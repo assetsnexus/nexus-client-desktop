@@ -144,7 +144,12 @@ export function App() {
           />
         ) : signedIn ? (
           openRoomId ? (
-            <MeetingRoomPanel roomId={openRoomId} onClose={() => setOpenRoomId(null)} />
+            <MeetingRoomPanel
+              roomId={openRoomId}
+              auth={auth}
+              connection={connection}
+              onClose={() => setOpenRoomId(null)}
+            />
           ) : view === 'storage' ? (
             <StorageExplorer />
           ) : view === 'calendar' ? (

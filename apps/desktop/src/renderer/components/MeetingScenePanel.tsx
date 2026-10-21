@@ -17,6 +17,7 @@ import { MeetingSceneTab, type MeetingVoiceBarProps } from '@nexus/meetings-reac
 import type { MeetingPresenceMap } from '@nexus/meetings-core';
 import { createSceneClient, type SceneClient } from '@nexus/scene-client';
 import { ClusterRoomViewer } from '@nexus/cluster-scene-react';
+import type { SceneRoom } from '@nexus/character-kit';
 import type { MeetingRoomRow } from '../../shared/ipc.js';
 import { projectRoomSession } from '../meetings/room-session.js';
 import {
@@ -49,15 +50,15 @@ export function MeetingScenePanel({
   voiceCapabilities,
   voiceMode,
   voice,
-  autoStartVoice,
+  onRoomReady,
 }: {
   room: MeetingRoomRow;
   voiceCapabilities: VoiceAvailabilityInputs;
   voiceMode?: MeetingVoiceBarProps['mode'];
   voice?: Partial<MeetingVoiceBarProps>;
-  autoStartVoice?: boolean;
+  /** Receives the live scene room so the host can drive avatar lip-sync. */
+  onRoomReady?: (room: SceneRoom | null) => void;
 }) {
-  void autoStartVoice;
   const session = useMemo(() => projectRoomSession(room), [room]);
   const presence = useMemo(() => presenceMap(room), [room]);
   // `MeetingSceneTab` chips need the meetings-core occupant shape; the cluster
@@ -82,6 +83,7 @@ export function MeetingScenePanel({
       createSceneClient={createClient}
       occupants={occupants}
       phoneVrEnabled
+      onRoomReady={onRoomReady}
     />
   ) : null;
 
