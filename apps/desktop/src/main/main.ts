@@ -28,8 +28,12 @@ import { createIdentityManager } from './identity-manager.js';
 import { createAssetAgentDiscoveryManager } from './asset-agent-discovery.js';
 import { createBonjourBackend } from './mdns-bonjour.js';
 import { createCompanionWindowManager, defaultCompanionPreloadPath } from './companion-window.js';
+import { createCalendarManager } from './calendar-manager.js';
 import {
   IPC,
+  type CalendarAttendeeStatus,
+  type CalendarCreateInput,
+  type CalendarListInput,
   type CompanionLaunch,
   type ConnectionConfigPatch,
   type LocalRunnerSettings,
@@ -99,6 +103,16 @@ const companionWindows = createCompanionWindowManager({
   resolveRendererUrl,
   preloadPath: defaultCompanionPreloadPath(),
 });
+
+// Phase 7b: desktop calendar. Region-node owns the calendar; this only calls it.
+const calendarManager = createCalendarManager({
+  getSender: () => getAuthManager().createSender(),
+});
+const viewerUserId = () => {
+  const snap = identityManager.getSnapshot();
+  const active = snap.accounts.find((a) => a.active);
+  return active?.userId ?? snap.activeUserId ?? null;
+};
 
 /** Build the region auth client options from current settings. */
 function authClientOptions(): AuthClientOptions {
@@ -281,6 +295,30 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.companionClose, (_e, contactId: string) => companionWindows.close(contactId));
   ipcMain.handle(IPC.companionList, () => companionWindows.openContactIds());
+
+  // Desktop calendar (Phase 7b).
+  ipcMain.handle(IPC.calendarListEvents, (_e, input?: CalendarListInput) =>
+    calendarManager.listEvents(input ?? {}, viewerUserId()),
+  );
+  ipcMain.handle(IPC.calendarUpcoming, () => calendarManager.upcoming(viewerUserId()));
+  ipcMain.handle(IPC.calendarCreateEvent, (_e, input: CalendarCreateInput) =>
+    calendarManager.createEvent(input, viewerUserId()),
+  );
+  ipcMain.handle(IPC.calendarCancelEvent, (_e, eventId: string) =>
+    calendarManager.cancelEvent(eventId),
+  );
+  ipcMain.handle(IPC.calendarRespond, (_e, eventId: string, status: CalendarAttendeeStatus) =>
+    calendarManager.respond(eventId, status, viewerUserId()),
+  );
+  ipcMain.handle(IPC.calendarOpenJoin, async (_e, eventId: string) => {
+    const target = await calendarManager.joinTarget(eventId);
+    if (target.roomId) return { opened: false, url: null, roomId: target.roomId };
+    if (target.url && /^https?:\/\//i.test(target.url)) {
+      await shell.openExternal(target.url);
+      return { opened: true, url: target.url };
+    }
+    return { opened: false, url: null, roomId: null };
+  });
 
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {

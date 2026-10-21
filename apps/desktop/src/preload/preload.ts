@@ -53,6 +53,12 @@ const bridge: NexusBridge = {
   companionOpen: (launch) => ipcRenderer.invoke(IPC.companionOpen, launch),
   companionClose: (contactId) => ipcRenderer.invoke(IPC.companionClose, contactId),
   companionList: () => ipcRenderer.invoke(IPC.companionList),
+  calendarListEvents: (input) => ipcRenderer.invoke(IPC.calendarListEvents, input),
+  calendarUpcoming: () => ipcRenderer.invoke(IPC.calendarUpcoming),
+  calendarCreateEvent: (input) => ipcRenderer.invoke(IPC.calendarCreateEvent, input),
+  calendarCancelEvent: (eventId) => ipcRenderer.invoke(IPC.calendarCancelEvent, eventId),
+  calendarRespond: (eventId, status) => ipcRenderer.invoke(IPC.calendarRespond, eventId, status),
+  calendarOpenJoin: (eventId) => ipcRenderer.invoke(IPC.calendarOpenJoin, eventId),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 };
 

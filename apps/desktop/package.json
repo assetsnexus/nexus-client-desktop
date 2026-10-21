@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@nexus/asset-agent-discovery": "file:../../packages/asset-agent-discovery",
+    "@nexus/calendar-client": "file:../../packages/calendar-client",
     "@nexus/character-kit": "file:../../../anx-libs/nexus-collaboration-vr/packages/character-kit",
     "@nexus/character-react": "file:../../../anx-libs/nexus-collaboration-vr/packages/character-react",
     "@nexus/chat-core": "file:../../../anx-npm-modules/packages/chat-core",

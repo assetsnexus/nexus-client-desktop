@@ -5,6 +5,7 @@ import { ChatHost } from './components/ChatHost.js';
 import { SettingsPanel } from './components/SettingsPanel.js';
 import { StorageExplorer } from './components/StorageExplorer.js';
 import { IdentitySwitcher } from './components/IdentitySwitcher.js';
+import { CalendarPanel } from './components/CalendarPanel.js';
 
 const shellStyle: CSSProperties = {
   height: '100vh',
@@ -43,7 +44,7 @@ export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: 'signed_out' });
   const [connection, setConnection] = useState<DesktopConnectionConfig | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [view, setView] = useState<'chat' | 'storage'>('chat');
+  const [view, setView] = useState<'chat' | 'storage' | 'calendar'>('chat');
   const [showIdentities, setShowIdentities] = useState(false);
   const [version, setVersion] = useState('');
 
@@ -72,7 +73,7 @@ export function App() {
         <span style={{ flex: 1 }} />
         {signedIn ? (
           <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid #3a4654' }}>
-            {(['chat', 'storage'] as const).map((tab) => (
+            {(['chat', 'storage', 'calendar'] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -87,7 +88,7 @@ export function App() {
                   background: view === tab && !showSettings ? '#243244' : '#1c2430',
                 }}
               >
-                {tab === 'chat' ? 'Chat' : 'Storage'}
+                {tab === 'chat' ? 'Chat' : tab === 'storage' ? 'Storage' : 'Calendar'}
               </button>
             ))}
           </div>
@@ -134,6 +135,8 @@ export function App() {
         ) : signedIn ? (
           view === 'storage' ? (
             <StorageExplorer />
+          ) : view === 'calendar' ? (
+            <CalendarPanel />
           ) : (
             <ChatHost auth={auth} connection={connection} />
           )

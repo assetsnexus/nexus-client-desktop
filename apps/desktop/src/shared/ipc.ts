@@ -96,6 +96,58 @@ export type AssetAgentDiscoverySnapshot = {
   detail?: string;
 };
 
+/** Desktop calendar (Phase 7b). Serializable view of a region calendar event. */
+export type CalendarMeetingKind =
+  | 'nexus'
+  | 'zoom'
+  | 'teams'
+  | 'google_meet'
+  | 'webex'
+  | 'custom'
+  | 'in_person';
+
+export type CalendarEventRow = {
+  id: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  timeZone: string;
+  allDay: boolean;
+  status: 'tentative' | 'confirmed' | 'cancelled';
+  location: string | null;
+  description: string | null;
+  /** Resolved meeting provider + join target, from event metadata. */
+  meetingKind: CalendarMeetingKind;
+  joinUrl: string | null;
+  roomId: string | null;
+  /** The caller's own attendee response, when they are an attendee. */
+  myStatus: 'needs_action' | 'accepted' | 'declined' | 'tentative' | null;
+};
+
+export type CalendarListInput = {
+  from?: string;
+  to?: string;
+  limit?: number;
+  includeCancelled?: boolean;
+};
+
+export type CalendarCreateInput = {
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  timeZone: string;
+  description?: string;
+  location?: string;
+  /** Meeting provider; drives the metadata written to the event. */
+  meetingKind?: CalendarMeetingKind;
+  joinUrl?: string;
+  /** Link the meeting to a conversation room (nexus-kind meetings). */
+  roomId?: string;
+  attendees?: Array<{ userId?: string; externalEmail?: string; displayName?: string }>;
+};
+
+export type CalendarAttendeeStatus = 'needs_action' | 'accepted' | 'declined' | 'tentative';
+
 
 export type DeviceStatus = {
   registered: boolean;
@@ -333,6 +385,13 @@ export type NexusBridge = {
   companionOpen(launch: CompanionLaunch): Promise<{ opened: boolean; contactId: string }>;
   companionClose(contactId: string): Promise<boolean>;
   companionList(): Promise<string[]>;
+  // Desktop calendar (Phase 7b).
+  calendarListEvents(input?: CalendarListInput): Promise<CalendarEventRow[]>;
+  calendarUpcoming(): Promise<CalendarEventRow[]>;
+  calendarCreateEvent(input: CalendarCreateInput): Promise<CalendarEventRow>;
+  calendarCancelEvent(eventId: string): Promise<void>;
+  calendarRespond(eventId: string, status: CalendarAttendeeStatus): Promise<CalendarEventRow>;
+  calendarOpenJoin(eventId: string): Promise<{ opened: boolean; url: string | null; roomId?: string | null }>;
 };
 
 /** IPC channel names. Kept explicit so main/preload stay in sync. */
@@ -379,5 +438,11 @@ export const IPC = {
   companionOpen: 'nexus:companion:open',
   companionClose: 'nexus:companion:close',
   companionList: 'nexus:companion:list',
+  calendarListEvents: 'nexus:calendar:list-events',
+  calendarUpcoming: 'nexus:calendar:upcoming',
+  calendarCreateEvent: 'nexus:calendar:create-event',
+  calendarCancelEvent: 'nexus:calendar:cancel-event',
+  calendarRespond: 'nexus:calendar:respond',
+  calendarOpenJoin: 'nexus:calendar:open-join',
   openExternal: 'nexus:open-external',
 } as const;
