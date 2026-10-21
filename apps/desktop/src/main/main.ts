@@ -23,9 +23,11 @@ import { DEFAULT_LOCAL_BACKENDS, probeLocalModels } from './local-models.js';
 import { createToolsStore } from './tools-store.js';
 import { runTool } from './tool-runner.js';
 import { createStorageManager } from './storage-manager.js';
+import { createRunnerManager } from './runner-manager.js';
 import {
   IPC,
   type ConnectionConfigPatch,
+  type LocalRunnerSettings,
   type LoginRequest,
   type StorageUploadRequest,
   type ToolInvocation,
@@ -41,6 +43,10 @@ const toolsStore = createToolsStore();
 const storageManager = createStorageManager({
   getSender: () => getAuthManager().createSender(),
   getRegionUrl: () => settings.getConnectionConfig().regionUrl,
+});
+const runnerManager = createRunnerManager({
+  secureStore,
+  getSender: () => getAuthManager().createSender(),
 });
 
 let mainWindow: BrowserWindow | null = null;
@@ -174,6 +180,15 @@ function registerIpc(): void {
     storageManager.moveFile(fileId, targetFolderId),
   );
 
+  // Local GPU runner (Phase 4).
+  ipcMain.handle(IPC.runnerGetState, () => runnerManager.getState());
+  ipcMain.handle(IPC.runnerSetSettings, (_e, patch: Partial<LocalRunnerSettings>) =>
+    runnerManager.setSettings(patch ?? {}),
+  );
+  ipcMain.handle(IPC.runnerStart, () => runnerManager.start());
+  ipcMain.handle(IPC.runnerStop, () => runnerManager.stop());
+  ipcMain.handle(IPC.runnerRegister, () => runnerManager.register());
+
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
       throw new Error('refusing to open a non-http(s) url');
@@ -193,4 +208,9 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// The loopback runner must not outlive the app; close it before we exit.
+app.on('before-quit', () => {
+  void runnerManager.dispose();
 });

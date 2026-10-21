@@ -5,6 +5,8 @@ import {
   type LocalCommandSkill,
   type LocalModelBackendStatus,
   type LocalModelsSnapshot,
+  type LocalRunnerSettings,
+  type LocalRunnerState,
   type ToolsConfig,
   type WorkspaceRoot,
 } from '../bridge.js';
@@ -68,9 +70,13 @@ const row: CSSProperties = {
 
 const healthColors: Record<string, string> = {
   healthy: '#4ade80',
+  available: '#4ade80',
   unreachable: '#f2a1a1',
+  error: '#f2a1a1',
   disabled: '#8b95a1',
+  stopped: '#8b95a1',
   checking: '#fbbf24',
+  starting: '#fbbf24',
   unknown: '#8b95a1',
 };
 
@@ -123,6 +129,9 @@ export function SettingsPanel({
   const [models, setModels] = useState<LocalModelsSnapshot | null>(null);
   const [modelsBusy, setModelsBusy] = useState(false);
 
+  const [runner, setRunner] = useState<LocalRunnerState | null>(null);
+  const [runnerBusy, setRunnerBusy] = useState(false);
+
   const [tools, setTools] = useState<ToolsConfig | null>(null);
   const [newWorkspace, setNewWorkspace] = useState('');
   const [newWorkspaceMode, setNewWorkspaceMode] = useState<WorkspaceRoot['mode']>('read-write');
@@ -139,6 +148,33 @@ export function SettingsPanel({
   useEffect(() => {
     void refreshModels();
   }, [refreshModels]);
+
+  useEffect(() => {
+    void bridge.runnerGetState().then(setRunner);
+  }, []);
+
+  const patchRunner = useCallback(async (patch: Partial<LocalRunnerSettings>) => {
+    setRunnerBusy(true);
+    try {
+      setRunner(await bridge.runnerSetSettings(patch));
+    } finally {
+      setRunnerBusy(false);
+    }
+  }, []);
+
+  const registerRunner = useCallback(async () => {
+    setRunnerBusy(true);
+    try {
+      setRunner(await bridge.runnerRegister());
+    } catch (err) {
+      // Surface the reason (e.g. signed out) rather than failing silently.
+      setRunner((cur) =>
+        cur ? { ...cur, detail: err instanceof Error ? err.message : 'registration failed' } : cur,
+      );
+    } finally {
+      setRunnerBusy(false);
+    }
+  }, []);
 
   useEffect(() => {
     void bridge.getToolsConfig().then(setTools);
@@ -263,6 +299,107 @@ export function SettingsPanel({
           <LocalModelRow key={status.backend.id} status={status} />
         ))}
         {!models ? <p style={{ color: '#6b7784', fontSize: 12 }}>Checking…</p> : null}
+      </section>
+
+      <section style={section}>
+        <h2 style={{ margin: 0, fontSize: 16 }}>Local GPU runner (BYOK)</h2>
+        <p style={{ margin: 0, color: '#6b7784', fontSize: 12 }}>
+          Expose this machine&apos;s local model server to your agents. The runner serves a
+          loopback TLS proxy registered with the region as a BYOK <code>edge_gpu_sidecar</code>{' '}
+          provider, so your agents can use your own GPU without buying cloud tokens.
+        </p>
+
+        {runner ? (
+          <>
+            <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={runner.settings.enabled}
+                disabled={runnerBusy}
+                onChange={(e) => void patchRunner({ enabled: e.target.checked })}
+              />
+              <span>Run the local runner while signed in</span>
+            </label>
+
+            <label style={field}>
+              <span>Label in the model picker</span>
+              <input
+                style={input}
+                value={runner.settings.name}
+                disabled={runnerBusy}
+                onChange={(e) => setRunner({ ...runner, settings: { ...runner.settings, name: e.target.value } })}
+                onBlur={(e) => void patchRunner({ name: e.target.value })}
+              />
+            </label>
+
+            <label style={field}>
+              <span>Upstream local server (OpenAI-compatible)</span>
+              <input
+                style={input}
+                value={runner.settings.upstreamBaseUrl}
+                placeholder="http://127.0.0.1:11434"
+                disabled={runnerBusy}
+                onChange={(e) =>
+                  setRunner({ ...runner, settings: { ...runner.settings, upstreamBaseUrl: e.target.value } })
+                }
+                onBlur={(e) => void patchRunner({ upstreamBaseUrl: e.target.value })}
+              />
+            </label>
+
+            <label style={field}>
+              <span>Scope</span>
+              <select
+                style={input}
+                value={runner.settings.scope}
+                disabled={runnerBusy}
+                onChange={(e) => void patchRunner({ scope: e.target.value as 'user' | 'org' })}
+              >
+                <option value="user">user (private)</option>
+                <option value="org">org (shared with members)</option>
+              </select>
+            </label>
+
+            <div style={row}>
+              <HealthChip health={runner.availability} />
+              <span style={{ color: '#6b7784', fontSize: 12 }}>
+                {runner.endpointUrl ?? runner.detail ?? 'not running'}
+              </span>
+              <span style={{ flex: 1 }} />
+              <span style={{ color: '#6b7784', fontSize: 11 }}>
+                {runner.registered ? `registered${runner.providerId ? ` · ${runner.providerId}` : ''}` : 'not registered'}
+              </span>
+            </div>
+
+            {runner.certFingerprint ? (
+              <p style={{ margin: 0, color: '#6b7784', fontSize: 11, fontFamily: 'monospace' }}>
+                loopback cert {runner.certFingerprint.slice(0, 32)}… · expires {runner.certNotAfter || '—'}
+              </p>
+            ) : null}
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                type="button"
+                style={button}
+                disabled={runnerBusy || !runner.settings.enabled}
+                onClick={() => void registerRunner()}
+              >
+                Register with region
+              </button>
+              {runner.settings.enabled ? (
+                <button
+                  type="button"
+                  style={{ ...button, background: '#1c2430', borderColor: '#3a4654' }}
+                  disabled={runnerBusy}
+                  onClick={() => void patchRunner({ enabled: false })}
+                >
+                  Stop
+                </button>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <p style={{ color: '#6b7784', fontSize: 12 }}>Loading…</p>
+        )}
       </section>
 
       <section style={section}>

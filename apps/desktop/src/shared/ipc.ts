@@ -61,6 +61,41 @@ export type LocalModelsSnapshot = {
   backends: LocalModelBackendStatus[];
 };
 
+/**
+ * Local GPU runner (Phase 4): expose this machine's local model server to the
+ * user's agents via BYOK, registered as `edge_gpu_sidecar`.
+ */
+export type LocalRunnerSettings = {
+  /** Whether the loopback runner should run + be registered while signed in. */
+  enabled: boolean;
+  /** Upstream OpenAI-compatible local server (e.g. Ollama `http://127.0.0.1:11434`). */
+  upstreamBaseUrl: string;
+  /** Label shown in the model picker. */
+  name: string;
+  /** Advertised default model id (optional). */
+  defaultModel?: string;
+  /** 'user' (default) or 'org' scope for the BYOK registration. */
+  scope: 'user' | 'org';
+};
+
+export type LocalRunnerState = {
+  settings: LocalRunnerSettings;
+  /** Runtime availability of the loopback proxy (not the upstream). */
+  availability: 'stopped' | 'starting' | 'available' | 'error' | 'disabled';
+  detail?: string;
+  /** The `https://127.0.0.1:<port>/v1` endpoint the region is told to call. */
+  endpointUrl?: string;
+  /** Certificate alt names for the loopback leaf. */
+  altNames?: string[];
+  certFingerprint?: string;
+  certNotAfter?: string;
+  /** Whether the endpoint is currently registered as a BYOK provider. */
+  registered: boolean;
+  providerId?: string;
+  wrapperId?: string;
+  lastCheckedAt?: string;
+};
+
 /** Client-tool surface: workspaces + the gated shell / sandboxed fs tools. */
 export type WorkspaceMode = 'read-only' | 'read-write';
 
@@ -196,6 +231,12 @@ export type NexusBridge = {
   storageRestoreFile(fileId: string): Promise<void>;
   storageRenameFile(fileId: string, newName: string): Promise<void>;
   storageMoveFile(fileId: string, targetFolderId: string | null): Promise<void>;
+  // Local GPU runner (Phase 4).
+  runnerGetState(): Promise<LocalRunnerState>;
+  runnerSetSettings(patch: Partial<LocalRunnerSettings>): Promise<LocalRunnerState>;
+  runnerStart(): Promise<LocalRunnerState>;
+  runnerStop(): Promise<LocalRunnerState>;
+  runnerRegister(): Promise<LocalRunnerState>;
   openExternal(url: string): Promise<void>;
 };
 
@@ -225,5 +266,10 @@ export const IPC = {
   storageRestoreFile: 'nexus:storage:restore-file',
   storageRenameFile: 'nexus:storage:rename-file',
   storageMoveFile: 'nexus:storage:move-file',
+  runnerGetState: 'nexus:runner:get-state',
+  runnerSetSettings: 'nexus:runner:set-settings',
+  runnerStart: 'nexus:runner:start',
+  runnerStop: 'nexus:runner:stop',
+  runnerRegister: 'nexus:runner:register',
   openExternal: 'nexus:open-external',
 } as const;

@@ -35,6 +35,11 @@ const bridge: NexusBridge = {
   storageRenameFile: (fileId, newName) => ipcRenderer.invoke(IPC.storageRenameFile, fileId, newName),
   storageMoveFile: (fileId, targetFolderId) =>
     ipcRenderer.invoke(IPC.storageMoveFile, fileId, targetFolderId),
+  runnerGetState: () => ipcRenderer.invoke(IPC.runnerGetState),
+  runnerSetSettings: (patch) => ipcRenderer.invoke(IPC.runnerSetSettings, patch),
+  runnerStart: () => ipcRenderer.invoke(IPC.runnerStart),
+  runnerStop: () => ipcRenderer.invoke(IPC.runnerStop),
+  runnerRegister: () => ipcRenderer.invoke(IPC.runnerRegister),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 };
 
