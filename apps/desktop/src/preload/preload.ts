@@ -47,6 +47,9 @@ const bridge: NexusBridge = {
   identityLogout: (key) => ipcRenderer.invoke(IPC.identityLogout, key),
   identityStartMembership: (req) => ipcRenderer.invoke(IPC.identityStartMembership, req),
   identityCompleteMembership: (req) => ipcRenderer.invoke(IPC.identityCompleteMembership, req),
+  assetAgentDiscoverySnapshot: () => ipcRenderer.invoke(IPC.assetAgentSnapshot),
+  assetAgentDiscoveryScan: () => ipcRenderer.invoke(IPC.assetAgentScan),
+  assetAgentSetPreferLocal: (enabled) => ipcRenderer.invoke(IPC.assetAgentSetPreferLocal, enabled),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 };
 

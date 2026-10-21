@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import {
   bridge,
+  type AssetAgentDiscoverySnapshot,
   type DesktopConnectionConfig,
   type LocalCommandSkill,
   type LocalModelBackendStatus,
@@ -136,6 +137,20 @@ export function SettingsPanel({
   const [newWorkspace, setNewWorkspace] = useState('');
   const [newWorkspaceMode, setNewWorkspaceMode] = useState<WorkspaceRoot['mode']>('read-write');
 
+  const [assetAgents, setAssetAgents] = useState<AssetAgentDiscoverySnapshot | null>(null);
+  const [assetBusy, setAssetBusy] = useState(false);
+
+  const refreshAssetAgents = useCallback(async (scan: boolean) => {
+    setAssetBusy(true);
+    try {
+      setAssetAgents(
+        scan ? await bridge.assetAgentDiscoveryScan() : await bridge.assetAgentDiscoverySnapshot(),
+      );
+    } finally {
+      setAssetBusy(false);
+    }
+  }, []);
+
   const refreshModels = useCallback(async () => {
     setModelsBusy(true);
     try {
@@ -179,6 +194,10 @@ export function SettingsPanel({
   useEffect(() => {
     void bridge.getToolsConfig().then(setTools);
   }, []);
+
+  useEffect(() => {
+    void refreshAssetAgents(false);
+  }, [refreshAssetAgents]);
 
   async function addWorkspace() {
     const path = newWorkspace.trim();
@@ -454,6 +473,68 @@ export function SettingsPanel({
             Add
           </button>
         </div>
+      </section>
+
+      <section style={section}>
+        <h2 style={{ margin: 0, fontSize: 16 }}>LAN asset agents</h2>
+        <p style={{ margin: 0, color: '#6b7784', fontSize: 12 }}>
+          Asset nodes announce themselves on the local network over mDNS (<code>_anx._tcp</code>).
+          When enabled, the desktop prefers the direct LAN/intranet path to your own asset agents
+          instead of routing through the region. Peers from another region are never trusted.
+        </p>
+
+        {assetAgents ? (
+          <>
+            <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={assetAgents.preferLocalEnabled}
+                disabled={assetBusy}
+                onChange={(e) => void bridge.assetAgentSetPreferLocal(e.target.checked).then(setAssetAgents)}
+              />
+              <span>Prefer the local path to my asset agents</span>
+            </label>
+
+            {assetAgents.matches.length ? (
+              assetAgents.matches.map((m) => (
+                <div key={m.contactId} style={row}>
+                  <strong style={{ fontSize: 13 }}>{m.name ?? m.assetId}</strong>
+                  <span style={{ color: '#6b7784', fontSize: 12 }}>
+                    {m.host}:{m.port}
+                  </span>
+                  <HealthChip health={m.routeKind === 'intranet' ? 'available' : 'healthy'} />
+                  <span style={{ flex: 1 }} />
+                  {m.hostsRooms ? <span style={{ color: '#6b7784', fontSize: 11 }}>hosts rooms</span> : null}
+                </div>
+              ))
+            ) : (
+              <p style={{ color: '#6b7784', fontSize: 12 }}>
+                {assetAgents.detail ?? 'No matching asset agents found on this network.'}
+              </p>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button
+                type="button"
+                style={{ ...button, background: '#1c2430', borderColor: '#3a4654' }}
+                onClick={() => void refreshAssetAgents(true)}
+                disabled={assetBusy}
+              >
+                {assetBusy ? 'Scanning…' : 'Scan now'}
+              </button>
+              {assetAgents.region ? (
+                <span style={{ color: '#6b7784', fontSize: 11 }}>
+                  region {assetAgents.region}
+                  {assetAgents.rejectedForeignRegion
+                    ? ` · ${assetAgents.rejectedForeignRegion} foreign ignored`
+                    : ''}
+                </span>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <p style={{ color: '#6b7784', fontSize: 12 }}>Loading…</p>
+        )}
       </section>
 
       <section style={section}>

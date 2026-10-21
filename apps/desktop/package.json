@@ -24,6 +24,7 @@
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
   },
   "dependencies": {
+    "@nexus/asset-agent-discovery": "file:../../packages/asset-agent-discovery",
     "@nexus/character-kit": "file:../../../anx-libs/nexus-collaboration-vr/packages/character-kit",
     "@nexus/character-react": "file:../../../anx-libs/nexus-collaboration-vr/packages/character-react",
     "@nexus/chat-core": "file:../../../anx-npm-modules/packages/chat-core",
@@ -37,6 +38,7 @@
     "@nexus/storage-browser": "file:../../packages/storage-browser",
     "@pixiv/three-vrm": "^3.5.5",
     "@pixiv/three-vrm-animation": "^3.5.5",
+    "bonjour-service": "^1.4.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "three": "^0.170.0",

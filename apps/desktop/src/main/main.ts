@@ -25,6 +25,8 @@ import { runTool } from './tool-runner.js';
 import { createStorageManager } from './storage-manager.js';
 import { createRunnerManager } from './runner-manager.js';
 import { createIdentityManager } from './identity-manager.js';
+import { createAssetAgentDiscoveryManager } from './asset-agent-discovery.js';
+import { createBonjourBackend } from './mdns-bonjour.js';
 import {
   IPC,
   type ConnectionConfigPatch,
@@ -51,6 +53,40 @@ const runnerManager = createRunnerManager({
 });
 const identityManager = createIdentityManager({
   getSender: () => getAuthManager().createSender(),
+});
+// Phase 10: LAN/intranet asset-agent discovery. Contacts come from the region's
+// asset-agent list; the region slug comes from the region directory.
+const assetAgentDiscovery = createAssetAgentDiscoveryManager({
+  backend: createBonjourBackend(),
+  resolveRegion: async () => {
+    try {
+      const sender = await getAuthManager().createSender();
+      const result = await sender.send('anx.region.node.info', {});
+      const managed = (result as { data?: { managedRegions?: Array<{ slug?: string }> } }).data
+        ?.managedRegions;
+      return managed?.find((r) => r.slug)?.slug ?? null;
+    } catch {
+      return null;
+    }
+  },
+  getContacts: async () => {
+    try {
+      const sender = await getAuthManager().createSender();
+      const result = await sender.send('anx.communicate.contacts.asset-agents.list', {});
+      const rows =
+        (result as { data?: { contacts?: unknown[]; assetAgents?: unknown[] } }).data?.assetAgents ??
+        (result as { data?: { contacts?: unknown[]; assetAgents?: unknown[] } }).data?.contacts ??
+        [];
+      return (Array.isArray(rows) ? rows : []).flatMap((row) => {
+        const r = row as { assetId?: string; assetAgentKey?: string; agentKey?: string; name?: string; id?: string };
+        if (!r?.assetId) return [];
+        const key = r.assetAgentKey ?? r.agentKey ?? '';
+        return [{ id: r.id ?? `${r.assetId}:${key}`, assetId: r.assetId, agentKey: key, name: r.name ?? null }];
+      });
+    } catch {
+      return [];
+    }
+  },
 });
 
 let mainWindow: BrowserWindow | null = null;
@@ -222,6 +258,13 @@ function registerIpc(): void {
     IPC.identityCompleteMembership,
     (_e, req: { loginToken: string; method: string; code: string; businessEmail?: string }) =>
       identityManager.completeMembership(req),
+  );
+
+  // Local asset-agent discovery (Phase 10).
+  ipcMain.handle(IPC.assetAgentSnapshot, () => assetAgentDiscovery.snapshot());
+  ipcMain.handle(IPC.assetAgentScan, () => assetAgentDiscovery.scan());
+  ipcMain.handle(IPC.assetAgentSetPreferLocal, (_e, enabled: boolean) =>
+    assetAgentDiscovery.setPreferLocal(enabled === true),
   );
 
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {

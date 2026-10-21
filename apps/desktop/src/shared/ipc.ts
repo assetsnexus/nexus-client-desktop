@@ -68,6 +68,31 @@ export type MembershipLoginStart = {
   complianceWarnings?: Array<{ code: string; message: string }>;
 };
 
+/** Local asset-agent discovery (Phase 10). Serializable view of a LAN match. */
+export type AssetAgentPeerRow = {
+  contactId: string;
+  assetId: string;
+  name: string | null;
+  host: string;
+  port: number;
+  routeKind: 'lan_mdns' | 'intranet';
+  hostsRooms: boolean;
+  fingerprint: string;
+  region: string;
+};
+
+export type AssetAgentDiscoverySnapshot = {
+  /** Whether the user enabled preferring the local path. */
+  preferLocalEnabled: boolean;
+  /** Our region, used to reject foreign peers. */
+  region: string | null;
+  matches: AssetAgentPeerRow[];
+  rejectedForeignRegion: number;
+  unmatched: number;
+  scannedAt: string;
+  detail?: string;
+};
+
 
 export type DeviceStatus = {
   registered: boolean;
@@ -296,6 +321,10 @@ export type NexusBridge = {
     code: string;
     businessEmail?: string;
   }): Promise<IdentitySnapshot>;
+  // Local asset-agent discovery (Phase 10).
+  assetAgentDiscoverySnapshot(): Promise<AssetAgentDiscoverySnapshot>;
+  assetAgentDiscoveryScan(): Promise<AssetAgentDiscoverySnapshot>;
+  assetAgentSetPreferLocal(enabled: boolean): Promise<AssetAgentDiscoverySnapshot>;
   openExternal(url: string): Promise<void>;
 };
 
@@ -337,5 +366,8 @@ export const IPC = {
   identityLogout: 'nexus:identity:logout',
   identityStartMembership: 'nexus:identity:start-membership',
   identityCompleteMembership: 'nexus:identity:complete-membership',
+  assetAgentSnapshot: 'nexus:asset-agent:snapshot',
+  assetAgentScan: 'nexus:asset-agent:scan',
+  assetAgentSetPreferLocal: 'nexus:asset-agent:set-prefer-local',
   openExternal: 'nexus:open-external',
 } as const;
