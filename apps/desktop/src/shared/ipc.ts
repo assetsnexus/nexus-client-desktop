@@ -7,6 +7,9 @@
  */
 
 import type { AuthIdentity, DesktopConnectionConfig, LoginCredentials } from '@nexus/node-core';
+import type { CompanionLaunch } from './companion.js';
+
+export type { CompanionLaunch } from './companion.js';
 
 export type ConnectionConfigPatch = Partial<DesktopConnectionConfig>;
 
@@ -326,6 +329,10 @@ export type NexusBridge = {
   assetAgentDiscoveryScan(): Promise<AssetAgentDiscoverySnapshot>;
   assetAgentSetPreferLocal(enabled: boolean): Promise<AssetAgentDiscoverySnapshot>;
   openExternal(url: string): Promise<void>;
+  // Immersive companion window (Phase 7a).
+  companionOpen(launch: CompanionLaunch): Promise<{ opened: boolean; contactId: string }>;
+  companionClose(contactId: string): Promise<boolean>;
+  companionList(): Promise<string[]>;
 };
 
 /** IPC channel names. Kept explicit so main/preload stay in sync. */
@@ -369,5 +376,8 @@ export const IPC = {
   assetAgentSnapshot: 'nexus:asset-agent:snapshot',
   assetAgentScan: 'nexus:asset-agent:scan',
   assetAgentSetPreferLocal: 'nexus:asset-agent:set-prefer-local',
+  companionOpen: 'nexus:companion:open',
+  companionClose: 'nexus:companion:close',
+  companionList: 'nexus:companion:list',
   openExternal: 'nexus:open-external',
 } as const;

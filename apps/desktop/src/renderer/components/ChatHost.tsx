@@ -30,6 +30,12 @@ export function ChatHost({
   const [client, setClient] = useState<ReturnType<typeof createRegionCommandClient> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tools, setTools] = useState<ToolsConfig | null>(null);
+  const [activeVoice, setActiveVoice] = useState<{
+    contactId: string | null;
+    title: string;
+    avatarUrl: string | null;
+    agentId: string | null;
+  } | null>(null);
 
   useEffect(() => {
     void bridge.getToolsConfig().then(setTools);
@@ -86,6 +92,49 @@ export function ChatHost({
 
   return (
     <div style={{ height: '100%', minHeight: 0, position: 'relative' }}>
+      {activeVoice?.contactId ? (
+        <div
+          style={{
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            zIndex: 5,
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            padding: '6px 10px',
+            borderRadius: 10,
+            background: 'rgba(15,20,25,0.9)',
+            border: '1px solid #2a333d',
+          }}
+        >
+          <span style={{ fontSize: 12, color: '#9aa7b5' }}>{activeVoice.title}</span>
+          <button
+            type="button"
+            style={{
+              padding: '4px 10px',
+              borderRadius: 8,
+              border: '1px solid #3f6cb0',
+              background: '#2f5c9e',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+            onClick={() =>
+              void bridge.companionOpen({
+                contactId: activeVoice.contactId!,
+                conversationId: chat?.getState().conversationId ?? null,
+                agentId: activeVoice.agentId,
+                title: activeVoice.title,
+                avatarUrl: activeVoice.avatarUrl,
+              })
+            }
+          >
+            Immersive view
+          </button>
+        </div>
+      ) : null}
       <NexusChatApp
         chat={chat}
         client={client ?? undefined}
@@ -93,9 +142,30 @@ export function ChatHost({
         tools={registeredTools}
         onPostToHost={(msg: SdkToHostMessage) => {
           // Renderer-side host messages (open external links, device register).
-          const m = msg as unknown as { type?: string; url?: string };
+          const m = msg as unknown as {
+            type?: string;
+            url?: string;
+            active?: boolean;
+            title?: string;
+            avatarUrl?: string | null;
+            contactId?: string | null;
+            agentId?: string | null;
+          };
           if (m.type === 'openExternal' && typeof m.url === 'string') {
             void bridge.openExternal(m.url);
+          }
+          if (m.type === 'voiceState') {
+            // Track the live voice session so the host can offer the popout.
+            if (m.active && m.contactId) {
+              setActiveVoice({
+                contactId: m.contactId,
+                title: m.title ?? '',
+                avatarUrl: m.avatarUrl ?? null,
+                agentId: m.agentId ?? null,
+              });
+            } else if (!m.active) {
+              setActiveVoice(null);
+            }
           }
         }}
       />

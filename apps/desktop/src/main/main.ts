@@ -27,8 +27,10 @@ import { createRunnerManager } from './runner-manager.js';
 import { createIdentityManager } from './identity-manager.js';
 import { createAssetAgentDiscoveryManager } from './asset-agent-discovery.js';
 import { createBonjourBackend } from './mdns-bonjour.js';
+import { createCompanionWindowManager, defaultCompanionPreloadPath } from './companion-window.js';
 import {
   IPC,
+  type CompanionLaunch,
   type ConnectionConfigPatch,
   type LocalRunnerSettings,
   type LoginRequest,
@@ -91,6 +93,12 @@ const assetAgentDiscovery = createAssetAgentDiscoveryManager({
 
 let mainWindow: BrowserWindow | null = null;
 let authManager: ReturnType<typeof createAuthManager> | null = null;
+
+// Phase 7a: immersive companion window (one per contact).
+const companionWindows = createCompanionWindowManager({
+  resolveRendererUrl,
+  preloadPath: defaultCompanionPreloadPath(),
+});
 
 /** Build the region auth client options from current settings. */
 function authClientOptions(): AuthClientOptions {
@@ -267,6 +275,13 @@ function registerIpc(): void {
     assetAgentDiscovery.setPreferLocal(enabled === true),
   );
 
+  // Immersive companion window (Phase 7a).
+  ipcMain.handle(IPC.companionOpen, (_e, launch: CompanionLaunch) =>
+    companionWindows.open(launch),
+  );
+  ipcMain.handle(IPC.companionClose, (_e, contactId: string) => companionWindows.close(contactId));
+  ipcMain.handle(IPC.companionList, () => companionWindows.openContactIds());
+
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
       throw new Error('refusing to open a non-http(s) url');
@@ -290,5 +305,6 @@ app.on('window-all-closed', () => {
 
 // The loopback runner must not outlive the app; close it before we exit.
 app.on('before-quit', () => {
+  companionWindows.closeAll();
   void runnerManager.dispose();
 });

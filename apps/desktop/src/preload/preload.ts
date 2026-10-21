@@ -50,6 +50,9 @@ const bridge: NexusBridge = {
   assetAgentDiscoverySnapshot: () => ipcRenderer.invoke(IPC.assetAgentSnapshot),
   assetAgentDiscoveryScan: () => ipcRenderer.invoke(IPC.assetAgentScan),
   assetAgentSetPreferLocal: (enabled) => ipcRenderer.invoke(IPC.assetAgentSetPreferLocal, enabled),
+  companionOpen: (launch) => ipcRenderer.invoke(IPC.companionOpen, launch),
+  companionClose: (contactId) => ipcRenderer.invoke(IPC.companionClose, contactId),
+  companionList: () => ipcRenderer.invoke(IPC.companionList),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 };
 
