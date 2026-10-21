@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import {
   bridge,
   type DesktopConnectionConfig,
+  type LocalCommandSkill,
   type LocalModelBackendStatus,
   type LocalModelsSnapshot,
+  type ToolsConfig,
+  type WorkspaceRoot,
 } from '../bridge.js';
 
 const wrap: CSSProperties = {
@@ -120,6 +123,10 @@ export function SettingsPanel({
   const [models, setModels] = useState<LocalModelsSnapshot | null>(null);
   const [modelsBusy, setModelsBusy] = useState(false);
 
+  const [tools, setTools] = useState<ToolsConfig | null>(null);
+  const [newWorkspace, setNewWorkspace] = useState('');
+  const [newWorkspaceMode, setNewWorkspaceMode] = useState<WorkspaceRoot['mode']>('read-write');
+
   const refreshModels = useCallback(async () => {
     setModelsBusy(true);
     try {
@@ -132,6 +139,37 @@ export function SettingsPanel({
   useEffect(() => {
     void refreshModels();
   }, [refreshModels]);
+
+  useEffect(() => {
+    void bridge.getToolsConfig().then(setTools);
+  }, []);
+
+  async function addWorkspace() {
+    const path = newWorkspace.trim();
+    if (!path || !tools) return;
+    const next: ToolsConfig = await bridge.setWorkspaces([
+      ...tools.workspaces,
+      { id: `ws-${Date.now()}`, label: path.split('/').filter(Boolean).pop() || path, path, mode: newWorkspaceMode },
+    ]);
+    setTools(next);
+    setNewWorkspace('');
+  }
+
+  async function removeWorkspace(id: string) {
+    if (!tools) return;
+    setTools(await bridge.setWorkspaces(tools.workspaces.filter((w) => w.id !== id)));
+  }
+
+  async function toggleReadOnly(id: string) {
+    if (!tools) return;
+    setTools(
+      await bridge.setWorkspaces(
+        tools.workspaces.map((w) =>
+          w.id === id ? { ...w, mode: w.mode === 'read-write' ? 'read-only' : 'read-write' } : w,
+        ),
+      ),
+    );
+  }
 
   async function onSave() {
     setSaving(true);
@@ -226,6 +264,90 @@ export function SettingsPanel({
         ))}
         {!models ? <p style={{ color: '#6b7784', fontSize: 12 }}>Checking…</p> : null}
       </section>
+
+      <section style={section}>
+        <h2 style={{ margin: 0, fontSize: 16 }}>Agent workspaces</h2>
+        <p style={{ margin: 0, color: '#6b7784', fontSize: 12 }}>
+          Directories the agent may read or write. Enforced in the main process — paths outside these
+          roots (including symlink escapes) are refused.
+        </p>
+
+        {tools?.workspaces.length ? (
+          tools.workspaces.map((w) => (
+            <div key={w.id} style={row}>
+              <strong style={{ fontSize: 13 }}>{w.label}</strong>
+              <span style={{ color: '#6b7784', fontSize: 12 }}>{w.path}</span>
+              <span style={{ flex: 1 }} />
+              <button
+                type="button"
+                style={{ ...button, background: '#1c2430', borderColor: '#3a4654', padding: '4px 10px' }}
+                onClick={() => toggleReadOnly(w.id)}
+              >
+                {w.mode}
+              </button>
+              <button
+                type="button"
+                style={{ ...button, background: '#1c2430', borderColor: '#3a4654', padding: '4px 10px' }}
+                onClick={() => removeWorkspace(w.id)}
+              >
+                Remove
+              </button>
+            </div>
+          ))
+        ) : (
+          <p style={{ color: '#6b7784', fontSize: 12 }}>No workspaces yet.</p>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            style={{ ...input, flex: 1 }}
+            value={newWorkspace}
+            placeholder="/absolute/path/to/project"
+            onChange={(e) => setNewWorkspace(e.target.value)}
+          />
+          <select
+            style={input}
+            value={newWorkspaceMode}
+            onChange={(e) => setNewWorkspaceMode(e.target.value as WorkspaceRoot['mode'])}
+          >
+            <option value="read-write">read-write</option>
+            <option value="read-only">read-only</option>
+          </select>
+          <button type="button" style={button} onClick={addWorkspace}>
+            Add
+          </button>
+        </div>
+      </section>
+
+      <section style={section}>
+        <h2 style={{ margin: 0, fontSize: 16 }}>Local command skills</h2>
+        <p style={{ margin: 0, color: '#6b7784', fontSize: 12 }}>
+          Per-OS commands the agent may run, exposed as client tools. The CPU + GPU load skill ships
+          by default (read-only).
+        </p>
+        {tools?.localCommands.map((skill) => (
+          <LocalCommandRow key={skill.skillId} skill={skill} />
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function LocalCommandRow({ skill }: { skill: LocalCommandSkill }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div style={row}>
+        <strong style={{ fontSize: 14 }}>{skill.title}</strong>
+        <span style={{ color: '#9aa7b5', fontSize: 12 }}>{skill.oneLiner}</span>
+      </div>
+      <ul style={{ margin: '0 0 8px', paddingLeft: 18, color: '#6b7784', fontSize: 12 }}>
+        {skill.commands.map((c) => (
+          <li key={c.id}>
+            <code>{c.os}</code> · {c.access}
+            {c.approval === 'ask' ? ' · needs approval' : ''}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

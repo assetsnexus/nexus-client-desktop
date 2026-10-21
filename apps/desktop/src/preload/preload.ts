@@ -19,6 +19,10 @@ const bridge: NexusBridge = {
   getDeviceStatus: () => ipcRenderer.invoke(IPC.deviceStatus),
   registerDevice: () => ipcRenderer.invoke(IPC.deviceRegister),
   listLocalModels: (refresh) => ipcRenderer.invoke(IPC.localModelsList, refresh),
+  getToolsConfig: () => ipcRenderer.invoke(IPC.toolsGet),
+  setWorkspaces: (workspaces) => ipcRenderer.invoke(IPC.toolsSetWorkspaces, workspaces),
+  setLocalCommands: (commands) => ipcRenderer.invoke(IPC.toolsSetLocalCommands, commands),
+  runTool: (req) => ipcRenderer.invoke(IPC.toolsRun, req),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 };
 

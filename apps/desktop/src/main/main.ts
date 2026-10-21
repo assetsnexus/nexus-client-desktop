@@ -20,13 +20,22 @@ import { createSettingsStore } from './settings-store.js';
 import { SafeStorageStore } from './secure-store.js';
 import { createAuthManager } from './auth-manager.js';
 import { DEFAULT_LOCAL_BACKENDS, probeLocalModels } from './local-models.js';
-import { IPC, type ConnectionConfigPatch, type LoginRequest, type TwoFactorRequest } from '../shared/ipc.js';
+import { createToolsStore } from './tools-store.js';
+import { runTool } from './tool-runner.js';
+import {
+  IPC,
+  type ConnectionConfigPatch,
+  type LoginRequest,
+  type ToolInvocation,
+  type TwoFactorRequest,
+} from '../shared/ipc.js';
 
 const __dirname_ = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 
 const settings = createSettingsStore();
 const secureStore = new SafeStorageStore();
+const toolsStore = createToolsStore();
 
 let mainWindow: BrowserWindow | null = null;
 let authManager: ReturnType<typeof createAuthManager> | null = null;
@@ -133,6 +142,13 @@ function registerIpc(): void {
   ipcMain.handle(IPC.deviceRegister, () => getAuthManager().registerDevice());
 
   ipcMain.handle(IPC.localModelsList, () => probeLocalModels(DEFAULT_LOCAL_BACKENDS));
+
+  ipcMain.handle(IPC.toolsGet, () => toolsStore.get());
+  ipcMain.handle(IPC.toolsSetWorkspaces, (_e, workspaces) => toolsStore.setWorkspaces(workspaces));
+  ipcMain.handle(IPC.toolsSetLocalCommands, (_e, commands) =>
+    toolsStore.setLocalCommands(commands),
+  );
+  ipcMain.handle(IPC.toolsRun, (_e, req: ToolInvocation) => runTool(req as never, { store: toolsStore }));
 
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {

@@ -61,6 +61,52 @@ export type LocalModelsSnapshot = {
   backends: LocalModelBackendStatus[];
 };
 
+/** Client-tool surface: workspaces + the gated shell / sandboxed fs tools. */
+export type WorkspaceMode = 'read-only' | 'read-write';
+
+export type WorkspaceRoot = {
+  id: string;
+  label: string;
+  path: string;
+  mode: WorkspaceMode;
+};
+
+export type LocalCommandVariant = {
+  id: string;
+  label: string;
+  os: 'linux' | 'darwin' | 'win32';
+  argv: string[];
+  cwd?: string;
+  access: 'read' | 'write';
+  approval: 'auto' | 'ask';
+};
+
+export type LocalCommandSkill = {
+  skillId: string;
+  title: string;
+  oneLiner: string;
+  triggerHints: string[];
+  body: string;
+  suggestedTools: string[];
+  commands: LocalCommandVariant[];
+};
+
+export type ToolsConfig = {
+  workspaces: WorkspaceRoot[];
+  localCommands: LocalCommandSkill[];
+};
+
+export type ToolInvocation = {
+  name: string;
+  [k: string]: unknown;
+};
+
+export type ToolInvocationResult = {
+  ok: boolean;
+  data?: unknown;
+  error?: string;
+};
+
 /** Methods exposed on `window.nexus` by the preload bridge. */
 export type NexusBridge = {
   getVersion(): Promise<string>;
@@ -73,6 +119,10 @@ export type NexusBridge = {
   getDeviceStatus(): Promise<DeviceStatus>;
   registerDevice(): Promise<DeviceStatus>;
   listLocalModels(refresh?: boolean): Promise<LocalModelsSnapshot>;
+  getToolsConfig(): Promise<ToolsConfig>;
+  setWorkspaces(workspaces: WorkspaceRoot[]): Promise<ToolsConfig>;
+  setLocalCommands(commands: LocalCommandSkill[]): Promise<ToolsConfig>;
+  runTool(req: ToolInvocation): Promise<ToolInvocationResult>;
   openExternal(url: string): Promise<void>;
 };
 
@@ -88,5 +138,9 @@ export const IPC = {
   deviceStatus: 'nexus:device:status',
   deviceRegister: 'nexus:device:register',
   localModelsList: 'nexus:local-models:list',
+  toolsGet: 'nexus:tools:get',
+  toolsSetWorkspaces: 'nexus:tools:set-workspaces',
+  toolsSetLocalCommands: 'nexus:tools:set-local-commands',
+  toolsRun: 'nexus:tools:run',
   openExternal: 'nexus:open-external',
 } as const;

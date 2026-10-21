@@ -7,7 +7,8 @@ import {
   type SdkToHostMessage,
 } from '@nexus/chat-react';
 import '@nexus/chat-react/style.css';
-import { bridge, type AuthState, type DesktopConnectionConfig } from '../bridge.js';
+import { bridge, type AuthState, type DesktopConnectionConfig, type ToolsConfig } from '../bridge.js';
+import { DEFAULT_DESKTOP_TOOLS, localCommandTools } from '../tools/descriptors.js';
 
 type ChatIdentity = Parameters<typeof createRegionCommandClient>[0]['identity'];
 
@@ -28,6 +29,11 @@ export function ChatHost({
   const [chat, setChat] = useState<NexusChat | null>(null);
   const [client, setClient] = useState<ReturnType<typeof createRegionCommandClient> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tools, setTools] = useState<ToolsConfig | null>(null);
+
+  useEffect(() => {
+    void bridge.getToolsConfig().then(setTools);
+  }, []);
 
   const apiBaseUrl = connection?.regionUrl ?? '';
   const identity = useMemo<ChatIdentity>(
@@ -39,6 +45,11 @@ export function ChatHost({
       deviceId: auth.identity.deviceId ?? null,
     }),
     [auth],
+  );
+
+  const registeredTools = useMemo(
+    () => [...DEFAULT_DESKTOP_TOOLS, ...localCommandTools(tools?.localCommands ?? [])],
+    [tools],
   );
 
   useEffect(() => {
@@ -79,6 +90,7 @@ export function ChatHost({
         chat={chat}
         client={client ?? undefined}
         features={{ adminPanels: false }}
+        tools={registeredTools}
         onPostToHost={(msg: SdkToHostMessage) => {
           // Renderer-side host messages (open external links, device register).
           const m = msg as unknown as { type?: string; url?: string };

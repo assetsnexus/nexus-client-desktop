@@ -28,6 +28,7 @@
     "@nexus/character-react": "file:../../../anx-libs/nexus-collaboration-vr/packages/character-react",
     "@nexus/chat-core": "file:../../../anx-npm-modules/packages/chat-core",
     "@nexus/chat-react": "file:../../../anx-npm-modules/packages/chat-react",
+    "@nexus/client-tools": "file:../../packages/client-tools",
     "@nexus/cluster-scene-react": "file:../../../anx-libs/nexus-collaboration-vr/packages/cluster-scene-react",
     "@nexus/node-core": "file:../../packages/node-core",
     "@nexus/scene-client": "file:../../../anx-npm-modules/packages/scene-client",
