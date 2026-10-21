@@ -1,0 +1,28 @@
+{
+  "name": "anx-desktop-app",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Nexus desktop client (Electron) for Linux, Windows, and macOS",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace apps/desktop",
+    "build": "npm run build --workspace apps/desktop",
+    "package": "npm run package --workspace apps/desktop",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  }
+}

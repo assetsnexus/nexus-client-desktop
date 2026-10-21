@@ -1,0 +1,9 @@
+node_modules/
+dist/
+release/
+.vite/
+*.log
+.DS_Store
+apps/desktop/dist/
+apps/desktop/dist-electron/
+packages/*/dist/
