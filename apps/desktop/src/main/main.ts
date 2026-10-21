@@ -30,6 +30,7 @@ import { createBonjourBackend } from './mdns-bonjour.js';
 import { createCompanionWindowManager, defaultCompanionPreloadPath } from './companion-window.js';
 import { createCalendarManager } from './calendar-manager.js';
 import { createMeetingsManager } from './meetings-manager.js';
+import { createLocalVoiceManager } from './local-voice-manager.js';
 import {
   IPC,
   type CalendarAttendeeStatus,
@@ -113,6 +114,12 @@ const calendarManager = createCalendarManager({
 // Phase 7c/7d/11: room media view. A nexus meeting is a linked conversation
 // room; this projects the roster from `anx.communicate.rooms.get`.
 const meetingsManager = createMeetingsManager({
+  getSender: () => getAuthManager().createSender(),
+});
+
+// Phase 11e: desktop-local speech models (on-device Whisper / Piper) + the
+// RAM/VRAM probe. Downloads go to userData; the idle lifecycle frees VRAM.
+const localVoiceManager = createLocalVoiceManager({
   getSender: () => getAuthManager().createSender(),
 });
 
@@ -330,6 +337,22 @@ function registerIpc(): void {
 
   // Meetings / room media (Phase 7c/7d/11).
   ipcMain.handle(IPC.meetingsGetRoom, (_e, roomId: string) => meetingsManager.getRoom(roomId));
+  // Phase 11e: the meeting voice bar gates on real capabilities, so the desktop
+  // asks the local-voice manager what it can actually serve.
+  ipcMain.handle(IPC.meetingsVoiceCapabilities, () => localVoiceManager.voiceCapabilities());
+
+  // Desktop-local speech models (Phase 11e).
+  ipcMain.handle(IPC.localVoiceState, () => localVoiceManager.getState());
+  ipcMain.handle(IPC.localVoiceSetSettings, (_e, patch) =>
+    localVoiceManager.setSettings(patch ?? {}),
+  );
+  ipcMain.handle(IPC.localVoiceRefreshCatalog, () => localVoiceManager.refreshCatalog());
+  ipcMain.handle(IPC.localVoiceInstall, (_e, modelId: string) => localVoiceManager.install(modelId));
+  ipcMain.handle(IPC.localVoiceCancelInstall, (_e, modelId: string) =>
+    localVoiceManager.cancelInstall(modelId),
+  );
+  ipcMain.handle(IPC.localVoiceRemove, (_e, modelId: string) => localVoiceManager.remove(modelId));
+  ipcMain.handle(IPC.localVoiceProbeResources, () => localVoiceManager.probeResources());
 
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
@@ -341,6 +364,7 @@ function registerIpc(): void {
 
 app.whenReady().then(async () => {
   registerIpc();
+  localVoiceManager.start();
   await createWindow();
 
   app.on('activate', () => {
@@ -355,5 +379,6 @@ app.on('window-all-closed', () => {
 // The loopback runner must not outlive the app; close it before we exit.
 app.on('before-quit', () => {
   companionWindows.closeAll();
+  void localVoiceManager.dispose();
   void runnerManager.dispose();
 });

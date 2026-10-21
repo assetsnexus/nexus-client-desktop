@@ -60,6 +60,14 @@ const bridge: NexusBridge = {
   calendarRespond: (eventId, status) => ipcRenderer.invoke(IPC.calendarRespond, eventId, status),
   calendarOpenJoin: (eventId) => ipcRenderer.invoke(IPC.calendarOpenJoin, eventId),
   meetingsGetRoom: (roomId) => ipcRenderer.invoke(IPC.meetingsGetRoom, roomId),
+  meetingsVoiceCapabilities: () => ipcRenderer.invoke(IPC.meetingsVoiceCapabilities),
+  localVoiceGetState: () => ipcRenderer.invoke(IPC.localVoiceState),
+  localVoiceSetSettings: (patch) => ipcRenderer.invoke(IPC.localVoiceSetSettings, patch),
+  localVoiceRefreshCatalog: () => ipcRenderer.invoke(IPC.localVoiceRefreshCatalog),
+  localVoiceInstall: (modelId) => ipcRenderer.invoke(IPC.localVoiceInstall, modelId),
+  localVoiceCancelInstall: (modelId) => ipcRenderer.invoke(IPC.localVoiceCancelInstall, modelId),
+  localVoiceRemove: (modelId) => ipcRenderer.invoke(IPC.localVoiceRemove, modelId),
+  localVoiceProbeResources: () => ipcRenderer.invoke(IPC.localVoiceProbeResources),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 };
 

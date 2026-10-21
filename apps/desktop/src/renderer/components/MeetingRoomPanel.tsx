@@ -10,6 +10,8 @@ import {
 } from '@nexus/meetings-core';
 import { bridge } from '../bridge.js';
 import { projectRoomSession } from '../meetings/room-session.js';
+import { MeetingScenePanel } from './MeetingScenePanel.js';
+import type { MeetingRoomRow, MeetingVoiceAvailability } from '../../shared/ipc.js';
 
 const wrap: CSSProperties = {
   height: '100%',
@@ -61,10 +63,12 @@ export function MeetingRoomPanel({
   roomId: string;
   onClose?: () => void;
 }) {
+  const [room, setRoom] = useState<MeetingRoomRow | null>(null);
   const [session, setSession] = useState<RoomMediaSession | null>(null);
   const [title, setTitle] = useState('Meeting');
   const [error, setError] = useState<string | null>(null);
   const [vr, setVr] = useState<ImmersiveVrSupport | null>(null);
+  const [voiceCaps, setVoiceCaps] = useState<MeetingVoiceAvailability | null>(null);
 
   useEffect(() => {
     void detectImmersiveVrSupport(browserXr()).then(setVr);
@@ -73,13 +77,14 @@ export function MeetingRoomPanel({
   const load = useCallback(async () => {
     setError(null);
     try {
-      const room = await bridge.meetingsGetRoom(roomId);
-      if (!room) {
+      const loaded = await bridge.meetingsGetRoom(roomId);
+      if (!loaded) {
         setError('This room is not available.');
         return;
       }
-      setTitle(room.title);
-      setSession(projectRoomSession(room));
+      setRoom(loaded);
+      setTitle(loaded.title);
+      setSession(projectRoomSession(loaded));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'could not load the room');
     }
@@ -88,6 +93,13 @@ export function MeetingRoomPanel({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void bridge
+      .meetingsVoiceCapabilities()
+      .then(setVoiceCaps)
+      .catch(() => setVoiceCaps(null));
+  }, []);
 
   const onModerate = useCallback(
     (participantId: string, action: 'mute' | 'disable-listening' | 'set-volume', value: boolean | number) => {
@@ -110,13 +122,20 @@ export function MeetingRoomPanel({
     [],
   );
 
-  const sceneSlot = (
+  const sceneSlot = room ? (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <p style={{ color: '#9aa7b5', fontSize: 13, margin: 0 }}>
-        {session?.sceneId
-          ? `Room scene: ${session.sceneId}`
-          : 'No 3D scene is bound to this room. The portal shows the cluster scene when one is linked.'}
-      </p>
+      <MeetingScenePanel
+        room={room}
+        voiceCapabilities={
+          voiceCaps ?? {
+            realtimeAvailable: false,
+            cloudSttAvailable: false,
+            cloudTtsAvailable: false,
+            localSttAvailable: false,
+            localTtsAvailable: false,
+          }
+        }
+      />
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <button
           type="button"
@@ -129,6 +148,8 @@ export function MeetingRoomPanel({
         {vr ? <span style={{ fontSize: 11, color: '#6b7784' }}>{vr.status}</span> : null}
       </div>
     </div>
+  ) : (
+    <p style={{ color: '#9aa7b5', fontSize: 13, margin: 0 }}>Loading the room scene…</p>
   );
 
   const card: MeetingCardModel | null = session

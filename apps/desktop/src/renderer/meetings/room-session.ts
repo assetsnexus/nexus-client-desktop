@@ -31,6 +31,11 @@ export type RoomDetailLike = {
   participants?: RoomParticipantLike[];
   /** Optional 3D scene (assets cluster) bound to the room. */
   sceneId?: string | null;
+  /**
+   * Phase 11e: per-participant embodiment presence (agents), keyed by id. Fed to
+   * the Scene tab's occupant projection so agents render their VRM/gesture rail.
+   */
+  presence?: Record<string, unknown> | null;
 };
 
 function toKind(type: string | undefined): ParticipantKind {

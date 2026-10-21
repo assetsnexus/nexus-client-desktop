@@ -16,6 +16,7 @@ describe('buildCompanionHash / parseCompanionHash', () => {
       title: 'Aria',
       avatarUrl: 'https://x/avatar.png',
       autoStart: true,
+      mode: 'split' as const,
     };
     expect(parseCompanionHash(buildCompanionHash(launch))).toEqual(launch);
   });
@@ -30,7 +31,13 @@ describe('buildCompanionHash / parseCompanionHash', () => {
       title: null,
       avatarUrl: null,
       autoStart: true,
+      mode: 'fullscreen',
     });
+  });
+
+  it('round-trips the split mode', () => {
+    const parsed = parseCompanionHash(buildCompanionHash({ contactId: 've-1', mode: 'split' }));
+    expect(parsed?.mode).toBe('split');
   });
 
   it('round-trips autoStart:false', () => {

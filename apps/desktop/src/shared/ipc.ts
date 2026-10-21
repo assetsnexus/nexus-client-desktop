@@ -9,7 +9,7 @@
 import type { AuthIdentity, DesktopConnectionConfig, LoginCredentials } from '@nexus/node-core';
 import type { CompanionLaunch } from './companion.js';
 
-export type { CompanionLaunch } from './companion.js';
+export type { CompanionLaunch, CompanionMode } from './companion.js';
 
 export type ConnectionConfigPatch = Partial<DesktopConnectionConfig>;
 
@@ -156,6 +156,22 @@ export type MeetingRoomParticipantRow = {
   avatarUrl: string | null;
 };
 
+/**
+ * Per-participant embodiment presence (Phase 11e), structurally matching
+ * `@nexus/chat-core` `ParticipantPresenceV1` / `@nexus/meetings-core`
+ * `MeetingPresence`. Carried for agent participants so the meeting Scene tab
+ * reuses the DM VRM/gesture rail verbatim.
+ */
+export type MeetingRoomPresenceRow = {
+  vrmUrl: string | null;
+  gestureManifestUrl: string | null;
+  defaultMood: string | null;
+  voiceId: string | null;
+  lipSyncEnabled: boolean;
+  vrmValidationStatus: string | null;
+  embodiment: Record<string, unknown> | null;
+};
+
 export type MeetingRoomRow = {
   id: string;
   title: string;
@@ -163,6 +179,20 @@ export type MeetingRoomRow = {
   conversationId: string | null;
   sceneId: string | null;
   participants: MeetingRoomParticipantRow[];
+  /** Presence keyed by participant id (agents only, best-effort). */
+  presence: Record<string, MeetingRoomPresenceRow>;
+};
+
+/**
+ * Voice capabilities the desktop can actually offer (Phase 11e), so the meeting
+ * voice bar disables a mode with an honest reason instead of failing at start.
+ */
+export type MeetingVoiceAvailability = {
+  realtimeAvailable: boolean;
+  cloudSttAvailable: boolean;
+  cloudTtsAvailable: boolean;
+  localSttAvailable: boolean;
+  localTtsAvailable: boolean;
 };
 
 
@@ -203,6 +233,96 @@ export type LocalModelBackendStatus = {
 export type LocalModelsSnapshot = {
   backends: LocalModelBackendStatus[];
 };
+
+/** Desktop-local speech models (Phase 11e): install + run STT/TTS on-device. */
+export type LocalVoiceModelKind = 'stt' | 'tts';
+
+export type LocalVoiceInstallState =
+  | 'not_installed'
+  | 'downloading'
+  | 'installed'
+  | 'error';
+
+export type LocalVoiceEngineState = 'unloaded' | 'loading' | 'ready' | 'error';
+
+/** One installable / installed speech model row for the settings UI. */
+export type LocalVoiceModelRow = {
+  id: string;
+  kind: LocalVoiceModelKind;
+  label: string;
+  source: 'region' | 'custom';
+  /** Primary download URL (public repo), or null for a custom endpoint. */
+  downloadUrl: string | null;
+  sizeBytes: number | null;
+  /** Approximate VRAM this model needs when loaded on a GPU. */
+  vramGiB: number | null;
+  runtime: string | null;
+  licenseKeys: string[];
+  installState: LocalVoiceInstallState;
+  installedBytes: number;
+  downloadPercent: number | null;
+  error?: string | null;
+};
+
+/** Live free/total RAM + VRAM for the settings progress bars. */
+export type LocalVoiceResourceSnapshot = {
+  ram: { totalBytes: number; freeBytes: number } | null;
+  vram: { totalBytes: number; freeBytes: number; vendor: 'nvidia' | 'amd' | 'unknown' } | null;
+  vramReason: string | null;
+  checkedAt: string;
+};
+
+/** Which protocol a custom (self-hosted) engine speaks. */
+export type LocalVoiceProtocol =
+  | 'nexus'
+  | 'openai_audio'
+  | 'whisper_rest'
+  | 'ollama'
+  | 'custom';
+
+/** A custom self-hosted STT/TTS endpoint (advanced). */
+export type LocalVoiceEndpoint = {
+  kind: LocalVoiceModelKind;
+  protocol: LocalVoiceProtocol;
+  baseUrl: string;
+  ignoreTls: boolean;
+  apiKey?: string | null;
+};
+
+export type LocalVoiceSettings = {
+  enabled: boolean;
+  /** Seconds a local engine may idle before it is unloaded (VRAM/RAM saver). */
+  idleTimeoutSeconds: number;
+  /** Preferred engine per modality: cloud region inference or an on-device model. */
+  sttEngine: 'cloud' | 'local';
+  ttsEngine: 'cloud' | 'local';
+  sttModelId: string | null;
+  ttsModelId: string | null;
+  customSttEndpoint: LocalVoiceEndpoint | null;
+  customTtsEndpoint: LocalVoiceEndpoint | null;
+  /** Acknowledge self-signed TLS for custom endpoints. */
+  ignoreTlsForCustom: boolean;
+};
+
+export type LocalVoiceEngineRow = {
+  id: string;
+  kind: LocalVoiceModelKind;
+  state: LocalVoiceEngineState;
+  lastUsedAtMs: number | null;
+  unloadAtMs: number | null;
+  error: string | null;
+};
+
+export type LocalVoiceState = {
+  settings: LocalVoiceSettings;
+  resources: LocalVoiceResourceSnapshot;
+  models: LocalVoiceModelRow[];
+  engines: LocalVoiceEngineRow[];
+  /** Directory the models install into (shown for transparency). */
+  modelsDir: string;
+};
+
+export type LocalVoiceSettingsPatch = Partial<LocalVoiceSettings>;
 
 /**
  * Local GPU runner (Phase 4): expose this machine's local model server to the
@@ -411,7 +531,16 @@ export type NexusBridge = {
   calendarOpenJoin(eventId: string): Promise<{ opened: boolean; url: string | null; roomId?: string | null }>;
   // Meetings / room media (Phase 7c/7d/11).
   meetingsGetRoom(roomId: string): Promise<MeetingRoomRow | null>;
-};
+  /** Phase 11e: voice capabilities (realtime + cloud/local STT/TTS) for the bar. */
+  meetingsVoiceCapabilities(): Promise<MeetingVoiceAvailability>;
+  // Desktop-local speech models (Phase 11e).
+  localVoiceGetState(): Promise<LocalVoiceState>;
+  localVoiceSetSettings(patch: LocalVoiceSettingsPatch): Promise<LocalVoiceState>;
+  localVoiceRefreshCatalog(): Promise<LocalVoiceState>;
+  localVoiceInstall(modelId: string): Promise<LocalVoiceState>;
+  localVoiceCancelInstall(modelId: string): Promise<LocalVoiceState>;
+  localVoiceRemove(modelId: string): Promise<LocalVoiceState>;
+  localVoiceProbeResources(): Promise<LocalVoiceResourceSnapshot>;};
 
 /** IPC channel names. Kept explicit so main/preload stay in sync. */
 export const IPC = {
@@ -464,5 +593,13 @@ export const IPC = {
   calendarRespond: 'nexus:calendar:respond',
   calendarOpenJoin: 'nexus:calendar:open-join',
   meetingsGetRoom: 'nexus:meetings:get-room',
+  meetingsVoiceCapabilities: 'nexus:meetings:voice-capabilities',
+  localVoiceState: 'nexus:local-voice:state',
+  localVoiceSetSettings: 'nexus:local-voice:set-settings',
+  localVoiceRefreshCatalog: 'nexus:local-voice:refresh-catalog',
+  localVoiceInstall: 'nexus:local-voice:install',
+  localVoiceCancelInstall: 'nexus:local-voice:cancel-install',
+  localVoiceRemove: 'nexus:local-voice:remove',
+  localVoiceProbeResources: 'nexus:local-voice:probe-resources',
   openExternal: 'nexus:open-external',
 } as const;

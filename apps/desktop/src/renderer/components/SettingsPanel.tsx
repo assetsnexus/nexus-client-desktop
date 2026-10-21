@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { LocalVoicePanel } from './LocalVoicePanel.js';
 import {
   bridge,
   type AssetAgentDiscoverySnapshot,
@@ -319,6 +320,8 @@ export function SettingsPanel({
         ))}
         {!models ? <p style={{ color: '#6b7784', fontSize: 12 }}>Checking…</p> : null}
       </section>
+
+      <LocalVoicePanel />
 
       <section style={section}>
         <h2 style={{ margin: 0, fontSize: 16 }}>Local GPU runner (BYOK)</h2>

@@ -17,6 +17,14 @@ export const COMPANION_DEFAULT_SIZE = { width: 720, height: 820 } as const;
 /** `#companion?...` hash segment identifying the companion route. */
 export const COMPANION_HASH_PREFIX = 'companion';
 
+/**
+ * Companion presentation mode (Phase 11e):
+ * - `fullscreen` — full-window 3D/VRM stage with the realtime voice session;
+ * - `split` — the same session, chat beside the 3D stage.
+ * Both share one realtime voice mode; only the layout differs.
+ */
+export type CompanionMode = 'fullscreen' | 'split';
+
 export type CompanionLaunch = {
   contactId: string;
   conversationId?: string | null;
@@ -27,6 +35,8 @@ export type CompanionLaunch = {
   avatarUrl?: string | null;
   /** Auto-start the live voice session on open (default true). */
   autoStart?: boolean;
+  /** Stage layout; defaults to `fullscreen`. */
+  mode?: CompanionMode;
 };
 
 function clean(value: unknown): string | null {
@@ -53,6 +63,7 @@ export function buildCompanionHash(launch: CompanionLaunch): string {
   const avatarUrl = clean(launch.avatarUrl);
   if (avatarUrl) params.set('avatarUrl', avatarUrl);
   if (launch.autoStart === false) params.set('autoStart', '0');
+  if (launch.mode === 'split') params.set('mode', 'split');
   return `#${COMPANION_HASH_PREFIX}?${params.toString()}`;
 }
 
@@ -76,6 +87,7 @@ export function parseCompanionHash(hash: string): CompanionLaunch | null {
     title: clean(params.get('title')),
     avatarUrl: clean(params.get('avatarUrl')),
     autoStart: params.get('autoStart') !== '0',
+    mode: params.get('mode') === 'split' ? 'split' : 'fullscreen',
   };
 }
 

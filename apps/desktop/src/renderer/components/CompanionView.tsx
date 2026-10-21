@@ -13,6 +13,7 @@ import {
   bridge,
   type AuthState,
   type CompanionLaunch,
+  type CompanionMode,
   type DesktopConnectionConfig,
 } from '../bridge.js';
 
@@ -47,6 +48,13 @@ const btn: CSSProperties = {
   fontSize: 12,
 };
 
+const btnActive: CSSProperties = {
+  ...btn,
+  border: '1px solid #3f6cb0',
+  background: '#2f5c9e',
+  color: '#fff',
+};
+
 /**
  * Immersive companion window body (Phase 7a).
  *
@@ -62,6 +70,8 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Phase 11e: one realtime voice session, two presentation modes.
+  const [mode, setMode] = useState<CompanionMode>(launch.mode ?? 'fullscreen');
 
   useEffect(() => {
     void bridge.getConnectionConfig().then(setConnection);
@@ -137,6 +147,21 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       <header style={bar}>
         <strong style={{ fontSize: 13 }}>{launch.title ?? contact?.name ?? 'Companion'}</strong>
         <span style={{ flex: 1 }} />
+        {(
+          [
+            ['fullscreen', 'Full 3D'],
+            ['split', 'Split'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            style={mode === id ? btnActive : btn}
+            onClick={() => setMode(id)}
+          >
+            {label}
+          </button>
+        ))}
         <button type="button" style={btn} onClick={() => void bridge.companionClose(launch.contactId)}>
           Close
         </button>
@@ -154,7 +179,10 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
             contact={contact}
             turns={turns}
             streaming={streaming}
-            view="avatar"
+            view={mode === 'fullscreen' ? 'avatar' : 'background'}
+            // Full 3D = avatar-only stage; Split = chat beside the 3D stage.
+            initialLayout={mode === 'fullscreen' ? 'avatar' : 'split'}
+            splitAxis="horizontal"
             autoStart={launch.autoStart !== false}
           />
         )}

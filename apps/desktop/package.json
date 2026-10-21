@@ -34,6 +34,7 @@
     "@nexus/cluster-scene-react": "file:../../../anx-libs/nexus-collaboration-vr/packages/cluster-scene-react",
     "@nexus/identity": "file:../../packages/identity",
     "@nexus/local-runner": "file:../../packages/local-runner",
+    "@nexus/local-voice": "file:../../packages/local-voice",
     "@nexus/meetings-core": "file:../../../anx-npm-modules/packages/meetings-core",
     "@nexus/meetings-react": "file:../../../anx-npm-modules/packages/meetings-react",
     "@nexus/node-core": "file:../../packages/node-core",
