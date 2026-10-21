@@ -32,6 +32,7 @@
     "@nexus/cluster-scene-react": "file:../../../anx-libs/nexus-collaboration-vr/packages/cluster-scene-react",
     "@nexus/node-core": "file:../../packages/node-core",
     "@nexus/scene-client": "file:../../../anx-npm-modules/packages/scene-client",
+    "@nexus/storage-browser": "file:../../packages/storage-browser",
     "@pixiv/three-vrm": "^3.5.5",
     "@pixiv/three-vrm-animation": "^3.5.5",
     "react": "^19.0.0",

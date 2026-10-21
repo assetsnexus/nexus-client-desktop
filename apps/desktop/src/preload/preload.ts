@@ -23,6 +23,18 @@ const bridge: NexusBridge = {
   setWorkspaces: (workspaces) => ipcRenderer.invoke(IPC.toolsSetWorkspaces, workspaces),
   setLocalCommands: (commands) => ipcRenderer.invoke(IPC.toolsSetLocalCommands, commands),
   runTool: (req) => ipcRenderer.invoke(IPC.toolsRun, req),
+  storageWorkspaces: () => ipcRenderer.invoke(IPC.storageWorkspaces),
+  storageFolderList: (workspaceId, parentFolderId) =>
+    ipcRenderer.invoke(IPC.storageFolderList, workspaceId, parentFolderId),
+  storageListFiles: (input) => ipcRenderer.invoke(IPC.storageListFiles, input),
+  storageCapabilities: (kind) => ipcRenderer.invoke(IPC.storageCapabilities, kind),
+  storageUpload: (req) => ipcRenderer.invoke(IPC.storageUpload, req),
+  storageDownloadUrl: (fileId) => ipcRenderer.invoke(IPC.storageDownloadUrl, fileId),
+  storageTrashFile: (fileId) => ipcRenderer.invoke(IPC.storageTrashFile, fileId),
+  storageRestoreFile: (fileId) => ipcRenderer.invoke(IPC.storageRestoreFile, fileId),
+  storageRenameFile: (fileId, newName) => ipcRenderer.invoke(IPC.storageRenameFile, fileId, newName),
+  storageMoveFile: (fileId, targetFolderId) =>
+    ipcRenderer.invoke(IPC.storageMoveFile, fileId, targetFolderId),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 };
 

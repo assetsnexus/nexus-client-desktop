@@ -3,6 +3,7 @@ import { bridge, type AuthState, type DesktopConnectionConfig } from './bridge.j
 import { LoginForm } from './components/LoginForm.js';
 import { ChatHost } from './components/ChatHost.js';
 import { SettingsPanel } from './components/SettingsPanel.js';
+import { StorageExplorer } from './components/StorageExplorer.js';
 
 const shellStyle: CSSProperties = {
   height: '100vh',
@@ -41,6 +42,7 @@ export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: 'signed_out' });
   const [connection, setConnection] = useState<DesktopConnectionConfig | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [view, setView] = useState<'chat' | 'storage'>('chat');
   const [version, setVersion] = useState('');
 
   useEffect(() => {
@@ -66,6 +68,28 @@ export function App() {
         <strong style={{ fontSize: 14 }}>Nexus</strong>
         <span style={{ color: '#6b7784', fontSize: 12 }}>v{version}</span>
         <span style={{ flex: 1 }} />
+        {signedIn ? (
+          <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid #3a4654' }}>
+            {(['chat', 'storage'] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => {
+                  setView(tab);
+                  setShowSettings(false);
+                }}
+                style={{
+                  ...btnStyle,
+                  border: 'none',
+                  borderRadius: 0,
+                  background: view === tab && !showSettings ? '#243244' : '#1c2430',
+                }}
+              >
+                {tab === 'chat' ? 'Chat' : 'Storage'}
+              </button>
+            ))}
+          </div>
+        ) : null}
         {connection ? (
           <span style={{ color: '#6b7784', fontSize: 12 }} title={connection.regionUrl}>
             {new URL(connection.regionUrl).host}
@@ -89,7 +113,11 @@ export function App() {
             onClose={() => setShowSettings(false)}
           />
         ) : signedIn ? (
-          <ChatHost auth={auth} connection={connection} />
+          view === 'storage' ? (
+            <StorageExplorer />
+          ) : (
+            <ChatHost auth={auth} connection={connection} />
+          )
         ) : (
           <LoginForm auth={auth} onAuthChange={refreshAuth} />
         )}

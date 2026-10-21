@@ -22,10 +22,12 @@ import { createAuthManager } from './auth-manager.js';
 import { DEFAULT_LOCAL_BACKENDS, probeLocalModels } from './local-models.js';
 import { createToolsStore } from './tools-store.js';
 import { runTool } from './tool-runner.js';
+import { createStorageManager } from './storage-manager.js';
 import {
   IPC,
   type ConnectionConfigPatch,
   type LoginRequest,
+  type StorageUploadRequest,
   type ToolInvocation,
   type TwoFactorRequest,
 } from '../shared/ipc.js';
@@ -36,6 +38,10 @@ const isDev = !app.isPackaged;
 const settings = createSettingsStore();
 const secureStore = new SafeStorageStore();
 const toolsStore = createToolsStore();
+const storageManager = createStorageManager({
+  getSender: () => getAuthManager().createSender(),
+  getRegionUrl: () => settings.getConnectionConfig().regionUrl,
+});
 
 let mainWindow: BrowserWindow | null = null;
 let authManager: ReturnType<typeof createAuthManager> | null = null;
@@ -149,6 +155,24 @@ function registerIpc(): void {
     toolsStore.setLocalCommands(commands),
   );
   ipcMain.handle(IPC.toolsRun, (_e, req: ToolInvocation) => runTool(req as never, { store: toolsStore }));
+
+  // Storage explorer (Phase 2).
+  ipcMain.handle(IPC.storageWorkspaces, () => storageManager.workspaces());
+  ipcMain.handle(IPC.storageFolderList, (_e, workspaceId: string, parentFolderId?: string | null) =>
+    storageManager.folderList(workspaceId, parentFolderId),
+  );
+  ipcMain.handle(IPC.storageListFiles, (_e, input) => storageManager.listFiles(input ?? {}));
+  ipcMain.handle(IPC.storageCapabilities, (_e, kind?: string) => storageManager.capabilities(kind));
+  ipcMain.handle(IPC.storageUpload, (_e, req: StorageUploadRequest) => storageManager.upload(req));
+  ipcMain.handle(IPC.storageDownloadUrl, (_e, fileId: string) => storageManager.downloadUrl(fileId));
+  ipcMain.handle(IPC.storageTrashFile, (_e, fileId: string) => storageManager.trashFile(fileId));
+  ipcMain.handle(IPC.storageRestoreFile, (_e, fileId: string) => storageManager.restoreFile(fileId));
+  ipcMain.handle(IPC.storageRenameFile, (_e, fileId: string, newName: string) =>
+    storageManager.renameFile(fileId, newName),
+  );
+  ipcMain.handle(IPC.storageMoveFile, (_e, fileId: string, targetFolderId: string | null) =>
+    storageManager.moveFile(fileId, targetFolderId),
+  );
 
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
