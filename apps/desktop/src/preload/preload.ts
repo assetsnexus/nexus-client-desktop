@@ -59,6 +59,7 @@ const bridge: NexusBridge = {
   calendarCancelEvent: (eventId) => ipcRenderer.invoke(IPC.calendarCancelEvent, eventId),
   calendarRespond: (eventId, status) => ipcRenderer.invoke(IPC.calendarRespond, eventId, status),
   calendarOpenJoin: (eventId) => ipcRenderer.invoke(IPC.calendarOpenJoin, eventId),
+  meetingsGetRoom: (roomId) => ipcRenderer.invoke(IPC.meetingsGetRoom, roomId),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 };
 

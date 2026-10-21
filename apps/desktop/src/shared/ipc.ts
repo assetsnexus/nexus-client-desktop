@@ -148,6 +148,23 @@ export type CalendarCreateInput = {
 
 export type CalendarAttendeeStatus = 'needs_action' | 'accepted' | 'declined' | 'tentative';
 
+/** Meetings / room media view (Phase 7c/7d/11). Serializable room roster. */
+export type MeetingRoomParticipantRow = {
+  id: string;
+  type: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+};
+
+export type MeetingRoomRow = {
+  id: string;
+  title: string;
+  type: string;
+  conversationId: string | null;
+  sceneId: string | null;
+  participants: MeetingRoomParticipantRow[];
+};
+
 
 export type DeviceStatus = {
   registered: boolean;
@@ -392,6 +409,8 @@ export type NexusBridge = {
   calendarCancelEvent(eventId: string): Promise<void>;
   calendarRespond(eventId: string, status: CalendarAttendeeStatus): Promise<CalendarEventRow>;
   calendarOpenJoin(eventId: string): Promise<{ opened: boolean; url: string | null; roomId?: string | null }>;
+  // Meetings / room media (Phase 7c/7d/11).
+  meetingsGetRoom(roomId: string): Promise<MeetingRoomRow | null>;
 };
 
 /** IPC channel names. Kept explicit so main/preload stay in sync. */
@@ -444,5 +463,6 @@ export const IPC = {
   calendarCancelEvent: 'nexus:calendar:cancel-event',
   calendarRespond: 'nexus:calendar:respond',
   calendarOpenJoin: 'nexus:calendar:open-join',
+  meetingsGetRoom: 'nexus:meetings:get-room',
   openExternal: 'nexus:open-external',
 } as const;

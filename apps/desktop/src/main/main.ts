@@ -29,6 +29,7 @@ import { createAssetAgentDiscoveryManager } from './asset-agent-discovery.js';
 import { createBonjourBackend } from './mdns-bonjour.js';
 import { createCompanionWindowManager, defaultCompanionPreloadPath } from './companion-window.js';
 import { createCalendarManager } from './calendar-manager.js';
+import { createMeetingsManager } from './meetings-manager.js';
 import {
   IPC,
   type CalendarAttendeeStatus,
@@ -108,6 +109,13 @@ const companionWindows = createCompanionWindowManager({
 const calendarManager = createCalendarManager({
   getSender: () => getAuthManager().createSender(),
 });
+
+// Phase 7c/7d/11: room media view. A nexus meeting is a linked conversation
+// room; this projects the roster from `anx.communicate.rooms.get`.
+const meetingsManager = createMeetingsManager({
+  getSender: () => getAuthManager().createSender(),
+});
+
 const viewerUserId = () => {
   const snap = identityManager.getSnapshot();
   const active = snap.accounts.find((a) => a.active);
@@ -319,6 +327,9 @@ function registerIpc(): void {
     }
     return { opened: false, url: null, roomId: null };
   });
+
+  // Meetings / room media (Phase 7c/7d/11).
+  ipcMain.handle(IPC.meetingsGetRoom, (_e, roomId: string) => meetingsManager.getRoom(roomId));
 
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {

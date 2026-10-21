@@ -6,6 +6,8 @@ import { SettingsPanel } from './components/SettingsPanel.js';
 import { StorageExplorer } from './components/StorageExplorer.js';
 import { IdentitySwitcher } from './components/IdentitySwitcher.js';
 import { CalendarPanel } from './components/CalendarPanel.js';
+import { MeetingRoomPanel } from './components/MeetingRoomPanel.js';
+import { MeetingsPanel } from './components/MeetingsPanel.js';
 
 const shellStyle: CSSProperties = {
   height: '100vh',
@@ -44,9 +46,10 @@ export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: 'signed_out' });
   const [connection, setConnection] = useState<DesktopConnectionConfig | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [view, setView] = useState<'chat' | 'storage' | 'calendar'>('chat');
+  const [view, setView] = useState<'chat' | 'storage' | 'calendar' | 'meetings'>('chat');
   const [showIdentities, setShowIdentities] = useState(false);
   const [version, setVersion] = useState('');
+  const [openRoomId, setOpenRoomId] = useState<string | null>(null);
 
   useEffect(() => {
     void bridge.getVersion().then(setVersion);
@@ -73,22 +76,29 @@ export function App() {
         <span style={{ flex: 1 }} />
         {signedIn ? (
           <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid #3a4654' }}>
-            {(['chat', 'storage', 'calendar'] as const).map((tab) => (
+            {(['chat', 'storage', 'calendar', 'meetings'] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
                 onClick={() => {
                   setView(tab);
+                  setOpenRoomId(null);
                   setShowSettings(false);
                 }}
                 style={{
                   ...btnStyle,
                   border: 'none',
                   borderRadius: 0,
-                  background: view === tab && !showSettings ? '#243244' : '#1c2430',
+                  background: view === tab && !showSettings && !openRoomId ? '#243244' : '#1c2430',
                 }}
               >
-                {tab === 'chat' ? 'Chat' : tab === 'storage' ? 'Storage' : 'Calendar'}
+                {tab === 'chat'
+                  ? 'Chat'
+                  : tab === 'storage'
+                    ? 'Storage'
+                    : tab === 'calendar'
+                      ? 'Calendar'
+                      : 'Meetings'}
               </button>
             ))}
           </div>
@@ -133,10 +143,14 @@ export function App() {
             onClose={() => setShowSettings(false)}
           />
         ) : signedIn ? (
-          view === 'storage' ? (
+          openRoomId ? (
+            <MeetingRoomPanel roomId={openRoomId} onClose={() => setOpenRoomId(null)} />
+          ) : view === 'storage' ? (
             <StorageExplorer />
           ) : view === 'calendar' ? (
             <CalendarPanel />
+          ) : view === 'meetings' ? (
+            <MeetingsPanel onOpenRoom={setOpenRoomId} />
           ) : (
             <ChatHost auth={auth} connection={connection} />
           )
