@@ -32,6 +32,14 @@ export type AuthManagerOptions = {
   deviceName: string;
   platform: string;
   appVersion: string;
+  /**
+   * Optional active-token resolver. When set (Phase 9 identity switching), it
+   * takes precedence over the single persisted token so the sender always uses
+   * the currently-selected identity.
+   */
+  getActiveToken?: () => string | null;
+  /** Called after a successful login / 2FA completion (Phase 9 identity record). */
+  onAuthenticated?: (input: { token: string; identity: AuthIdentity }) => void;
 };
 
 export type AuthManager = {
@@ -67,12 +75,20 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
     cachedIdentity = identity;
     pendingChallenge = null;
     await secureStore.set(TOKEN_KEY, token);
+    options.onAuthenticated?.({ token, identity });
     return { status: 'signed_in', token, identity };
   }
 
   async function currentState(): Promise<AuthState> {
     if (pendingChallenge) {
       return { status: 'two_factor_required', ...pendingChallenge };
+    }
+    // Phase 9: the identity store (multi-account / org switch) is the token
+    // authority when wired; it supersedes the single persisted token.
+    const activeOverride = options.getActiveToken?.() ?? null;
+    if (activeOverride) {
+      cachedToken = activeOverride;
+      return { status: 'signed_in', token: activeOverride, identity: cachedIdentity ?? emptyIdentity() };
     }
     if (cachedToken && cachedIdentity) {
       return { status: 'signed_in', token: cachedToken, identity: cachedIdentity };
@@ -84,6 +100,10 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
       return { status: 'signed_in', token: stored, identity: cachedIdentity };
     }
     return { status: 'signed_out' };
+  }
+
+  function emptyIdentity(): AuthIdentity {
+    return { userId: null, orgId: null, role: null, deviceId: null };
   }
 
   return {
@@ -118,7 +138,8 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
       await secureStore.delete(TOKEN_KEY);
     },
 
-    getToken: async () => cachedToken ?? (await secureStore.get(TOKEN_KEY)),
+    getToken: async () =>
+      options.getActiveToken?.() ?? cachedToken ?? (await secureStore.get(TOKEN_KEY)),
 
     async getDeviceStatus(): Promise<DeviceStatus> {
       const keys = await loadDeviceKeys();

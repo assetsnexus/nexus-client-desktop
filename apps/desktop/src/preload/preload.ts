@@ -40,6 +40,13 @@ const bridge: NexusBridge = {
   runnerStart: () => ipcRenderer.invoke(IPC.runnerStart),
   runnerStop: () => ipcRenderer.invoke(IPC.runnerStop),
   runnerRegister: () => ipcRenderer.invoke(IPC.runnerRegister),
+  identitySnapshot: () => ipcRenderer.invoke(IPC.identitySnapshot),
+  identityListMemberships: () => ipcRenderer.invoke(IPC.identityListMemberships),
+  identitySwitch: (key) => ipcRenderer.invoke(IPC.identitySwitch, key),
+  identitySwitchAccount: (userId) => ipcRenderer.invoke(IPC.identitySwitchAccount, userId),
+  identityLogout: (key) => ipcRenderer.invoke(IPC.identityLogout, key),
+  identityStartMembership: (req) => ipcRenderer.invoke(IPC.identityStartMembership, req),
+  identityCompleteMembership: (req) => ipcRenderer.invoke(IPC.identityCompleteMembership, req),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 };
 

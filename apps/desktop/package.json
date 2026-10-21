@@ -30,6 +30,7 @@
     "@nexus/chat-react": "file:../../../anx-npm-modules/packages/chat-react",
     "@nexus/client-tools": "file:../../packages/client-tools",
     "@nexus/cluster-scene-react": "file:../../../anx-libs/nexus-collaboration-vr/packages/cluster-scene-react",
+    "@nexus/identity": "file:../../packages/identity",
     "@nexus/local-runner": "file:../../packages/local-runner",
     "@nexus/node-core": "file:../../packages/node-core",
     "@nexus/scene-client": "file:../../../anx-npm-modules/packages/scene-client",

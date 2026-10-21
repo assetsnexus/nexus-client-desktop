@@ -23,6 +23,52 @@ export type TwoFactorRequest = {
   factor?: string;
 };
 
+/** Identity / account switching (Phase 9). Serializable views of the store. */
+export type IdentityRow = {
+  key: string;
+  kind: 'private' | 'business';
+  userId: string | null;
+  orgId: string | null;
+  role: string | null;
+  label: string;
+  expiresAt: string | null;
+  active: boolean;
+};
+
+export type AccountRow = {
+  userId: string;
+  email: string | null;
+  active: boolean;
+  identities: IdentityRow[];
+};
+
+export type IdentitySnapshot = {
+  accounts: AccountRow[];
+  accountSwitcherEnabled: boolean;
+  activeUserId: string | null;
+};
+
+export type MembershipRow = {
+  membershipId: string;
+  orgId: string | null;
+  role: string | null;
+  businessEmail: string | null;
+  orgName: string | null;
+};
+
+export type MembershipLoginStart = {
+  kind: 'authenticated' | 'two_factor_required';
+  orgId: string | null;
+  /** Present when a challenge was issued. */
+  loginToken?: string;
+  methods?: string[];
+  methodGroups?: { user: string[]; membership: string[] };
+  hint?: { channelType?: string; sentTo?: string | null; methodSlug?: string };
+  biometricApprovalRequired?: boolean;
+  complianceWarnings?: Array<{ code: string; message: string }>;
+};
+
+
 export type DeviceStatus = {
   registered: boolean;
   deviceId: string | null;
@@ -237,6 +283,19 @@ export type NexusBridge = {
   runnerStart(): Promise<LocalRunnerState>;
   runnerStop(): Promise<LocalRunnerState>;
   runnerRegister(): Promise<LocalRunnerState>;
+  // Identity / account switching (Phase 9).
+  identitySnapshot(): Promise<IdentitySnapshot>;
+  identityListMemberships(): Promise<MembershipRow[]>;
+  identitySwitch(key: string): Promise<IdentitySnapshot>;
+  identitySwitchAccount(userId: string): Promise<IdentitySnapshot>;
+  identityLogout(key?: string): Promise<IdentitySnapshot>;
+  identityStartMembership(req: { membershipId: string; businessEmail: string; password?: string }): Promise<MembershipLoginStart>;
+  identityCompleteMembership(req: {
+    loginToken: string;
+    method: string;
+    code: string;
+    businessEmail?: string;
+  }): Promise<IdentitySnapshot>;
   openExternal(url: string): Promise<void>;
 };
 
@@ -271,5 +330,12 @@ export const IPC = {
   runnerStart: 'nexus:runner:start',
   runnerStop: 'nexus:runner:stop',
   runnerRegister: 'nexus:runner:register',
+  identitySnapshot: 'nexus:identity:snapshot',
+  identityListMemberships: 'nexus:identity:list-memberships',
+  identitySwitch: 'nexus:identity:switch',
+  identitySwitchAccount: 'nexus:identity:switch-account',
+  identityLogout: 'nexus:identity:logout',
+  identityStartMembership: 'nexus:identity:start-membership',
+  identityCompleteMembership: 'nexus:identity:complete-membership',
   openExternal: 'nexus:open-external',
 } as const;

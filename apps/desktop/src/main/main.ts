@@ -24,6 +24,7 @@ import { createToolsStore } from './tools-store.js';
 import { runTool } from './tool-runner.js';
 import { createStorageManager } from './storage-manager.js';
 import { createRunnerManager } from './runner-manager.js';
+import { createIdentityManager } from './identity-manager.js';
 import {
   IPC,
   type ConnectionConfigPatch,
@@ -48,6 +49,9 @@ const runnerManager = createRunnerManager({
   secureStore,
   getSender: () => getAuthManager().createSender(),
 });
+const identityManager = createIdentityManager({
+  getSender: () => getAuthManager().createSender(),
+});
 
 let mainWindow: BrowserWindow | null = null;
 let authManager: ReturnType<typeof createAuthManager> | null = null;
@@ -69,6 +73,20 @@ function getAuthManager(): ReturnType<typeof createAuthManager> {
       deviceName: `${process.platform}-desktop`,
       platform: process.platform,
       appVersion: app.getVersion(),
+      // Phase 9: the identity store is the token authority (multi-account +
+      // org identity switching).
+      getActiveToken: () => identityManager.activeToken(),
+      onAuthenticated: ({ token, identity }) => {
+        if (!identity.userId) return;
+        identityManager.recordLogin({
+          userId: identity.userId,
+          email: identity.email ?? null,
+          orgId: identity.orgId,
+          role: identity.role,
+          token,
+          deviceId: identity.deviceId,
+        });
+      },
     });
   }
   return authManager;
@@ -188,6 +206,23 @@ function registerIpc(): void {
   ipcMain.handle(IPC.runnerStart, () => runnerManager.start());
   ipcMain.handle(IPC.runnerStop, () => runnerManager.stop());
   ipcMain.handle(IPC.runnerRegister, () => runnerManager.register());
+
+  // Identity / account switching (Phase 9).
+  ipcMain.handle(IPC.identitySnapshot, () => identityManager.getSnapshot());
+  ipcMain.handle(IPC.identityListMemberships, () => identityManager.listMemberships());
+  ipcMain.handle(IPC.identitySwitch, (_e, key: string) => identityManager.switchIdentity(key));
+  ipcMain.handle(IPC.identitySwitchAccount, (_e, userId: string) => identityManager.switchAccount(userId));
+  ipcMain.handle(IPC.identityLogout, (_e, key?: string) => identityManager.logout(key));
+  ipcMain.handle(
+    IPC.identityStartMembership,
+    (_e, req: { membershipId: string; businessEmail: string; password?: string }) =>
+      identityManager.startMembership(req),
+  );
+  ipcMain.handle(
+    IPC.identityCompleteMembership,
+    (_e, req: { loginToken: string; method: string; code: string; businessEmail?: string }) =>
+      identityManager.completeMembership(req),
+  );
 
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {

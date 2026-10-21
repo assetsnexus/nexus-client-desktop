@@ -4,6 +4,7 @@ import { LoginForm } from './components/LoginForm.js';
 import { ChatHost } from './components/ChatHost.js';
 import { SettingsPanel } from './components/SettingsPanel.js';
 import { StorageExplorer } from './components/StorageExplorer.js';
+import { IdentitySwitcher } from './components/IdentitySwitcher.js';
 
 const shellStyle: CSSProperties = {
   height: '100vh',
@@ -43,6 +44,7 @@ export function App() {
   const [connection, setConnection] = useState<DesktopConnectionConfig | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [view, setView] = useState<'chat' | 'storage'>('chat');
+  const [showIdentities, setShowIdentities] = useState(false);
   const [version, setVersion] = useState('');
 
   useEffect(() => {
@@ -95,6 +97,15 @@ export function App() {
             {new URL(connection.regionUrl).host}
           </span>
         ) : null}
+        {signedIn ? (
+          <button
+            type="button"
+            style={btnStyle}
+            onClick={() => setShowIdentities((v) => !v)}
+          >
+            Identities
+          </button>
+        ) : null}
         <button type="button" style={btnStyle} onClick={() => setShowSettings((v) => !v)}>
           {showSettings ? 'Close settings' : 'Settings'}
         </button>
@@ -106,6 +117,14 @@ export function App() {
       </header>
 
       <main style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        {showIdentities && signedIn ? (
+          <IdentitySwitcher
+            onClose={() => {
+              setShowIdentities(false);
+              refreshAuth();
+            }}
+          />
+        ) : null}
         {showSettings && connection ? (
           <SettingsPanel
             connection={connection}
