@@ -70,3 +70,9 @@ export {
   type RegionRoute,
   type RegionTransportState,
 } from './transport.js';
+
+export {
+  createNodeCommandClient,
+  type NodeCommandClient,
+  type NodeCommandClientOptions,
+} from './command-client.js';
