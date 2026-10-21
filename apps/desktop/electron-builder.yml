@@ -1,0 +1,63 @@
+appId: org.assetsnexus.nexus-desktop
+productName: Nexus
+copyright: Copyright © AssetsNexus
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist-electron/**/*
+  - dist/renderer/**/*
+  - package.json
+
+# Electron is bundled by electron-builder; @nexus/node-core and its
+# @nexus/commands-client dep are already inlined into dist-electron by esbuild.
+asar: true
+
+# Auto-update channel metadata; a real update server is a later layer.
+publish:
+  provider: github
+  releaseType: draft
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  # Signing/notarization need an Apple Developer membership; unsigned builds
+  # run after a right-click Open. Decide before the first public release.
+  identity: null
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  category: Network
+  executableName: nexus-desktop
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]
+    - target: rpm
+      arch: [x64]
+  desktop:
+    Name: Nexus
+    Comment: Nexus desktop client
+
+deb:
+  packageName: nexus-desktop
+
+# A hosted GPG-signed apt repo is a later layer; the .deb/.rpm artifacts ship first.

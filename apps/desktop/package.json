@@ -1,0 +1,53 @@
+{
+  "name": "nexus-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Nexus desktop client (Electron shell + renderer)",
+  "license": "UNLICENSED",
+  "author": {
+    "name": "AssetsNexus",
+    "email": "desktop@assetsnexus.org"
+  },
+  "homepage": "https://assetsnexus.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/assetsnexus/nexus-desktop.git"
+  },
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build:main && npm run build:renderer",
+    "build:main": "node scripts/build-main.mjs",
+    "build:renderer": "vite build",
+    "package": "npm run build && electron-builder --publish never",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
+  },
+  "dependencies": {
+    "@nexus/character-kit": "file:../../../anx-libs/nexus-collaboration-vr/packages/character-kit",
+    "@nexus/character-react": "file:../../../anx-libs/nexus-collaboration-vr/packages/character-react",
+    "@nexus/chat-core": "file:../../../anx-npm-modules/packages/chat-core",
+    "@nexus/chat-react": "file:../../../anx-npm-modules/packages/chat-react",
+    "@nexus/cluster-scene-react": "file:../../../anx-libs/nexus-collaboration-vr/packages/cluster-scene-react",
+    "@nexus/node-core": "file:../../packages/node-core",
+    "@nexus/scene-client": "file:../../../anx-npm-modules/packages/scene-client",
+    "@pixiv/three-vrm": "^3.5.5",
+    "@pixiv/three-vrm-animation": "^3.5.5",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.170.0",
+    "three-vrm-lip-sync": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.170.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "33.4.11",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.4"
+  }
+}
