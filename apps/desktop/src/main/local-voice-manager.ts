@@ -19,7 +19,6 @@ import { get as httpsGet } from 'node:https';
 import { freemem, totalmem } from 'node:os';
 import { app } from 'electron';
 import {
-  BUILTIN_VOICE_MODELS,
   DEFAULT_LOCAL_VOICE_SETTINGS,
   buildDownloadPlan,
   createVoiceLifecycle,
@@ -63,6 +62,12 @@ export type LocalVoiceManagerOptions = {
   probeRunners?: ProbeRunners;
   /** Injected engine loader (spawns a process in production). */
   engineRuntime?: LocalVoiceEngineRuntime;
+  /**
+   * Map a bare engine binary name to a concrete path (the app-managed
+   * `whisper-server` when installed). Lets the idle lifecycle spawn a runner the
+   * app downloaded, without a manual PATH install.
+   */
+  resolveBinary?: (binary: string) => string;
   now?: () => number;
 };
 
@@ -107,11 +112,17 @@ export function createLocalVoiceManager(options: LocalVoiceManagerOptions) {
   const settingsPath = options.settingsPath ?? join(userData, 'local-voice.json');
   const now = options.now ?? (() => Date.now());
 
-  const engineRuntime = options.engineRuntime ?? createDefaultEngineRuntime({ modelsDir });
+  const engineRuntime =
+    options.engineRuntime ??
+    createDefaultEngineRuntime({ modelsDir, resolveBinary: options.resolveBinary });
 
   let lifecycle: VoiceLifecycle | null = null;
   let idleTimer: NodeJS.Timeout | null = null;
-  let catalog: LocalVoiceModel[] = BUILTIN_VOICE_MODELS;
+  // Seed from the FULL built-in catalog (speech + VAD + wake detectors). Using
+  // only `BUILTIN_VOICE_MODELS` here hid the detector rows until a manual
+  // "Refresh catalog" happened to succeed, so the wake picker reported "no wake
+  // models" even though they ship built in.
+  let catalog: LocalVoiceModel[] = mergeVoiceCatalog([]);
   const downloads = new Map<string, AbortController>();
   const downloadState = new Map<
     string,
@@ -176,6 +187,7 @@ export function createLocalVoiceManager(options: LocalVoiceManagerOptions) {
       label: model.label,
       source: model.source,
       downloadUrl: model.downloadUrl,
+      sourceUrl: model.sourceUrl,
       sizeBytes: model.sizeBytes,
       vramGiB: model.vramGiB,
       runtime: model.runtime,
@@ -271,6 +283,7 @@ export function createLocalVoiceManager(options: LocalVoiceManagerOptions) {
           ...r,
           downloadUrl: download.downloadUrl ?? r.downloadUrl,
           downloadFiles: download.files ?? r.downloadFiles,
+          sourceUrl: download.sourceUrl ?? r.sourceUrl,
           sizeBytes: download.sizeBytes ?? r.sizeBytes,
           vramGiB: download.vramGiB ?? r.vramGiB,
           runtime: download.runtime ?? r.runtime,
@@ -494,7 +507,7 @@ export function createLocalVoiceManager(options: LocalVoiceManagerOptions) {
   }
 
   async function state(): Promise<LocalVoiceState> {
-    if (!catalog.length) catalog = BUILTIN_VOICE_MODELS;
+    if (!catalog.length) catalog = mergeVoiceCatalog([]);
     const settings = readSettings();
     return {
       settings,
@@ -569,6 +582,41 @@ export function createLocalVoiceManager(options: LocalVoiceManagerOptions) {
       } catch {
         return true;
       }
+    },
+
+    /** The directory models install into (for the wake host to read bytes from). */
+    modelsDirectory(): string {
+      return modelsDir;
+    },
+
+    /** Look up a catalog model by id (for the wake host to resolve file names). */
+    findModel(modelId: string): LocalVoiceModel | null {
+      return catalog.find((m) => m.id === modelId) ?? null;
+    },
+
+    /**
+     * Every catalog model. Lets the wake STT resolver auto-select an installed
+     * speech model when the user never picked one explicitly, and lets the UI
+     * build readiness checklists without a second IPC round-trip.
+     */
+    listModels(): LocalVoiceModel[] {
+      return [...catalog];
+    },
+
+    /** True when every file of a model is present on disk (wake STT readiness). */
+    isInstalled(modelId: string): boolean {
+      const model = catalog.find((m) => m.id === modelId);
+      return model ? isInstalled(model) : false;
+    },
+
+    /** The user's chosen local STT model id, or null (wake STT target selection). */
+    selectedSttModelId(): string | null {
+      return readSettings().sttModelId;
+    },
+
+    /** The configured custom STT endpoint, if any (wake STT target selection). */
+    customSttEndpoint(): LocalVoiceSettings['customSttEndpoint'] {
+      return readSettings().customSttEndpoint;
     },
 
     /** Free a local engine's VRAM immediately (settings toggle / unload all). */

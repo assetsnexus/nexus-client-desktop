@@ -2,7 +2,7 @@
   "name": "@nexus/calendar-client",
   "version": "0.1.0",
   "description": "Headless region calendar client for the Nexus desktop/CLI: typed anx.calendar.* calls plus pure agenda helpers",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

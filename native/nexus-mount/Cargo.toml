@@ -1,0 +1,31 @@
+[package]
+name = "nexus-mount"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native FUSE/WinFsp/macFUSE helper that projects a Nexus storage bucket as a local directory"
+authors = ["AssetsNexus Team"]
+
+[[bin]]
+name = "nexus-mount"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ureq = { version = "2", default-features = false, features = ["json", "tls"] }
+parking_lot = "0.12"
+
+[target.'cfg(unix)'.dependencies]
+# Kernel FUSE bindings (Linux + macOS/macFUSE). `abi-7-31` selects the newest
+# wire ABI without requiring libfuse/pkg-config at build time.
+fuser = { version = "0.14", default-features = false, features = ["abi-7-31"] }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

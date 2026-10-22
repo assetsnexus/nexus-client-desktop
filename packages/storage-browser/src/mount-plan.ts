@@ -126,6 +126,8 @@ export type JournalEntry = {
   op: 'write' | 'delete' | 'mkdir';
   /** Base64 payload for writes. */
   contentBase64?: string;
+  /** Remote file id when the mutation targets an existing object. */
+  fileId?: string;
   /** Revision the write was based on, for conflict detection. */
   baseRevision: number | null;
   enqueuedAt: string;

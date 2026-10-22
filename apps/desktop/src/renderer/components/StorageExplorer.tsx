@@ -4,6 +4,7 @@ import {
   type StorageCapabilities,
   type StorageFileRow,
   type StoragePage,
+  type StorageRevisionPage,
   type StorageWorkspaceRow,
 } from '../bridge.js';
 
@@ -61,6 +62,8 @@ export function StorageExplorer() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<StorageFileRow | null>(null);
+  const [revisions, setRevisions] = useState<StorageRevisionPage | null>(null);
+  const [revisionsBusy, setRevisionsBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   const loadWorkspaces = useCallback(async () => {
@@ -189,6 +192,43 @@ export function StorageExplorer() {
   );
 
   const items = useMemo(() => page?.items ?? [], [page]);
+
+  const loadRevisions = useCallback(async (file: StorageFileRow) => {
+    setRevisionsBusy(true);
+    setError(null);
+    try {
+      setRevisions(await bridge.storageListRevisions(file.id, 100));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to load revisions');
+      setRevisions(null);
+    } finally {
+      setRevisionsBusy(false);
+    }
+  }, []);
+
+  const onRevert = useCallback(
+    async (file: StorageFileRow, revisionNo: number) => {
+      if (!window.confirm(`Revert "${file.name}" to revision ${revisionNo}? This writes a new revision.`)) return;
+      try {
+        await bridge.storageRevertRevision(file.id, revisionNo);
+        await loadRevisions(file);
+        refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'revert failed');
+      }
+    },
+    [loadRevisions, refresh],
+  );
+
+  // Load revision history whenever the selected file changes.
+  useEffect(() => {
+    if (!selected) {
+      setRevisions(null);
+      return;
+    }
+    void loadRevisions(selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
 
   return (
     <div style={panelStyle}>
@@ -360,6 +400,45 @@ export function StorageExplorer() {
                   Restore
                 </button>
               )}
+            </div>
+          ) : null}
+
+          {selected && mode === 'active' ? (
+            <div style={{ borderTop: '1px solid #2a333d', padding: 10, maxHeight: 220, overflow: 'auto' }}>
+              <div style={{ color: '#6b7784', fontSize: 11, textTransform: 'uppercase', marginBottom: 6 }}>
+                Revision history {revisionsBusy ? '· loading…' : ''}
+              </div>
+              {revisions && revisions.items.length === 0 ? (
+                <p style={{ color: '#6b7784', fontSize: 12 }}>No recorded revisions yet.</p>
+              ) : null}
+              {(revisions?.items ?? []).map((r) => (
+                <div
+                  key={r.revisionNo}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '4px 0',
+                    borderBottom: '1px solid #1e252d',
+                  }}
+                >
+                  <span style={{ fontSize: 12, color: '#c7d2de', width: 52 }}>rev {r.revisionNo}</span>
+                  <span style={{ fontSize: 11, color: '#8a97a5', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {r.command}
+                    {r.reason ? ` · ${r.reason}` : ''}
+                  </span>
+                  <span style={{ fontSize: 11, color: '#6b7784', whiteSpace: 'nowrap' }}>
+                    {r.sizeBytes} B
+                  </span>
+                  {r.revisionNo === revisions?.currentRevisionNo ? (
+                    <span style={{ fontSize: 11, color: '#8fd08f' }}>current</span>
+                  ) : (
+                    <button type="button" style={btnStyle} onClick={() => void onRevert(selected, r.revisionNo)}>
+                      Restore
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           ) : null}
         </section>

@@ -216,6 +216,60 @@ export function createStorageClient(send: StorageCommandSender) {
       : [];
   }
 
+  /** Every folder in a workspace (flat), so a path can be resolved to an id. */
+  async function folderTree(workspaceId: string) {
+    return folderList(workspaceId, '*');
+  }
+
+  /** Create a folder (used to materialize remote sub-dirs during sync). */
+  async function createFolder(input: {
+    workspaceId: string;
+    name: string;
+    parentFolderId?: string | null;
+  }): Promise<{ id: string; name: string; parentFolderId: string | null }> {
+    const payload: Record<string, unknown> = {
+      workspaceId: input.workspaceId,
+      name: input.name,
+    };
+    if (input.parentFolderId != null) payload.parentFolderId = input.parentFolderId;
+    const raw = await send('anx.storage.workspace.folder.create', payload);
+    const fail = envelopeFailed(raw);
+    if (fail.failed) throw new StorageCommandError('anx.storage.workspace.folder.create', fail);
+    const r = asRecord(unwrapEnvelope(raw).folder ?? unwrapEnvelope(raw));
+    return {
+      id: str(r._id ?? r.id) ?? '',
+      name: str(r.name) ?? input.name,
+      parentFolderId: str(r.parentFolderId),
+    };
+  }
+
+  /** Delete a file record (used for two-way deletes). */
+  async function deleteFile(fileId: string) {
+    const raw = await send('anx.storage.bucket.trash-file', { fileId });
+    const fail = envelopeFailed(raw);
+    if (fail.failed) throw new StorageCommandError('anx.storage.bucket.trash-file', fail);
+    return unwrapEnvelope(raw);
+  }
+
+  /**
+   * Fetch a file's bytes (presigned GET, falling back to the region proxy), so
+   * the sync daemon can materialize a local copy.
+   */
+  async function downloadBytes(input: {
+    fileId: string;
+    regionBaseUrl: string;
+    fetchFn?: typeof fetch;
+  }): Promise<Uint8Array> {
+    const fetchFn = input.fetchFn ?? fetch;
+    const { url } = await resolveDownloadUrl({
+      fileId: input.fileId,
+      regionBaseUrl: input.regionBaseUrl,
+    });
+    const res = await fetchFn(url);
+    if (!res.ok) throw new Error(`download failed (${res.status})`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
   /** Backend capabilities matrix; URL + byte-transfer transports differ per backend. */
   async function backendCapabilities(kind?: string): Promise<BackendCapabilities> {
     const raw = await send(
@@ -392,22 +446,122 @@ export function createStorageClient(send: StorageCommandSender) {
     return unwrapEnvelope(raw);
   }
 
+  // ─── Revision history / revert ────────────────────────────────────────────
+
+  /** List a file's revision history (newest first). */
+  async function listRevisions(input: { fileId: string; limit?: number }): Promise<RevisionPage> {
+    const payload: Record<string, unknown> = { fileId: input.fileId };
+    if (input.limit) payload.limit = input.limit;
+    const raw = await send('anx.file.revision.list', payload);
+    const fail = envelopeFailed(raw);
+    if (fail.failed) throw new StorageCommandError('anx.file.revision.list', fail);
+    const body = unwrapEnvelope(raw);
+    const items = Array.isArray(body.items) ? body.items.map(parseRevisionRow) : [];
+    return {
+      fileId: str(body.fileId) ?? input.fileId,
+      currentRevisionNo: num(body.currentRevisionNo),
+      sha256: str(body.sha256),
+      items,
+    };
+  }
+
+  /** Read a past revision's bytes (base64), decoded to a Uint8Array. */
+  async function readRevision(input: { fileId: string; revisionNo: number }): Promise<{ bytes: Uint8Array; sizeBytes: number; contentType: string }> {
+    const raw = await send('anx.file.revision.read', {
+      fileId: input.fileId,
+      revisionNo: input.revisionNo,
+    });
+    const fail = envelopeFailed(raw);
+    if (fail.failed) throw new StorageCommandError('anx.file.revision.read', fail);
+    const body = unwrapEnvelope(raw);
+    const base64 = str(body.base64Data) ?? '';
+    return {
+      bytes: new Uint8Array(Buffer.from(base64, 'base64')),
+      sizeBytes: num(body.sizeBytes) ?? 0,
+      contentType: str(body.contentType) ?? 'application/octet-stream',
+    };
+  }
+
+  /** Revert a file to a past revision (append-only; creates a new revision). */
+  async function revertRevision(input: {
+    fileId: string;
+    revisionNo: number;
+    ifMatchRevision?: number;
+  }): Promise<{ revertedTo: number; revisionNo: number; sha256: string | null }> {
+    const payload: Record<string, unknown> = {
+      fileId: input.fileId,
+      revisionNo: input.revisionNo,
+    };
+    if (input.ifMatchRevision != null) payload.ifMatchRevision = input.ifMatchRevision;
+    const raw = await send('anx.file.revision.revert', payload);
+    const fail = envelopeFailed(raw);
+    if (fail.failed) throw new StorageCommandError('anx.file.revision.revert', fail);
+    const body = unwrapEnvelope(raw);
+    return {
+      revertedTo: num(body.revertedTo) ?? input.revisionNo,
+      revisionNo: num(body.revisionNo) ?? 0,
+      sha256: str(body.sha256),
+    };
+  }
+
   return {
     listBucketFiles,
     listWorkspaces,
     listContracts,
     folderList,
+    folderTree,
+    createFolder,
     backendCapabilities,
     uploadInit,
     upload,
     resolveDownloadUrl,
+    downloadBytes,
     listTrash,
     renameFile,
     moveFile,
     copyFile,
     trashFile,
+    deleteFile,
     restoreFile,
     subscriptionContingent,
+    listRevisions,
+    readRevision,
+    revertRevision,
+  };
+}
+
+/** One revision row in a file's history. */
+export type RevisionRow = {
+  revisionNo: number;
+  parentRevisionNo: number;
+  sizeBytes: number;
+  sha256: string;
+  contentType: string;
+  command: string;
+  reason: string | null;
+  createdBy: Record<string, unknown>;
+  createdAt: string | null;
+};
+
+export type RevisionPage = {
+  fileId: string;
+  currentRevisionNo: number | null;
+  sha256: string | null;
+  items: RevisionRow[];
+};
+
+export function parseRevisionRow(raw: unknown): RevisionRow {
+  const r = asRecord(raw);
+  return {
+    revisionNo: num(r.revisionNo) ?? 0,
+    parentRevisionNo: num(r.parentRevisionNo) ?? 0,
+    sizeBytes: num(r.sizeBytes) ?? 0,
+    sha256: str(r.sha256) ?? '',
+    contentType: str(r.contentType) ?? 'application/octet-stream',
+    command: str(r.command) ?? '',
+    reason: str(r.reason),
+    createdBy: asRecord(r.createdBy),
+    createdAt: str(r.createdAt),
   };
 }
 

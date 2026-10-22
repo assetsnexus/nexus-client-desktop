@@ -2,7 +2,7 @@
   "name": "@nexus/local-voice",
   "version": "0.1.0",
   "description": "Desktop-local STT/TTS model manager: catalog, downloads, on-device engine lifecycle with idle auto-unload, and system VRAM/RAM probing",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

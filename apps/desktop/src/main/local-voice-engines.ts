@@ -33,6 +33,12 @@ export type CreateEngineRuntimeOptions = {
   modelsDir: string;
   /** Resolve an engine id to a runnable command + args (null = not runnable). */
   resolve?: (id: string, kind: 'stt' | 'tts') => { command: string; args: string[] } | null;
+  /**
+   * Map a bare binary name to a concrete path — used so the lifecycle spawns the
+   * `whisper-server` the app downloaded (in the user's data folder) rather than
+   * requiring a manual install on the system PATH.
+   */
+  resolveBinary?: (binary: string) => string;
   /** Spawn override (tests). */
   spawnFn?: typeof spawn;
 };
@@ -58,6 +64,8 @@ function makeProcessRuntime(entry: {
   kind: 'stt' | 'tts';
   command: string;
   args: string[];
+  /** Map the command to a concrete path at spawn time (may change per load). */
+  resolveCommand?: (command: string) => string;
 }, spawnFn: typeof spawn): LocalVoiceRuntimeEntry {
   let proc: ChildProcess | null = null;
   return {
@@ -65,7 +73,10 @@ function makeProcessRuntime(entry: {
     kind: entry.kind,
     async load() {
       if (proc) return;
-      proc = spawnFn(entry.command, entry.args, { stdio: 'ignore', detached: false });
+      // Resolve lazily: the user may install the binary *after* startup, so a
+      // path captured at construction would go stale.
+      const command = entry.resolveCommand?.(entry.command) ?? entry.command;
+      proc = spawnFn(command, entry.args, { stdio: 'ignore', detached: false });
       proc.on('exit', () => {
         proc = null;
       });
@@ -94,15 +105,26 @@ export function createDefaultEngineRuntime(
   options: CreateEngineRuntimeOptions,
 ): LocalVoiceEngineRuntime {
   const spawnFn = options.spawnFn ?? spawn;
+  const resolveBinary = options.resolveBinary;
   const entries: LocalVoiceRuntimeEntry[] = [];
   for (const def of DEFAULT_ENGINES) {
     if (options.resolve) {
       const resolved = options.resolve(def.id, def.kind);
       if (!resolved) continue;
-      entries.push(makeProcessRuntime({ id: def.id, kind: def.kind, ...resolved }, spawnFn));
+      entries.push(
+        makeProcessRuntime(
+          { id: def.id, kind: def.kind, ...resolved, resolveCommand: resolveBinary },
+          spawnFn,
+        ),
+      );
       continue;
     }
-    entries.push(makeProcessRuntime({ id: def.id, kind: def.kind, command: def.binary, args: def.args }, spawnFn));
+    entries.push(
+      makeProcessRuntime(
+        { id: def.id, kind: def.kind, command: def.binary, args: def.args, resolveCommand: resolveBinary },
+        spawnFn,
+      ),
+    );
   }
   // A model-specific runtime is added on demand by the host once a model is
   // installed; the base set above is always available as the fallback.

@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { LocalModelsPanel } from './LocalModelsPanel.js';
 import { LocalVoicePanel } from './LocalVoicePanel.js';
+import { WakeSettingsPanel } from './WakeSettingsPanel.js';
+import { ErrorBoundary } from './ErrorBoundary.js';
+import { LanguageSelector } from './LanguageSelector.js';
+import { useI18n } from '../i18n/index.js';
 import {
   bridge,
   type AssetAgentDiscoverySnapshot,
   type DesktopConnectionConfig,
   type LocalCommandSkill,
-  type LocalModelBackendStatus,
-  type LocalModelsSnapshot,
   type LocalRunnerSettings,
   type LocalRunnerState,
+  type NotificationSettings,
   type ToolsConfig,
   type WorkspaceRoot,
 } from '../bridge.js';
@@ -101,12 +105,6 @@ function HealthChip({ health }: { health: string }) {
   );
 }
 
-function formatBytes(bytes?: number | null): string {
-  if (typeof bytes !== 'number' || !Number.isFinite(bytes)) return '';
-  const gb = bytes / 1024 ** 3;
-  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(0)} MB`;
-}
-
 /**
  * Settings: connection targets (region/gateway/portal + custom CA) and the
  * desktop-local model health list. Local models are probed on this machine by
@@ -121,15 +119,13 @@ export function SettingsPanel({
   onConnectionChange: (next: DesktopConnectionConfig) => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const [regionUrl, setRegionUrl] = useState(connection.regionUrl);
   const [gatewayUrl, setGatewayUrl] = useState(connection.gatewayUrl ?? '');
   const [portalUrl, setPortalUrl] = useState(connection.portalUrl ?? '');
   const [customCaPem, setCustomCaPem] = useState(connection.customCaPem ?? '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-
-  const [models, setModels] = useState<LocalModelsSnapshot | null>(null);
-  const [modelsBusy, setModelsBusy] = useState(false);
 
   const [runner, setRunner] = useState<LocalRunnerState | null>(null);
   const [runnerBusy, setRunnerBusy] = useState(false);
@@ -141,6 +137,44 @@ export function SettingsPanel({
   const [assetAgents, setAssetAgents] = useState<AssetAgentDiscoverySnapshot | null>(null);
   const [assetBusy, setAssetBusy] = useState(false);
 
+  const [notifications, setNotifications] = useState<NotificationSettings | null>(null);
+  const [notificationsBusy, setNotificationsBusy] = useState(false);
+  const [testSent, setTestSent] = useState(false);
+
+  useEffect(() => {
+    void bridge.getUiSettings().then((ui) => setNotifications(ui.notifications));
+  }, []);
+
+  const patchNotifications = useCallback(
+    async (patch: Partial<NotificationSettings>) => {
+      if (!notifications) return;
+      setNotificationsBusy(true);
+      setTestSent(false);
+      try {
+        const ui = await bridge.setUiSettings({
+          notifications: { ...notifications, ...patch },
+        });
+        setNotifications(ui.notifications);
+      } finally {
+        setNotificationsBusy(false);
+      }
+    },
+    [notifications],
+  );
+
+  const sendTestNotification = useCallback(async () => {
+    await bridge.notifyIncoming({
+      messageId: `test-${Date.now()}`,
+      conversationId: null,
+      contactId: null,
+      agentId: null,
+      senderName: 'Nexus',
+      preview: 'This is what a new-message notification looks like.',
+      title: 'Nexus',
+    }, { force: true });
+    setTestSent(true);
+  }, []);
+
   const refreshAssetAgents = useCallback(async (scan: boolean) => {
     setAssetBusy(true);
     try {
@@ -151,19 +185,6 @@ export function SettingsPanel({
       setAssetBusy(false);
     }
   }, []);
-
-  const refreshModels = useCallback(async () => {
-    setModelsBusy(true);
-    try {
-      setModels(await bridge.listLocalModels(true));
-    } finally {
-      setModelsBusy(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshModels();
-  }, [refreshModels]);
 
   useEffect(() => {
     void bridge.runnerGetState().then(setRunner);
@@ -247,6 +268,104 @@ export function SettingsPanel({
   return (
     <div style={wrap}>
       <section style={section}>
+        <h2 style={{ margin: 0, fontSize: 16 }}>{t('settings.language')}</h2>
+        <p style={{ margin: 0, color: '#6b7784', fontSize: 12 }}>{t('settings.language.help')}</p>
+        <LanguageSelector variant="field" />
+      </section>
+
+      <section style={section}>
+        <h2 style={{ margin: 0, fontSize: 16 }}>{t('settings.notifications')}</h2>
+        <p style={{ margin: 0, color: '#6b7784', fontSize: 12 }}>
+          {t('settings.notifications.help')}
+        </p>
+        {notifications ? (
+          <>
+            <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={notifications.enabled}
+                disabled={notificationsBusy}
+                onChange={(e) => void patchNotifications({ enabled: e.target.checked })}
+              />
+              <span style={{ color: '#e8eef4' }}>{t('settings.notifications.enabled')}</span>
+            </label>
+
+            <label style={field}>
+              <span>{t('settings.notifications.cardMode')}</span>
+              <select
+                style={input}
+                value={notifications.cardMode}
+                disabled={notificationsBusy || !notifications.enabled}
+                onChange={(e) =>
+                  void patchNotifications({
+                    cardMode: e.target.value === 'title_only' ? 'title_only' : 'full',
+                  })
+                }
+              >
+                <option value="full">{t('settings.notifications.cardMode.full')}</option>
+                <option value="title_only">{t('settings.notifications.cardMode.titleOnly')}</option>
+              </select>
+            </label>
+
+            <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={notifications.showSender}
+                disabled={notificationsBusy || !notifications.enabled}
+                onChange={(e) => void patchNotifications({ showSender: e.target.checked })}
+              />
+              <span style={{ color: '#e8eef4' }}>{t('settings.notifications.showSender')}</span>
+            </label>
+
+            <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={notifications.showPreview}
+                disabled={
+                  notificationsBusy ||
+                  !notifications.enabled ||
+                  notifications.cardMode === 'title_only'
+                }
+                onChange={(e) => void patchNotifications({ showPreview: e.target.checked })}
+              />
+              <span style={{ color: '#e8eef4' }}>{t('settings.notifications.showPreview')}</span>
+            </label>
+
+            <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={notifications.sound}
+                disabled={notificationsBusy || !notifications.enabled}
+                onChange={(e) => void patchNotifications({ sound: e.target.checked })}
+              />
+              <span style={{ color: '#e8eef4' }}>
+                {t('settings.notifications.sound')}{' '}
+                <span style={{ color: '#6b7784' }}>{t('settings.notifications.sound.help')}</span>
+              </span>
+            </label>
+
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button
+                type="button"
+                style={{ ...button, background: '#1c2430', borderColor: '#3a4654' }}
+                onClick={() => void sendTestNotification()}
+                disabled={notificationsBusy}
+              >
+                {t('settings.notifications.test')}
+              </button>
+              {testSent ? (
+                <span style={{ color: '#4ade80', fontSize: 12 }}>
+                  {t('settings.notifications.testSent')}
+                </span>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <p style={{ color: '#6b7784', fontSize: 12 }}>Loading…</p>
+        )}
+      </section>
+
+      <section style={section}>
         <h2 style={{ margin: 0, fontSize: 16 }}>Connection</h2>
         <p style={{ margin: 0, color: '#6b7784', fontSize: 12 }}>
           Region node and inference are cloud-hosted per region stack. The desktop is a client; the
@@ -292,36 +411,22 @@ export function SettingsPanel({
           {saved ? <span style={{ color: '#4ade80', fontSize: 12 }}>Saved</span> : null}
           <span style={{ flex: 1 }} />
           <button type="button" style={{ ...button, background: '#1c2430', borderColor: '#3a4654' }} onClick={onClose}>
-            Done
+            {t('settings.done')}
           </button>
         </div>
       </section>
 
-      <section style={section}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 16 }}>Local models</h2>
-          <span style={{ flex: 1 }} />
-          <button
-            type="button"
-            style={{ ...button, background: '#1c2430', borderColor: '#3a4654' }}
-            onClick={refreshModels}
-            disabled={modelsBusy}
-          >
-            {modelsBusy ? 'Checking…' : 'Refresh'}
-          </button>
-        </div>
-        <p style={{ margin: 0, color: '#6b7784', fontSize: 12 }}>
-          Detected on this machine. Ollama is enabled by default; ComfyUI is a preview placeholder.
-          Auto-discovery and manual backends come later.
-        </p>
+      <ErrorBoundary label="Local models">
+        <LocalModelsPanel />
+      </ErrorBoundary>
 
-        {models?.backends.map((status) => (
-          <LocalModelRow key={status.backend.id} status={status} />
-        ))}
-        {!models ? <p style={{ color: '#6b7784', fontSize: 12 }}>Checking…</p> : null}
-      </section>
+      <ErrorBoundary label="Local speech models">
+        <LocalVoicePanel />
+      </ErrorBoundary>
 
-      <LocalVoicePanel />
+      <ErrorBoundary label="Wake words">
+        <WakeSettingsPanel />
+      </ErrorBoundary>
 
       <section style={section}>
         <h2 style={{ margin: 0, fontSize: 16 }}>Local GPU runner (BYOK)</h2>
@@ -569,32 +674,6 @@ function LocalCommandRow({ skill }: { skill: LocalCommandSkill }) {
           </li>
         ))}
       </ul>
-    </div>
-  );
-}
-
-function LocalModelRow({ status }: { status: LocalModelBackendStatus }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
-      <div style={row}>
-        <strong style={{ fontSize: 14 }}>{status.backend.label}</strong>
-        <HealthChip health={status.health} />
-        <span style={{ color: '#6b7784', fontSize: 12 }}>{status.backend.baseUrl}</span>
-        <span style={{ flex: 1 }} />
-        <span style={{ color: '#6b7784', fontSize: 11 }}>
-          {status.models.length ? `${status.models.length} model(s)` : status.detail ?? ''}
-        </span>
-      </div>
-      {status.models.length ? (
-        <ul style={{ margin: '0 0 8px', paddingLeft: 18, color: '#9aa7b5', fontSize: 12 }}>
-          {status.models.map((m) => (
-            <li key={m.id}>
-              {m.name}
-              {formatBytes(m.sizeBytes) ? ` · ${formatBytes(m.sizeBytes)}` : ''}
-            </li>
-          ))}
-        </ul>
-      ) : null}
     </div>
   );
 }

@@ -161,7 +161,11 @@ export class CliSession {
       const code = await prompter.text('Enter the code', { secret: true });
       const out = await regionTwoFactorLogin(
         { baseUrl: connection.regionUrl, headers: { 'X-Anx-App': connection.appId } },
-        { authRequestId: login.challenge.authRequestId, code },
+        {
+          loginToken: login.challenge.loginToken,
+          method: login.challenge.factors[0] ?? 'email',
+          code,
+        },
       );
       this.token = out.token;
       this.identity = out.identity;

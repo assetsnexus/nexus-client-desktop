@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Nexus desktop client (Electron shell + renderer)",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "author": {
     "name": "AssetsNexus",
     "email": "desktop@assetsnexus.org"
@@ -19,7 +19,9 @@
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "node scripts/build-main.mjs",
     "build:renderer": "vite build",
-    "package": "npm run build && electron-builder --publish never",
+    "build:native": "node scripts/build-native.mjs",
+    "native:test": "cargo test --manifest-path ../../native/Cargo.toml && node ../../native/smoke-mount.mjs ../../native/target/release/nexus-mount",
+    "package": "npm run build && npm run build:native && electron-builder --publish never",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
   },
@@ -40,9 +42,11 @@
     "@nexus/node-core": "file:../../packages/node-core",
     "@nexus/scene-client": "file:../../../anx-npm-modules/packages/scene-client",
     "@nexus/storage-browser": "file:../../packages/storage-browser",
+    "@nexus/wake-word": "file:../../../anx-npm-modules/packages/wake-word",
     "@pixiv/three-vrm": "^3.5.5",
     "@pixiv/three-vrm-animation": "^3.5.5",
     "bonjour-service": "^1.4.4",
+    "onnxruntime-web": "^1.30.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "three": "^0.170.0",

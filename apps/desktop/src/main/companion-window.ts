@@ -95,6 +95,7 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
 
 /** Convenience for wiring the preload path from the main entry. */
 export function defaultCompanionPreloadPath(): string {
-  // `__dirname` inside the bundled main is `dist-electron`.
-  return join(__dirname, '../preload/preload.cjs');
+  // `__dirname` inside the bundled main is `dist-electron`; the preload is
+  // emitted to dist-electron/preload/, so it is a subfolder, not a sibling.
+  return join(__dirname, 'preload/preload.cjs');
 }

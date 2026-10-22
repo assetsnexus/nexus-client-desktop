@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   NexusChatApp,
   createNexusChat,
@@ -9,6 +9,21 @@ import {
 import '@nexus/chat-react/style.css';
 import { bridge, type AuthState, type DesktopConnectionConfig, type ToolsConfig } from '../bridge.js';
 import { DEFAULT_DESKTOP_TOOLS, localCommandTools } from '../tools/descriptors.js';
+import { createIncomingWatcher, resolveSenderName } from '../notifications/incoming.js';
+import { createWakeChatRouter } from '../wake/router.js';
+import type { SessionState } from '../wake/session.js';
+import { runDictation } from '../wake/dictation.js';
+import { createUtteranceSource } from '../wake/utterance.js';
+import { transcribeUtterance } from '../wake/transcribe.js';
+import { WakeOverlay } from './WakeOverlay.js';
+import { WakeQueueBanner } from './WakeQueueBanner.js';
+import {
+  dequeueUtterance,
+  enqueueUtterance,
+  dictationTranscribesInCloud,
+  type QueuedUtterance,
+  type WakeActivationMode,
+} from '../../shared/wake.js';
 
 type ChatIdentity = Parameters<typeof createRegionCommandClient>[0]['identity'];
 
@@ -22,9 +37,12 @@ type ChatIdentity = Parameters<typeof createRegionCommandClient>[0]['identity'];
 export function ChatHost({
   auth,
   connection,
+  wakeActivation,
 }: {
   auth: Extract<AuthState, { status: 'signed_in' }>;
   connection: DesktopConnectionConfig | null;
+  /** A wake routed from the shell; a new token means a new activation to run. */
+  wakeActivation?: { phrase: string; agentId: string | null; token: number } | null;
 }) {
   const [chat, setChat] = useState<NexusChat | null>(null);
   const [client, setClient] = useState<ReturnType<typeof createRegionCommandClient> | null>(null);
@@ -80,6 +98,182 @@ export function ChatHost({
     };
   }, [apiBaseUrl, identity]);
 
+  // Report inbound assistant messages to the main process, which raises an OS
+  // notification when the window is unattended. The watcher owns the "is this
+  // new?" logic (including history paging), so this effect stays a thin pipe.
+  useEffect(() => {
+    if (!chat) return;
+    const watcher = createIncomingWatcher();
+    const report = (state: ReturnType<NexusChat['getState']>) => {
+      const panel = state.panels[state.activePanelIndex];
+      const contact = state.contacts.find((c) => c.id === panel?.contactId) ?? null;
+      const incoming = watcher.observe({
+        conversationId: panel?.conversationId ?? state.conversationId ?? null,
+        messages: state.messages,
+        streaming: state.streaming,
+        historyLoading: Boolean(state.history?.loading || state.history?.loadingMore),
+      });
+      if (incoming.length === 0) return;
+      const senderName = resolveSenderName({
+        agentName: contact?.name ?? null,
+        conversationTitle: null,
+      });
+      for (const message of incoming) {
+        void bridge.notifyIncoming({
+          messageId: message.id,
+          conversationId: panel?.conversationId ?? state.conversationId ?? null,
+          contactId: panel?.contactId ?? null,
+          agentId: contact?.agentId ?? null,
+          senderName,
+          preview: message.content,
+          title: senderName,
+        });
+      }
+    };
+    // Establish the baseline for whatever is already on screen.
+    report(chat.getState());
+    return chat.subscribe(report);
+  }, [chat]);
+
+  // Wake activation: main raises the window and forwards the phrase + mapped
+  // agent. Depending on the configured activation mode we either open the chat,
+  // show the compact overlay, or open the companion window — then capture one
+  // utterance and hold the transcript for review. A wake carries no authority.
+  const wakeRouterRef = useRef<ReturnType<typeof createWakeChatRouter> | null>(null);
+  const [wakeSession, setWakeSession] = useState<SessionState | null>(null);
+  const [wakeMode, setWakeMode] = useState<WakeActivationMode>('chat');
+  const [wakeAgent, setWakeAgent] = useState<{ name: string; avatarUrl: string | null } | null>(null);
+  const [queued, setQueued] = useState<QueuedUtterance[]>([]);
+
+  // Surface any transcript an earlier wake left behind under the `queue` policy.
+  useEffect(() => {
+    void bridge.wakeGetQueue().then(setQueued).catch(() => setQueued([]));
+  }, []);
+
+  useEffect(() => {
+    if (!chat || !client) return;
+    const router = createWakeChatRouter({
+      getSettings: () => bridge.wakeGetSettings(),
+      present: async (mode, target) => {
+        setWakeMode(mode);
+        const agentRow = chat.getState().contacts.find((c) => c.id === target.contactId) ?? null;
+        setWakeAgent({
+          name: target.agentName ?? agentRow?.name ?? 'Agent',
+          avatarUrl: agentRow?.avatarUrl ?? null,
+        });
+        if (mode === 'companion') {
+          // The companion window runs its own realtime voice session, so the
+          // router must not open a second microphone capture.
+          await bridge.companionOpen({
+            contactId: target.contactId,
+            conversationId: chat.getState().conversationId ?? null,
+            agentId: target.agentId,
+            title: target.agentName ?? null,
+            avatarUrl: agentRow?.avatarUrl ?? null,
+          });
+          return { dictate: false };
+        }
+        if (mode === 'chat') await chat.openContact(target.contactId);
+        return { dictate: true };
+      },
+      dictate: async (onPartial) => {
+        const session = runDictation({
+          source: createUtteranceSource(),
+          onPartial,
+          transcribe: (blob) =>
+            transcribeUtterance(
+              {
+                client,
+                listModels: () => chat.listAvailableModels(),
+              },
+              blob,
+            ),
+        });
+        return session.done;
+      },
+      listAgents: () => chat.getState().contacts.map((c) => ({ contactId: c.id, name: c.name })),
+      /**
+       * Whether dictation transcribes in the cloud. Uses the same capability
+       * source as the meeting bar: a `local` STT engine only truly runs on-device
+       * when a model is installed (or a custom local endpoint is set).
+       */
+      transcriptionIsCloud: async () => {
+        const local = await bridge
+          .localVoiceGetState()
+          .then((s) => ({
+            engine: s.settings.sttEngine,
+            localAvailable: s.models.some(
+              (m) => m.kind === 'stt' && m.installState === 'installed',
+            ),
+            custom: Boolean(s.settings.customSttEndpoint?.baseUrl),
+          }))
+          .catch(() => ({ engine: 'cloud' as const, localAvailable: false, custom: false }));
+        return dictationTranscribesInCloud({
+          sttEngine: local.engine,
+          localSttAvailable: local.localAvailable,
+          customSttEndpoint: local.custom,
+        });
+      },
+      send: async ({ contactId, text }) => {
+        const conversationId = chat.getState().conversationId ?? undefined;
+        await chat.sendMessage(text, { contactId, conversationId });
+      },
+      enqueue: (entry) => {
+        setQueued((prev) => {
+          const next = enqueueUtterance(prev, entry);
+          void bridge.wakeSetQueue(next).catch(() => undefined);
+          return next;
+        });
+      },
+      onSessionChange: (session) => setWakeSession(session),
+      onError: (message) => console.warn('anx.wake.route failed', message),
+    });
+    wakeRouterRef.current = router;
+    return () => {
+      router.cancel();
+      wakeRouterRef.current = null;
+    };
+  }, [chat, client]);
+
+  /**
+   * Route an activation handed down by the shell. `token` is the effect key so a
+   * repeated wake (same phrase/agent) is not swallowed as an identical value.
+   */
+  const routeToken = wakeActivation?.token ?? 0;
+  const routePhrase = wakeActivation?.phrase ?? '';
+  const routeAgentId = wakeActivation?.agentId ?? null;
+  useEffect(() => {
+    if (!routeAgentId || !routeToken) return;
+    void wakeRouterRef.current?.route({
+      agentId: routeAgentId,
+      contactId: routeAgentId,
+      agentName: null,
+      phrase: routePhrase,
+    });
+  }, [routeToken, routeAgentId, routePhrase]);
+
+  const dismissQueued = useCallback((id: string) => {
+    setQueued((prev) => {
+      const next = dequeueUtterance(prev, id);
+      void bridge.wakeSetQueue(next).catch(() => undefined);
+      return next;
+    });
+  }, []);
+
+  const submitQueued = useCallback(
+    async (entry: QueuedUtterance) => {
+      if (!chat) return;
+      if (entry.agentId) await chat.openContact(entry.agentId);
+      const conversationId = chat.getState().conversationId ?? undefined;
+      await chat.sendMessage(entry.text, {
+        contactId: entry.agentId ?? undefined,
+        conversationId,
+      });
+      dismissQueued(entry.id);
+    },
+    [chat, dismissQueued],
+  );
+
   if (error) {
     return <p style={{ padding: 24, color: '#f2a1a1' }}>{error}</p>;
   }
@@ -92,6 +286,13 @@ export function ChatHost({
 
   return (
     <div style={{ height: '100%', minHeight: 0, position: 'relative' }}>
+      {queued.length ? (
+        <WakeQueueBanner
+          entries={queued}
+          onSend={(entry) => void submitQueued(entry)}
+          onDismiss={dismissQueued}
+        />
+      ) : null}
       {activeVoice?.contactId ? (
         <div
           style={{
@@ -169,6 +370,15 @@ export function ChatHost({
           }
         }}
       />
+      {wakeSession ? (
+        <WakeOverlay
+          session={wakeSession}
+          mode={wakeMode}
+          agent={wakeAgent}
+          onSubmit={() => void wakeRouterRef.current?.submit()}
+          onCancel={() => wakeRouterRef.current?.cancel()}
+        />
+      ) : null}
     </div>
   );
 }

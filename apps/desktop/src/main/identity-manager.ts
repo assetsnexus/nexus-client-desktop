@@ -227,5 +227,21 @@ export function createIdentityManager(options: IdentityManagerOptions) {
     reset(): IdentitySnapshot {
       return persist(createIdentityStoreState({ accountSwitcherEnabled: state.accountSwitcherEnabled }));
     },
+
+    /**
+     * The raw active token (or null). Used by the logout manager to end the
+     * session without a region round-trip.
+     */
+    currentToken(): string | null {
+      return activeIdentity(state)?.token ?? null;
+    },
+
+    /**
+     * Drop the whole local identity index (permanent logout): every account and
+     * token is forgotten. A `switch_user` logout keeps it.
+     */
+    clearAll(): IdentitySnapshot {
+      return persist(createIdentityStoreState({ accountSwitcherEnabled: state.accountSwitcherEnabled }));
+    },
   };
 }

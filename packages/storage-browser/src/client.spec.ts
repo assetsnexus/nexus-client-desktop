@@ -312,3 +312,58 @@ describe('bytesToBase64', () => {
     expect(bytesToBase64(new Uint8Array([104, 105]))).toBe('aGk=');
   });
 });
+
+describe('revision commands', () => {
+  const revEnvelope = {
+    ok: true,
+    data: {
+      fileId: 'f1',
+      currentRevisionNo: 3,
+      sha256: 'cur',
+      items: [
+        {
+          revisionNo: 2,
+          parentRevisionNo: 1,
+          sizeBytes: 5,
+          sha256: 'r2',
+          contentType: 'text/plain',
+          command: 'anx.storage.file.partial-edit',
+          reason: 'tweak',
+          createdBy: { userId: 'u1' },
+          createdAt: '2026-03-01T00:00:00.000Z',
+        },
+      ],
+    },
+  };
+
+  it('lists revisions and parses rows', async () => {
+    const send = sender({ 'anx.file.revision.list': revEnvelope });
+    const client = createStorageClient(send as never);
+    const page = await client.listRevisions({ fileId: 'f1' });
+    expect(page.currentRevisionNo).toBe(3);
+    expect(page.items[0]).toMatchObject({ revisionNo: 2, sha256: 'r2', reason: 'tweak' });
+  });
+
+  it('reads a revision and decodes base64', async () => {
+    const send = sender({
+      'anx.file.revision.read': { ok: true, data: { base64Data: Buffer.from('hello').toString('base64'), sizeBytes: 5, contentType: 'text/plain' } },
+    });
+    const client = createStorageClient(send as never);
+    const out = await client.readRevision({ fileId: 'f1', revisionNo: 2 });
+    expect(Buffer.from(out.bytes).toString('utf8')).toBe('hello');
+  });
+
+  it('reverts and returns the new revision', async () => {
+    const send = sender({ 'anx.file.revision.revert': { ok: true, data: { revertedTo: 2, revisionNo: 4, sha256: 'new' } } });
+    const client = createStorageClient(send as never);
+    const out = await client.revertRevision({ fileId: 'f1', revisionNo: 2, ifMatchRevision: 3 });
+    expect(out).toEqual({ revertedTo: 2, revisionNo: 4, sha256: 'new' });
+    expect(send).toHaveBeenCalledWith('anx.file.revision.revert', { fileId: 'f1', revisionNo: 2, ifMatchRevision: 3 });
+  });
+
+  it('throws a StorageCommandError on failure', async () => {
+    const send = sender({ 'anx.file.revision.list': { ok: false, code: 'NOT_FOUND', message: 'no file' } });
+    const client = createStorageClient(send as never);
+    await expect(client.listRevisions({ fileId: 'x' })).rejects.toBeInstanceOf(StorageCommandError);
+  });
+});

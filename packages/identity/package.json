@@ -2,7 +2,7 @@
   "name": "@nexus/identity",
   "version": "0.1.0",
   "description": "Headless multi-identity / multi-account store and org-membership switch client for the Nexus desktop app and CLI",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

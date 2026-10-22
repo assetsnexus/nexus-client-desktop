@@ -3,10 +3,15 @@ import { MeetingView } from '@nexus/meetings-react';
 import {
   applyModeration,
   detectImmersiveVrSupport,
+  hasLiveVideo,
   primaryMeetingAgent,
+  startCameraCapture,
+  startScreenCapture,
+  stopMediaStream,
   type ImmersiveVrSupport,
   type MeetingCardModel,
   type MeetingVoiceMode,
+  type MediaStreamLike,
   type RoomMediaSession,
   type XrSystemLike,
 } from '@nexus/meetings-core';
@@ -19,6 +24,7 @@ import {
 import type { SceneRoom } from '@nexus/character-kit';
 import { bridge, type AuthState, type DesktopConnectionConfig } from '../bridge.js';
 import { projectRoomSession } from '../meetings/room-session.js';
+import { attachCameraStream, detachCameraStream } from '../meetings/camera.js';
 import { createMeetingVoiceHost, voiceSurfaceView } from '../meetings/meeting-voice.js';
 import { MeetingScenePanel } from './MeetingScenePanel.js';
 import type { MeetingRoomRow, MeetingVoiceAvailability } from '../../shared/ipc.js';
@@ -89,9 +95,18 @@ export function MeetingRoomPanel({
 }) {
   const [room, setRoom] = useState<MeetingRoomRow | null>(null);
   const [session, setSession] = useState<RoomMediaSession | null>(null);
+  // Phase 7d: mirror the session in a ref so moderation handlers can read the
+  // current roster synchronously when building the command payload.
+  const sessionRef = useRef<RoomMediaSession | null>(null);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
   const [title, setTitle] = useState('Meeting');
   const [error, setError] = useState<string | null>(null);
   const [vr, setVr] = useState<ImmersiveVrSupport | null>(null);
+  const [vrActive, setVrActive] = useState(false);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [voiceCaps, setVoiceCaps] = useState<MeetingVoiceAvailability | null>(null);
   const [voiceMode, setVoiceMode] = useState<MeetingVoiceMode | null>(null);
   const [voiceView, setVoiceView] = useState<ReturnType<typeof voiceSurfaceView> | null>(null);
@@ -102,6 +117,9 @@ export function MeetingRoomPanel({
   const chatRef = useRef<NexusChat | null>(null);
   const sceneRoomRef = useRef<SceneRoom | null>(null);
   const lipSyncStopRef = useRef<(() => void) | null>(null);
+  const cameraStreamRef = useRef<MediaStreamLike | null>(null);
+  const screenStreamRef = useRef<MediaStreamLike | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     void detectImmersiveVrSupport(browserXr()).then(setVr);
@@ -181,6 +199,20 @@ export function MeetingRoomPanel({
   );
 
   const agent = session ? primaryMeetingAgent(session) : null;
+
+  // Phase 7d: enforce the primary agent's inbound moderation locally. When a
+  // moderator disables the agent's listening (or mutes it), the meeting silences
+  // the agent's inbound audio without ending the call; re-enabling restores it.
+  const primaryAgentMuted = agent ? agent.muted === true || agent.listening === false : false;
+  useEffect(() => {
+    const chat = chatRef.current;
+    if (!chat) return;
+    try {
+      chat.setRemoteMuted?.(primaryAgentMuted);
+    } catch {
+      /* older chat facade without remote mute — non-fatal */
+    }
+  }, [primaryAgentMuted]);
 
   const startVoice = useCallback(async () => {
     const chat = chatRef.current;
@@ -267,24 +299,144 @@ export function MeetingRoomPanel({
 
   const onModerate = useCallback(
     (participantId: string, action: 'mute' | 'disable-listening' | 'set-volume', value: boolean | number) => {
-      setSession((prev) => {
-        if (!prev) return prev;
-        if (action === 'mute') {
-          return applyModeration(prev, { action: 'mute', participantId, muted: Boolean(value) });
-        }
-        if (action === 'disable-listening') {
-          // The view passes the *current* listening flag; disable == !listening.
-          return applyModeration(prev, {
-            action: 'disable-listening',
-            participantId,
-            disabled: Boolean(value),
-          });
-        }
-        return applyModeration(prev, { action: 'set-volume', participantId, volume: Number(value) });
-      });
+      // rebuild the next session synchronously so we can derive the exact
+      // moderation payload without reading state from a stale closure.
+      const current = sessionRef.current;
+      if (!current) return;
+      let nextSession: RoomMediaSession;
+      if (action === 'mute') {
+        nextSession = applyModeration(current, { action: 'mute', participantId, muted: Boolean(value) });
+      } else if (action === 'disable-listening') {
+        // The view passes the *current* listening flag; disable == !listening.
+        nextSession = applyModeration(current, {
+          action: 'disable-listening',
+          participantId,
+          disabled: Boolean(value),
+        });
+      } else {
+        nextSession = applyModeration(current, {
+          action: 'set-volume',
+          participantId,
+          volume: Number(value),
+        });
+      }
+      setSession(nextSession);
+
+      // `set-volume` is a purely local playback concern and never round-trips.
+      if (action === 'set-volume') return;
+      const target = nextSession.participants.find((p) => p.id === participantId);
+      if (!target) return;
+
+      const client = createRegionCommandClient({ apiBaseUrl, identity });
+      void client
+        .send('anx.communicate.rooms.participants.moderate', {
+          roomId,
+          participantType: target.kind,
+          participantId,
+          muted: target.muted,
+          // Only meaningful for agent seats; the server rejects it for humans.
+          listening: target.kind === 'user' ? undefined : target.listening,
+          videoEnabled: target.transport === 'video' || target.transport === 'video_screenshare',
+        })
+        .then((res) => {
+          const r = res as { ok?: boolean; message?: string } | null;
+          if (!r || r.ok !== true) {
+            setNotice(r?.message ?? 'Moderation was refused.');
+            setSession(current);
+          }
+        })
+        .catch((err: unknown) => {
+          setNotice(err instanceof Error ? err.message : 'Moderation failed.');
+          // Revert optimistic state and re-hydrate from the server so the UI
+          // never drifts from the persisted room seat.
+          setSession(current);
+          void load();
+        });
     },
-    [],
+    [apiBaseUrl, identity, roomId, load],
   );
+
+  // Phase 12a: enter/exit the immersive VR preview on the Scene tab's live
+  // `SceneRoom`. `SceneRoom.enterPhoneVr` prefers WebXR `immersive-vr` and falls
+  // back to IMU stereo, so this is the same rail the portal uses. The scene room
+  // is only present once the ClusterRoomViewer has mounted.
+  const toggleVr = useCallback(async () => {
+    const sceneRoom = sceneRoomRef.current;
+    if (!sceneRoom) {
+      setNotice('Open the Scene tab and wait for the 3D room to load before entering VR.');
+      return;
+    }
+    try {
+      if (vrActive) {
+        const status = await sceneRoom.exitPhoneVr();
+        setVrActive(status.active);
+        setNotice(status.errorMessage);
+      } else {
+        const status = await sceneRoom.enterPhoneVr();
+        setVrActive(status.active);
+        setNotice(status.active ? null : status.message);
+      }
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not start the VR session.');
+    }
+  }, [vrActive]);
+
+  // Phase 7c: publish the local webcam. Capture is a browser capability; the
+  // resulting stream is attached to the local preview <video> and handed to the
+  // room transport. Toggling off stops every track so the camera light clears.
+  const toggleCamera = useCallback(async () => {
+    if (cameraStreamRef.current) {
+      stopMediaStream(cameraStreamRef.current);
+      cameraStreamRef.current = null;
+      detachCameraStream(localVideoRef.current);
+      setCameraOn(false);
+      return;
+    }
+    const res = await startCameraCapture({ withAudio: true });
+    if (!res.ok) {
+      setNotice(res.message);
+      return;
+    }
+    cameraStreamRef.current = res.stream;
+    setCameraOn(hasLiveVideo(res.stream));
+    setNotice(null);
+    if (localVideoRef.current) attachCameraStream(res.stream, localVideoRef.current);
+  }, []);
+
+  // Phase 7c: publish a screen/window. Electron answers getDisplayMedia via the
+  // main-process display-media handler.
+  const toggleShare = useCallback(async () => {
+    if (screenStreamRef.current) {
+      stopMediaStream(screenStreamRef.current);
+      screenStreamRef.current = null;
+      setSharing(false);
+      if (localVideoRef.current && !cameraStreamRef.current) detachCameraStream(localVideoRef.current);
+      if (localVideoRef.current && cameraStreamRef.current) {
+        attachCameraStream(cameraStreamRef.current, localVideoRef.current);
+      }
+      return;
+    }
+    const res = await startScreenCapture({ withAudio: true });
+    if (!res.ok) {
+      setNotice(res.message);
+      return;
+    }
+    screenStreamRef.current = res.stream;
+    setSharing(true);
+    setNotice(null);
+    // Screenshare takes over the preview so the user sees what they publish.
+    if (localVideoRef.current) attachCameraStream(res.stream, localVideoRef.current);
+  }, []);
+
+  // Stop capture on unmount so the camera / screen never outlive the panel.
+  useEffect(() => {
+    return () => {
+      stopMediaStream(cameraStreamRef.current);
+      stopMediaStream(screenStreamRef.current);
+      cameraStreamRef.current = null;
+      screenStreamRef.current = null;
+    };
+  }, []);
 
   const sceneSlot = room ? (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -312,10 +464,11 @@ export function MeetingRoomPanel({
         <button
           type="button"
           style={btn}
-          disabled={vr?.status !== 'supported'}
+          disabled={vr?.status !== 'supported' && !vrActive}
           title={vr && vr.status !== 'supported' ? vr.detail : 'Open in an attached VR headset'}
+          onClick={() => void toggleVr()}
         >
-          Preview in VR headset
+          {vrActive ? 'Exit VR headset' : 'Preview in VR headset'}
         </button>
         {vr ? <span style={{ fontSize: 11, color: '#6b7784' }}>{vr.status}</span> : null}
         {voiceView?.errorMessage ? (
@@ -325,6 +478,83 @@ export function MeetingRoomPanel({
     </div>
   ) : (
     <p style={{ color: '#9aa7b5', fontSize: 13, margin: 0 }}>Loading the room scene…</p>
+  );
+
+  const videoSlot = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button type="button" style={btn} onClick={() => void toggleCamera()}>
+          {cameraOn ? 'Stop camera' : 'Start camera'}
+        </button>
+        <button type="button" style={btn} onClick={() => void toggleShare()}>
+          {sharing ? 'Stop sharing' : 'Share screen'}
+        </button>
+      </div>
+      <div
+        style={{
+          position: 'relative',
+          aspectRatio: '16 / 9',
+          background: '#000',
+          borderRadius: 10,
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <video
+          ref={localVideoRef}
+          autoPlay
+          playsInline
+          muted
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            display: cameraOn || sharing ? 'block' : 'none',
+          }}
+        />
+        {!cameraOn && !sharing ? (
+          <p style={{ color: '#9aa7b5', fontSize: 13, margin: 0 }}>
+            Your camera and screen are off.
+          </p>
+        ) : null}
+        {sharing ? (
+          <span
+            style={{
+              position: 'absolute',
+              top: 8,
+              left: 8,
+              fontSize: 11,
+              padding: '2px 6px',
+              borderRadius: 6,
+              background: '#1c2430',
+              color: '#7fb2ff',
+            }}
+          >
+            Sharing screen
+          </span>
+        ) : null}
+      </div>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {session?.participants.map((p) => (
+          <li
+            key={p.id}
+            style={{
+              fontSize: 11,
+              padding: '3px 8px',
+              borderRadius: 999,
+              background: '#1c2430',
+              color: p.transport === 'none' ? '#6b7784' : '#e8eef4',
+            }}
+          >
+            {p.displayName}
+            {p.transport === 'audio' ? ' · audio' : ''}
+            {p.transport === 'video' || p.transport === 'video_screenshare' ? ' · video' : ''}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 
   const card: MeetingCardModel | null = session
@@ -372,7 +602,13 @@ export function MeetingRoomPanel({
       {notice ? <p style={{ padding: '8px 14px', color: '#fbbf24', fontSize: 12 }}>{notice}</p> : null}
       <div style={{ flex: 1, minHeight: 0 }}>
         {card && session ? (
-          <MeetingView card={card} session={session} sceneSlot={sceneSlot} onModerate={onModerate} />
+          <MeetingView
+            card={card}
+            session={session}
+            videoSlot={videoSlot}
+            sceneSlot={sceneSlot}
+            onModerate={onModerate}
+          />
         ) : (
           <p style={{ padding: 24, color: '#9aa7b5' }}>Loading room…</p>
         )}

@@ -2,7 +2,7 @@
   "name": "@nexus/local-runner",
   "version": "0.1.0",
   "description": "Local OpenAI-compatible runner for the Nexus desktop: BYOK registration as edge_gpu_sidecar, an OpenAI-compatible proxy server, and local TLS material",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

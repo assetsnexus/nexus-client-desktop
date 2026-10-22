@@ -21,6 +21,8 @@ export type CommandResult = {
   responseCode: number;
   responseObject: unknown;
   message?: string;
+  /** Machine-readable failure code (`UNAUTHORIZED`, `FORBIDDEN`, …), if any. */
+  code?: string;
   authorizationRequired?: boolean;
   authRequestId?: string;
 };

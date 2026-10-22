@@ -23,6 +23,10 @@ export type RoomParticipantLike = {
   displayName?: string | null;
   username?: string | null;
   avatarUrl?: string | null;
+  /** Phase 7d — media moderation state persisted on the room seat. */
+  muted?: boolean | null;
+  listening?: boolean | null;
+  videoEnabled?: boolean | null;
 };
 
 export type RoomDetailLike = {
@@ -68,8 +72,10 @@ export function projectRoomParticipant(p: RoomParticipantLike): MeetingParticipa
     displayName: p.displayName ?? p.username ?? p.id,
     avatarUrl: p.avatarUrl ?? null,
     transport: defaultTransport(kind),
-    muted: false,
-    listening: true,
+    // Phase 7d: the server seat is the source of truth; fall back to the live
+    // default (unmuted, listening) when the room predates the moderation fields.
+    muted: p.muted === true,
+    listening: p.listening !== false,
     volume: 1,
     isAssetStream: kind === 'asset_agent',
   };

@@ -30,6 +30,12 @@ export type LocalVoiceModel = {
   modelRef: string | null;
   /** Public download URL (HuggingFace etc.); null when the row omitted it. */
   downloadUrl: string | null;
+  /**
+   * Canonical project / model card page (GitHub repo or HuggingFace model page)
+   * for attribution and "where did this come from?". Distinct from
+   * {@link downloadUrl}, which points at the raw artifact bytes.
+   */
+  sourceUrl: string | null;
   /** Expected on-disk size in bytes (for the progress bar + free-space check). */
   sizeBytes: number | null;
   /** Approximate VRAM needed if the engine runs on GPU. */
@@ -79,7 +85,12 @@ export function classifyVoiceKind(row: Record<string, unknown>): VoiceEngineKind
   const category = String(row.category ?? '').toLowerCase();
   if (category === 'tts' || category.includes('text_to_speech')) return 'tts';
   if (category === 'stt' || category.includes('speech_to_text')) return 'stt';
+  if (category === 'vad' || category.includes('voice_activity')) return 'vad';
+  if (category === 'wake' || category.includes('wake_word') || category.includes('keyword'))
+    return 'wake';
   const caps = strArray(row.capabilities).map((c) => c.toLowerCase());
+  if (caps.some((c) => c === 'wake' || c.startsWith('wake') || c.includes('keyword'))) return 'wake';
+  if (caps.some((c) => c === 'vad' || c.startsWith('vad') || c.includes('voice_activity'))) return 'vad';
   const hasTts = caps.some((c) => c === 'tts' || c.startsWith('tts') || c === 'speech');
   const hasStt = caps.some((c) => c === 'stt' || c.startsWith('stt') || c === 'transcribe');
   if (hasTts && !hasStt) return 'tts';
@@ -137,6 +148,9 @@ export function parseLocalVoiceModel(
     label,
     modelRef,
     downloadUrl,
+    // Region rows may publish the upstream project page; otherwise fall back to
+    // the download host so the UI can always link somewhere real.
+    sourceUrl: str(r.sourceUrl ?? r.homepage ?? r.modelUrl ?? r.cardUrl) ?? downloadUrl,
     sizeBytes: num(r.sizeBytes ?? r.downloadBytes ?? r.size),
     vramGiB: num(r.vramGiB ?? r.vramRequiredGib ?? r.selfHostVramGib),
     runtime: str(r.runtime ?? r.quantization ?? r.format),
@@ -200,6 +214,7 @@ export function customEndpointToModel(endpoint: CustomVoiceEndpoint): LocalVoice
     label: endpoint.label,
     modelRef: null,
     downloadUrl: null,
+    sourceUrl: null,
     sizeBytes: null,
     vramGiB: null,
     runtime: endpoint.protocol,

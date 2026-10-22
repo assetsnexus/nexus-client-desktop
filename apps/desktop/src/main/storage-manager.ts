@@ -105,6 +105,30 @@ export function createStorageManager(options: StorageManagerOptions) {
     async moveFile(fileId: string, targetFolderId: string | null) {
       await (await client()).moveFile({ fileId, targetFolderId });
     },
+
+    async listRevisions(fileId: string, limit?: number) {
+      const page = await (await client()).listRevisions({ fileId, limit });
+      return {
+        fileId: page.fileId,
+        currentRevisionNo: page.currentRevisionNo,
+        sha256: page.sha256,
+        items: page.items.map((r) => ({
+          revisionNo: r.revisionNo,
+          parentRevisionNo: r.parentRevisionNo,
+          sizeBytes: r.sizeBytes,
+          sha256: r.sha256,
+          contentType: r.contentType,
+          command: r.command,
+          reason: r.reason,
+          createdAt: r.createdAt,
+        })),
+      };
+    },
+
+    async revertRevision(fileId: string, revisionNo: number) {
+      const out = await (await client()).revertRevision({ fileId, revisionNo });
+      return { revertedTo: out.revertedTo, revisionNo: out.revisionNo };
+    },
   };
 }
 

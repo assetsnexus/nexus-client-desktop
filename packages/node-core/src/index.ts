@@ -19,18 +19,46 @@ export {
 } from './config.js';
 
 export {
+  connectionFromEnv,
+  connectionPatchFromEnv,
+  loadDotenvFile,
+  parseDotenv,
+  resolveEnvFilePath,
+  type ConnectionEnv,
+  type ConnectionEnvPatch,
+  type DotenvMap,
+} from './dotenv.js';
+
+export {
   RegionAuthError,
   login,
+  listCountries,
+  listRegions,
+  readIdentity,
+  resendPasswordless,
+  resolveManagedRegion,
   sendCommand,
+  startPasswordless,
+  switchLoginTwoFactor,
   twoFactorLogin,
+  verifyPasswordless,
   type AuthClientOptions,
   type AuthIdentity,
   type CommandEnvelope,
+  type CountryRow,
   type LoginCredentials,
+  type LoginMethod,
   type LoginResult,
+  type PasswordlessChannel,
+  type PasswordlessResendInput,
+  type PasswordlessStartResult,
+  type PasswordlessVerifyInput,
+  type PasswordlessVerifyResult,
   type RegionResponse,
+  type RegionRow,
   type SendOptions,
   type TwoFactorChallenge,
+  type TwoFactorChallengeHint,
   type TwoFactorLoginInput,
 } from './auth.js';
 
@@ -50,8 +78,30 @@ export {
   createHttpsAgent,
   looksLikePemCertificate,
   splitPemCertificates,
+  normalizeFingerprint,
+  certificateFingerprints,
+  parseCertificates,
+  certificateFingerprint,
+  verifyLeafIssuedByCa,
+  isIpLiteral,
+  type LeafVerification,
+  type LeafVerificationReason,
   type NodeTlsOptions,
 } from './tls.js';
+
+export {
+  createNodeFetch,
+  type MinimalResponse,
+  type NodeFetchOptions,
+} from './node-fetch.js';
+
+export {
+  pollDeviceLink,
+  startDeviceLink,
+  type DeviceLinkPollResult,
+  type DeviceLinkStartInput,
+  type DeviceLinkStarted,
+} from './device-link.js';
 
 export {
   createMemorySecureStore,
@@ -76,3 +126,11 @@ export {
   type NodeCommandClient,
   type NodeCommandClientOptions,
 } from './command-client.js';
+
+export {
+  classifySessionFailure,
+  sessionLostFromResult,
+  type SessionLoss,
+  type SessionLossReason,
+  type SessionOk,
+} from './session-guard.js';

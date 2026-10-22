@@ -8,7 +8,16 @@
  * whether the host should relax validation for that endpoint only.
  */
 
-export type VoiceEngineKind = 'stt' | 'tts';
+/**
+ * Modalities the desktop can install and run on-device. `stt`/`tts` are speech
+ * engines; `vad` (voice-activity detection) and `wake` (wake-word detection) are
+ * the always-on, low-power detectors the client runs locally to decide when to
+ * start listening — they share the same download/install machinery.
+ */
+export type VoiceEngineKind = 'stt' | 'tts' | 'vad' | 'wake';
+
+/** Modalities that require a microphone and run continuously (never cloud). */
+export const ON_DEVICE_DETECTOR_KINDS: readonly VoiceEngineKind[] = ['vad', 'wake'];
 
 export type VoiceEngineProtocol =
   | 'nexus'

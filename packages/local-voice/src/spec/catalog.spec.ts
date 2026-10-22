@@ -53,8 +53,27 @@ describe('parseLocalVoiceModel', () => {
     expect(model!.vramGiB).toBe(3.2);
   });
 
-  it('expands an explicit file list with per-file sizes', () => {
+  it('accepts a region-provided project/homepage link', () => {
     const model = parseLocalVoiceModel({
+      id: 'with-homepage',
+      category: 'stt',
+      downloadUrl: 'https://example.com/model.bin',
+      homepage: 'https://github.com/example/project',
+    })!;
+    expect(model.sourceUrl).toBe('https://github.com/example/project');
+  });
+
+  it('falls back to the download URL when no project page is published', () => {
+    const model = parseLocalVoiceModel({
+      id: 'no-homepage',
+      category: 'stt',
+      downloadUrl: 'https://example.com/model.bin',
+    })!;
+    // Never null for a downloadable row: the UI always has something to link.
+    expect(model.sourceUrl).toBe('https://example.com/model.bin');
+  });
+
+  it('expands an explicit file list with per-file sizes', () => {    const model = parseLocalVoiceModel({
       id: 'piper-en',
       category: 'tts',
       files: [

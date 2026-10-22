@@ -2,7 +2,7 @@
   "name": "nexus-cli",
   "version": "0.1.0",
   "description": "Nexus CLI — talk to your agents from the terminal",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
   "bin": {
     "nexus": "./bin/nexus.mjs"

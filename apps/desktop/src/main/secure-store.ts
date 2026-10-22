@@ -88,4 +88,14 @@ export class SafeStorageStore implements SecureStore {
     delete data.values[key];
     this.write();
   }
+
+  /**
+   * Remove every stored secret (permanent logout). Keeps the file but empties
+   * the value map so no token, device key or PIN survives.
+   */
+  async clear(): Promise<void> {
+    const data = this.read();
+    data.values = {};
+    this.write();
+  }
 }

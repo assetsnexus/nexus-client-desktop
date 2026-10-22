@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    Borromean rings. Weave: A(teal) over B(mid), B(mid) over C(deep), C(deep) over A(teal).
+    
+    Centres (equilateral triangle, circumradius 88):
+      A = (256, 168)  — top
+      B = (332, 332)  — bottom-right
+      C = (180, 332)  — bottom-left
+    Ring radius = 96, stroke = 34.
+
+    6 crossing points:
+      AB pair: (323.11, 236.64) and (265.10, 263.57)
+      BC pair: (256.00, 273.83) and (256.00, 390.59)
+      CA pair: (246.90, 263.57) and (188.89, 236.64)
+
+    Per ring, 4 arc segments between its 4 crossing points:
+      Ring A: [46°→85°]=over-AB, [85°→95°]=free, [95°→134°]=under-CA, [134°→406°]=free
+      Ring B: [143°→217°]=over-BC, [217°→226°]=free, [226°→265°]=under-AB, [265°→503°]=free
+      Ring C: [275°→314°]=over-CA, [314°→323°]=free, [323°→397°]=under-BC, [37°→275°]=free
+      
+    Drawing strategy per crossing:
+      At AB: draw B-under-arc first, then gap (navy) over same path, then A-over-arc on top.
+      At BC: draw C-under-arc first, then gap, then B-over-arc on top.
+      At CA: draw A-under-arc first, then gap, then C-over-arc on top.
+  -->
+  <rect width="512" height="512" fill="#0a0f1e" rx="72"/>
+  <g fill="none" stroke-linecap="round">
+
+    <!-- ═══════════ FREE ARCS (no weave involvement) ═══════════ -->
+    <!-- Ring A big free arc: 134°→(134+272)°=406° i.e. the whole top of ring A -->
+    <path d="M 188.89,236.64 A 96,96 0 1,1 323.11,236.64" stroke="#70dcde" stroke-width="34"/>
+    <!-- Ring A tiny free arc: 85°→95° (across bottom-centre of A, between the two crossings) -->
+    <path d="M 265.10,263.57 A 96,96 0 0,1 246.90,263.57" stroke="#70dcde" stroke-width="34"/>
+
+    <!-- Ring B big free arc: 265°→503° (left arc of ring B going under/free) -->
+    <path d="M 323.11,236.64 A 96,96 0 1,1 256.00,390.59" stroke="#3db8bb" stroke-width="34"/>
+    <!-- Ring B tiny free arc: 217°→226° -->
+    <path d="M 256.00,273.83 A 96,96 0 0,1 265.10,263.57" stroke="#3db8bb" stroke-width="34"/>
+
+    <!-- Ring C big free arc: 37°→275° (right arc of ring C) -->
+    <path d="M 256.00,390.59 A 96,96 0 1,1 188.89,236.64" stroke="#2096a0" stroke-width="34"/>
+    <!-- Ring C tiny free arc: 314°→323° -->
+    <path d="M 246.90,263.57 A 96,96 0 0,1 256.00,273.83" stroke="#2096a0" stroke-width="34"/>
+
+    <!-- ═══════════ CROSSING AB: A over B ═══════════ -->
+    <!-- Step 1: draw B's under-arc -->
+    <path d="M 265.10,263.57 A 96,96 0 0,1 323.11,236.64" stroke="#3db8bb" stroke-width="34"/>
+    <!-- Step 2: punch gap (navy, wider) along A's over-arc path to cut B -->
+    <path d="M 323.11,236.64 A 96,96 0 0,1 265.10,263.57" stroke="#0a0f1e" stroke-width="58"/>
+    <!-- Step 3: draw A's over-arc on top -->
+    <path d="M 323.11,236.64 A 96,96 0 0,1 265.10,263.57" stroke="#70dcde" stroke-width="34"/>
+
+    <!-- ═══════════ CROSSING BC: B over C ═══════════ -->
+    <!-- Step 1: draw C's under-arc -->
+    <path d="M 256.00,273.83 A 96,96 0 0,1 256.00,390.59" stroke="#2096a0" stroke-width="34"/>
+    <!-- Step 2: punch gap along B's over-arc -->
+    <path d="M 256.00,390.59 A 96,96 0 0,1 256.00,273.83" stroke="#0a0f1e" stroke-width="58"/>
+    <!-- Step 3: draw B's over-arc on top -->
+    <path d="M 256.00,390.59 A 96,96 0 0,1 256.00,273.83" stroke="#3db8bb" stroke-width="34"/>
+
+    <!-- ═══════════ CROSSING CA: C over A ═══════════ -->
+    <!-- Step 1: draw A's under-arc -->
+    <path d="M 246.90,263.57 A 96,96 0 0,1 188.89,236.64" stroke="#70dcde" stroke-width="34"/>
+    <!-- Step 2: punch gap along C's over-arc -->
+    <path d="M 188.89,236.64 A 96,96 0 0,1 246.90,263.57" stroke="#0a0f1e" stroke-width="58"/>
+    <!-- Step 3: draw C's over-arc on top -->
+    <path d="M 188.89,236.64 A 96,96 0 0,1 246.90,263.57" stroke="#2096a0" stroke-width="34"/>
+
+  </g>
+</svg>

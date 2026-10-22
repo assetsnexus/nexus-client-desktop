@@ -2,7 +2,7 @@
   "name": "@nexus/storage-browser",
   "version": "0.1.0",
   "description": "Headless Nexus storage client + explorer/mount model (buckets, capability fallbacks, mount plan) shared by the desktop app, the nexus CLI and the mount daemon",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

@@ -5,9 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; connect-src *; img-src 'self' data: blob: https:; media-src 'self' blob: data:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:"
+      content="default-src 'self'; connect-src * data: blob:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:"
     />
     <title>Nexus</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/anx-logo.svg" />
+    <style>
+      /* Electron shell fills the window edge-to-edge; the UA body margin would
+         otherwise push the 100vh shell past the viewport and clip the footer. */
+      html,
+      body,
+      #root {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+      }
+      body {
+        overflow: hidden;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

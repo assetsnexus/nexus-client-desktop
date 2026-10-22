@@ -4,6 +4,15 @@ release/
 .vite/
 *.log
 .DS_Store
+
+# Local dev overrides — never commit a real .env (it may hold a CA or tokens).
+# Commit `.env.example` instead.
+.env
+.env.local
+apps/desktop/.env
+
 apps/desktop/dist/
 apps/desktop/dist-electron/
+apps/desktop/dist-native/
 packages/*/dist/
+native/target/

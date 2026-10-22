@@ -50,6 +50,11 @@ function projectParticipant(raw: unknown): MeetingRoomParticipantRow | null {
           ? p.username
           : null,
     avatarUrl: typeof p.avatarUrl === 'string' ? p.avatarUrl : null,
+    // Phase 7d — carry the persisted moderation state so the renderer hydrates
+    // the roster tile (mute / listening) from the seat, not from a local guess.
+    muted: typeof p.muted === 'boolean' ? p.muted : undefined,
+    listening: typeof p.listening === 'boolean' ? p.listening : undefined,
+    videoEnabled: typeof p.videoEnabled === 'boolean' ? p.videoEnabled : undefined,
   };
 }
 

@@ -2,7 +2,7 @@
   "name": "@nexus/client-tools",
   "version": "0.1.0",
   "description": "Client-side tool runtime shared by the Nexus desktop app and the nexus CLI (workspace registry, path sandbox, gated bash, fs editing, local-command skills)",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

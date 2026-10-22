@@ -2,7 +2,7 @@
   "name": "@nexus/node-core",
   "version": "0.1.0",
   "description": "Headless Nexus client core shared by the desktop app and the nexus CLI (config, device keys, secure storage, region transport)",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

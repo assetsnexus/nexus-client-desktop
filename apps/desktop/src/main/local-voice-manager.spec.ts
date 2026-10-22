@@ -9,7 +9,9 @@ vi.mock('electron', () => ({
 }));
 
 const { createLocalVoiceManager } = await import('./local-voice-manager.js');
-const { BUILTIN_VOICE_MODELS, modelDirName } = await import('@nexus/local-voice');
+const { BUILTIN_VOICE_MODELS, BUILTIN_DETECTOR_MODELS, modelDirName } = await import(
+  '@nexus/local-voice'
+);
 
 const dirs: string[] = [];
 function tempDir() {
@@ -70,12 +72,17 @@ function manager(overrides: Record<string, unknown> = {}) {
 }
 
 describe('local voice manager', () => {
-  it('starts with cloud engines disabled and the built-in catalog', async () => {
+  it('starts with cloud engines disabled and the FULL built-in catalog', async () => {
     const { m } = manager();
     const state = await m.getState();
     expect(state.settings.enabled).toBe(true);
     expect(state.settings.sttEngine).toBe('cloud');
-    expect(state.models.length).toBe(BUILTIN_VOICE_MODELS.length);
+    // Regression: the seed must include the detector rows (VAD + wake), not just
+    // speech models — otherwise the wake picker reports "no wake models" on a
+    // fresh install.
+    expect(state.models.length).toBe(BUILTIN_VOICE_MODELS.length + BUILTIN_DETECTOR_MODELS.length);
+    expect(state.models.some((r) => r.kind === 'wake')).toBe(true);
+    expect(state.models.some((r) => r.kind === 'vad')).toBe(true);
     expect(state.models.every((r) => r.installState === 'not_installed')).toBe(true);
     await m.dispose();
   });

@@ -2,7 +2,7 @@
   "name": "@nexus/asset-agent-discovery",
   "version": "0.1.0",
   "description": "LAN/intranet asset-agent discovery for the Nexus desktop: parse _anx._tcp mDNS TXT records, match locally-reachable peers against the caller's asset agents, and score routes for a P2P turn",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

@@ -1,0 +1,220 @@
+/**
+ * Wake → presentation router (renderer).
+ *
+ * When a wake word fires, main raises the window and forwards the activation.
+ * This module decides *how* the agent is surfaced (settings → activation mode) and
+ * drives one dictation session through the pure {@link createWakeSession} policy:
+ *
+ *  - `chat` — open the agent's conversation and dictate into its composer;
+ *  - `widget` — show a small overlay (waveform + live transcript + agent avatar)
+ *    without opening the chat; the transcript is placed in the composer on submit;
+ *  - `companion` — open the agent's immersive companion window in voice mode.
+ *
+ * It is deliberately separated from any component so the policy ("what should a
+ * wake do?") is testable with fakes, and so the mechanics of driving the mounted
+ * chat SPA live in one place.
+ *
+ * TRUST: a wake only opens a conversation and pre-fills a *user* message. It
+ * never authenticates, never approves, and never dispatches a privileged command.
+ */
+
+import type { WakeActivationMode, WakeSettings } from '../../shared/wake.js';
+import type { QueuedUtterance, TranscriptAgent } from './transcript.js';
+import { createWakeSession, type SessionState } from './session.js';
+
+export type WakeChatTarget = {
+  agentId: string | null;
+  /** Chat contact id of the agent (the wake binding's `agentId`). */
+  contactId: string;
+  agentName: string | null;
+  phrase: string;
+};
+
+export type WakeRouteState = 'idle' | 'opening' | 'listening' | 'review' | 'sending';
+
+export type WakeChatRouter = {
+  /** Route an activation: present the agent and drive one dictation session. */
+  route(target: WakeChatTarget): Promise<void>;
+  /** Cancel any in-flight session (e.g. the user typed instead). */
+  cancel(): void;
+  /** Submit the buffered transcript from a review surface. */
+  submit(): Promise<void>;
+  /** The inactivity timer fired; apply the unsent policy. */
+  timeout(): Promise<void>;
+  /** Current session state, or null when idle. */
+  getSession(): SessionState | null;
+};
+
+export type WakeChatRouterOptions = {
+  /** Read the current wake behavior settings (mode, phrases, timeout, …). */
+  getSettings: () => WakeSettings | Promise<WakeSettings>;
+  /**
+   * Present the agent for the given mode. Resolves once the surface is ready to
+   * receive dictation. `chat` opens the thread, `widget` shows the overlay,
+   * `companion` opens the companion window.
+   *
+   * Return `{ dictate: false }` when the surface runs its *own* realtime voice
+   * (the companion window) so this router does not open a second capture.
+   */
+  present: (
+    mode: WakeActivationMode,
+    target: WakeChatTarget,
+  ) => Promise<void | { dictate?: boolean }>;
+  /** Capture one utterance and transcribe it; null when nothing was heard. */
+  dictate: (onPartial: (text: string) => void) => Promise<string | null>;
+  /** Deliver the transcript as the user's message to the open conversation. */
+  send: (input: { contactId: string; text: string }) => Promise<void>;
+  /** Keep an unsubmitted transcript for review (the `queue` unsent policy). */
+  enqueue: (entry: QueuedUtterance) => void;
+  /** Known agents for speak-led routing ("Bob, …"). */
+  listAgents?: () => TranscriptAgent[];
+  /**
+   * True when dictation will transcribe in the cloud (audio leaves the device).
+   * When it is, the router always shows a **visible** dictation surface (the
+   * widget) even if the user configured "open chat", so they cannot miss that
+   * their speech is being streamed. On-device transcription is unchanged.
+   */
+  transcriptionIsCloud?: () => boolean | Promise<boolean>;
+  /** Called when a step fails, so the host can surface a non-fatal notice. */
+  onError?: (message: string) => void;
+  onStateChange?: (state: WakeRouteState) => void;
+  /** Notified on every session state change (drives the widget/review UI). */
+  onSessionChange?: (session: SessionState | null) => void;
+  /** How often the inactivity deadline is checked (default 5s). */
+  timeoutPollMs?: number;
+  /** Clock, injectable for tests. */
+  now?: () => number;
+  /** Id factory, injectable for tests. */
+  newId?: () => string;
+};
+
+export function createWakeChatRouter(options: WakeChatRouterOptions) {
+  const pollMs = options.timeoutPollMs ?? 5_000;
+  let active = false;
+  let current: ReturnType<typeof createWakeSession> | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  function stopTimer(): void {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  /** Release the session lock and clear the presentation surface. */
+  function conclude(): void {
+    stopTimer();
+    current = null;
+    active = false;
+    options.onSessionChange?.(null);
+    options.onStateChange?.('idle');
+  }
+
+  /** Poll the session's inactivity deadline and apply the unsent policy. */
+  function startTimer(): void {
+    if (pollMs <= 0) return;
+    stopTimer();
+    timer = setInterval(() => {
+      void timeout();
+    }, pollMs);
+  }
+
+  async function timeout(): Promise<void> {
+    if (!current) return;
+    await current.timeout();
+    // A timeout always concludes the session (send-now only comes from an explicit
+    // submit), so release the lock and clear the surface.
+    const status = current.state.status;
+    if (status === 'queued' || status === 'discarded' || status === 'submitted') conclude();
+  }
+
+  return {
+    async route(target: WakeChatTarget) {
+      if (active) return;
+      active = true;
+      try {
+        const settings = await options.getSettings();
+        // Cloud transcription means audio leaves the device while the user
+        // speaks. Force the compact *widget* (always visible) even if the user
+        // chose "open chat", so the streaming is never invisible.
+        const cloudTranscription =
+          (await Promise.resolve()
+            .then(() => options.transcriptionIsCloud?.())
+            .catch(() => false)) === true;
+        const mode: WakeActivationMode = cloudTranscription ? 'widget' : settings.activationMode;
+        options.onStateChange?.('opening');
+        const presented = await options.present(mode, target);
+
+        // A surface that runs its own realtime voice (the companion window) owns
+        // the session; opening a second microphone capture here would double it.
+        if (presented && presented.dictate === false) {
+          options.onStateChange?.('idle');
+          active = false;
+          options.onSessionChange?.(null);
+          return;
+        }
+        options.onStateChange?.('listening');
+
+        const session = createWakeSession({
+          mode: settings.activationMode,
+          reviewBeforeSend: settings.reviewBeforeSend,
+          submitPhrases: settings.submitPhrases,
+          unsentPolicy: settings.unsentPolicy,
+          timeoutMs: settings.activationTimeoutSeconds * 1000,
+          agents: options.listAgents?.() ?? [],
+          cloudTranscription,
+          initialTarget: {
+            agentId: target.agentId,
+            agentName: target.agentName,
+            phrase: target.phrase,
+          },
+          dictate: options.dictate,
+          send: async (input) => {
+            options.onStateChange?.('sending');
+            await options.send({
+              contactId: input.agentId ?? target.contactId,
+              text: input.text,
+            });
+          },
+          enqueue: options.enqueue,
+          now: options.now,
+          newId: options.newId,
+          onStateChange: (state) => {
+            options.onSessionChange?.(state);
+            if (state.status === 'review') options.onStateChange?.('review');
+          },
+        });
+        current = session;
+        session.start();
+        startTimer();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'The wake command could not start.';
+        conclude();
+        options.onError?.(message);
+      }
+    },
+    cancel() {
+      current?.cancel();
+      conclude();
+    },
+    async submit() {
+      if (!current) return;
+      const session = current;
+      await session.submit();
+      stopTimer();
+      // Keep the review surface visible so the user sees the sent state, then
+      // release the lock so the next wake can route.
+      active = false;
+      if (session.state.status === 'submitted' || session.state.status === 'discarded') {
+        options.onStateChange?.('idle');
+      }
+    },
+    timeout,
+    getSession() {
+      return current?.state ?? null;
+    },
+  } satisfies WakeChatRouter;
+}
+
+/** Exposed for hosts that need the session state shape. */
+export type { SessionState };

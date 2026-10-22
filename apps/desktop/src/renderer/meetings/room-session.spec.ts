@@ -23,6 +23,21 @@ describe('projectRoomSession', () => {
     expect(projectRoomParticipant({ id: 's1', type: 'asset_agent' }).kind).toBe('asset_agent');
   });
 
+  it('hydrates persisted moderation state from the room seat', () => {
+    const seat = projectRoomParticipant({
+      id: 'a1',
+      type: 'agent',
+      muted: true,
+      listening: false,
+    });
+    expect(seat.muted).toBe(true);
+    expect(seat.listening).toBe(false);
+    // Absent fields fall back to the live defaults.
+    const fresh = projectRoomParticipant({ id: 'a2', type: 'agent' });
+    expect(fresh.muted).toBe(false);
+    expect(fresh.listening).toBe(true);
+  });
+
   it('defaults agents to an audio leg and marks asset agents as streams', () => {
     const agent = projectRoomParticipant({ id: 'a1', type: 'agent', displayName: 'Ada' });
     expect(agent.transport).toBe('audio');

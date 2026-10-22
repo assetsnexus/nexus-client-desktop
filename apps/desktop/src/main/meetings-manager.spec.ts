@@ -114,7 +114,35 @@ describe('createMeetingsManager', () => {
         senderReturning({ data: { id: 'r', participants: [null, { type: 'user' }, { id: 'ok' }] } }),
     });
     const room = await mgr.getRoom('r');
-    expect(room!.participants).toEqual([{ id: 'ok', type: 'user', displayName: null, avatarUrl: null }]);
+    expect(room!.participants).toEqual([
+      { id: 'ok', type: 'user', displayName: null, avatarUrl: null },
+    ]);
+  });
+
+  it('carries persisted Phase 7d moderation fields through the projection', async () => {
+    const mgr = createMeetingsManager({
+      loadPresence: false,
+      getSender: async () =>
+        senderReturning({
+          data: {
+            id: 'room-1',
+            participants: [
+              { id: 'a1', type: 'agent', muted: true, listening: false, videoEnabled: false },
+              { id: 'u1', type: 'user' },
+            ],
+          },
+        }),
+    });
+    const room = await mgr.getRoom('room-1');
+    expect(room!.participants[0]).toMatchObject({
+      id: 'a1',
+      muted: true,
+      listening: false,
+      videoEnabled: false,
+    });
+    // Unset fields stay undefined so the renderer can fall back to defaults.
+    expect(room!.participants[1].muted).toBeUndefined();
+    expect(room!.participants[1].listening).toBeUndefined();
   });
 });
 

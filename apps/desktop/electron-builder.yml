@@ -9,11 +9,23 @@ directories:
 files:
   - dist-electron/**/*
   - dist/renderer/**/*
+  - dist-native/**/*
   - package.json
 
 # Electron is bundled by electron-builder; @nexus/node-core and its
 # @nexus/commands-client dep are already inlined into dist-electron by esbuild.
 asar: true
+
+# The native helper must live outside the asar archive to be executable.
+asarUnpack:
+  - dist-native/**
+
+# The window/taskbar icon is read from disk at runtime, so it must sit outside
+# the asar next to the app bundle (see resolveWindowIcon in src/main/main.ts).
+# electron-builder derives the installer/.ico/.icns from build/icon.png.
+extraResources:
+  - from: build/window-icon.png
+    to: window-icon.png
 
 # Auto-update channel metadata; a real update server is a later layer.
 publish:
@@ -32,6 +44,7 @@ mac:
   identity: null
 
 win:
+  icon: build/icon.png
   target:
     - target: nsis
       arch: [x64]
@@ -46,6 +59,7 @@ nsis:
 linux:
   category: Network
   executableName: nexus-desktop
+  icon: build/icon.png
   target:
     - target: AppImage
       arch: [x64, arm64]

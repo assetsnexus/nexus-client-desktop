@@ -6,25 +6,282 @@
  * by main, preload, and renderer so the contract stays in one place.
  */
 
-import type { AuthIdentity, DesktopConnectionConfig, LoginCredentials } from '@nexus/node-core';
+import type {
+  AuthIdentity,
+  CountryRow,
+  DesktopConnectionConfig,
+  LoginCredentials,
+  PasswordlessChannel,
+  RegionRow,
+} from '@nexus/node-core';
 import type { CompanionLaunch } from './companion.js';
+import type { RegionEnvironment } from './sandbox-environment.js';
+import type {
+  WakeSettings,
+  WakeWordBinding,
+  WakeAgentRow,
+  QueuedUtterance,
+  WakeEngineKind,
+} from './wake.js';
+import type { AppLockSettings, AppLockState } from './app-lock.js';
+import type { LogoutChoice, LogoutReport, LogoutStep } from './logout.js';
+
+export type { RegionEnvironment } from './sandbox-environment.js';
+
+export type {
+  AppLockSettings,
+  AppLockState,
+} from './app-lock.js';
+export {
+  DEFAULT_APP_LOCK_SETTINGS,
+  LOCK_TIMEOUT_CHOICES,
+  PIN_MIN_LENGTH,
+  PIN_MAX_LENGTH,
+} from './app-lock.js';
+
+export type {
+  LogoutChoice,
+  LogoutStep,
+  LogoutStepResult,
+  LogoutReport,
+} from './logout.js';
+
+export type {
+  WakeSettings,
+  WakeWordBinding,
+  WakeAgentRow,
+  QueuedUtterance,
+  WakeActivationMode,
+  WakeUnsentPolicy,
+  WakeAutoMapMode,
+  WakeEngineKind,
+} from './wake.js';
 
 export type { CompanionLaunch, CompanionMode } from './companion.js';
+export type { CountryRow, RegionRow } from '@nexus/node-core';
+export type { CountryRegionResolution } from './login-region.js';
 
 export type ConnectionConfigPatch = Partial<DesktopConnectionConfig>;
 
+/**
+ * Non-secret desktop UI preferences. `locale` is validated by the renderer
+ * against the locales it ships; an unknown value falls back to the OS locale.
+ */
+export type UiSettings = {
+  locale: string | null;
+  notifications: NotificationSettings;
+  /**
+   * Last home country picked on the login screen (ISO 3166-1 alpha-2), so the
+   * picker remembers the choice the way the portal's `anx_login_country` does.
+   */
+  loginCountry: string | null;
+  /** App PIN inactivity-lock preferences (the PIN itself is never exposed). */
+  appLock: AppLockSettings;
+};
+
+/**
+ * How a new-message OS notification is presented. The default is a full card
+ * with sender + preview and no sound — a sound on every message is intrusive, so
+ * it is opt-in.
+ */
+export type NotificationSettings = {
+  /** Master switch for OS notifications while the window is unattended. */
+  enabled: boolean;
+  /** `full` shows the message body; `title_only` shows just the title line. */
+  cardMode: 'full' | 'title_only';
+  /** Include who sent the message. */
+  showSender: boolean;
+  /** Include the message text (ignored for `title_only`). */
+  showPreview: boolean;
+  /** Play the OS notification sound. Off by default. */
+  sound: boolean;
+  /**
+   * When the app is locked (PIN gate), replace the card content with a neutral
+   * notice so a locked machine cannot leak message text or the sender. On by
+   * default; the user may explicitly turn it off.
+   */
+  suppressWhenLocked: boolean;
+};
+
+/**
+ * Canonical notification-settings defaults, shared by the main process (applied
+ * when reading/patching the persisted block) and the renderer (initial UI state)
+ * so the two can never drift.
+ */
+export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
+  enabled: true,
+  cardMode: 'full',
+  showSender: true,
+  showPreview: true,
+  // Off by default: an unexpected sound is worse than a missed chime.
+  sound: false,
+  // On by default: a locked machine must not leak message content.
+  suppressWhenLocked: true,
+};
+
+/** What the renderer reports to main about an inbound message. */
+export type DesktopNotificationPayload = {
+  messageId: string;
+  conversationId: string | null;
+  contactId: string | null;
+  agentId: string | null;
+  senderName: string | null;
+  preview: string | null;
+  title: string | null;
+};
+
+/**
+ * A wake binding resolved for arming in the renderer: the engine kind, the
+ * phrase, and (for `builtin`) the installed ONNX bytes. Never carries auth
+ * material — a wake word cannot authenticate.
+ */
+export type WakeBindingResolution = {
+  binding: WakeWordBinding;
+  engineKind: WakeEngineKind;
+  armed: boolean;
+  /** Present only for a `builtin` detector whose model is installed. */
+  modelBytes: Uint8Array | null;
+  /**
+   * Present only for a `custom_sample` detector: the decoded log-mel envelope of
+   * the enrolled phrase, ready to feed the on-device detector without a fetch.
+   */
+  customSampleFingerprint: WakeTemplateFingerprintWire | null;
+  /**
+   * True for an `stt_phrase` binding: the phrase is matched against on-device
+   * transcription rather than a fixed keyword model. The renderer arms an
+   * STT-phrase detector and asks main to transcribe gated speech
+   * (`wakeTranscribeLocal`), which never leaves the machine.
+   */
+  transcribeLocally: boolean;
+  /** Human-safe reason when the binding cannot be armed. */
+  unavailableReason: string | null;
+};
+
+/**
+ * Structural, serializable mirror of `@nexus/wake-word`'s
+ * `WakeTemplateFingerprint` (the arrays serialize as plain number arrays across
+ * IPC). Device-local only; never leaves the machine.
+ */
+export type WakeTemplateFingerprintWire = {
+  envelope: number[];
+  frames: number;
+  sampleRate: number;
+  hopSamples: number;
+};
+
+/** Live state of the wake listener, for the bottom-bar indicator. */
+export type WakeListenState = {
+  /** Master switch from settings. */
+  enabled: boolean;
+  /** True while at least one detector is genuinely armed. */
+  listening: boolean;
+  /** Phrases currently armed, for the visualization label. */
+  activePhrases: string[];
+  /** Smoothed input level 0..1, for the waveform. */
+  level: number;
+  /** Last detection, so the UI can flash. */
+  lastDetection: { phrase: string; agentId: string | null; at: number } | null;
+  /** Non-fatal reason when listening is desired but not possible. */
+  message: string | null;
+};
+
+/**
+ * Readiness of on-device wake transcription (`stt_phrase`). Mirrors the main
+ * process's `WakeSttStatus` so the settings UI can highlight the *exact* field
+ * that needs configuring, and live-updates when a model or runner is installed.
+ */
+export type WakeSttStatus = {
+  ready: boolean;
+  reason: string | null;
+  /** Machine-readable cause when not ready, for targeted UI guidance. */
+  code: 'no_model' | 'no_runner' | 'server_failed' | 'cloud_refused' | null;
+  /** The local speech model that would serve the wake, when installed. */
+  modelId: string | null;
+  modelLabel: string | null;
+  /** True when a custom local endpoint is configured instead of a catalog model. */
+  usingCustomEndpoint: boolean;
+  /** True when a runnable `whisper-server` was found (managed copy or PATH). */
+  runnerInstalled: boolean;
+};
+
 export type AuthState =
   | { status: 'signed_out' }
-  | { status: 'two_factor_required'; authRequestId: string; factors: string[]; message?: string }
+  | ({ status: 'two_factor_required' } & PasswordlessChallengeState)
   | { status: 'signed_in'; token: string; identity: AuthIdentity };
+
+/**
+ * Startup session hydration verdict (Deliverable 2). The renderer uses this to
+ * choose between the signed-in shell, a retryable offline screen, and sign-in —
+ * and to know *why* when it lands on sign-in.
+ */
+export type SessionHydrationState = {
+  view: 'signed_in' | 'offline_retry' | 'signed_out';
+  reason:
+    | 'no_session'
+    | 'corrupted'
+    | 'expired'
+    | 'revoked'
+    | 'unauthorized'
+    | 'region_unreachable'
+    | 'ok';
+  /** Human-safe explanation for the offline / signed-out screen. */
+  message: string | null;
+  /** True when the region was unreachable and the user may retry. */
+  canRetry: boolean;
+  /** True when a stored session existed at startup. */
+  hasSession: boolean;
+  /** The active token when hydrated as signed in, else null. */
+  token: string | null;
+  identity: AuthIdentity | null;
+};
 
 export type LoginRequest = LoginCredentials;
 
-export type TwoFactorRequest = {
-  authRequestId: string;
-  code?: string;
-  factor?: string;
+/**
+ * An in-flight verification step. Both the password login and the passwordless
+ * (email / SMS / voice) flows land here: the region returns an opaque
+ * `loginToken` and the methods the account can complete with. The token never
+ * reaches the renderer's storage; it only rides back on the next IPC call.
+ */
+export type PasswordlessChallengeState = {
+  /** Opaque temporary token; main process keeps it and echoes it back. */
+  loginToken: string;
+  /** Which flow produced the challenge, so the UI can word itself correctly. */
+  flow: 'password' | 'passwordless';
+  /** Methods the account can complete with, e.g. `['email','authenticator']`. */
+  methods: string[];
+  /** Legacy alias for `methods`. */
+  factors: string[];
+  /** Masked destination copy, e.g. `{ sentTo: 'a***@example.com' }`. */
+  hint?: { channelType?: string; sentTo?: string | null; methodSlug?: string };
+  message?: string;
 };
+
+export type TwoFactorRequest = {
+  /** Verification code (email / SMS / voice / authenticator). */
+  code: string;
+  /** Method to verify with; defaults to the first advertised method. */
+  method?: string;
+};
+
+/** Cross-device login link ("sign in with the Nexus app"). */
+export type DeviceLinkSessionStart = {
+  /** Short code rendered as a QR and shown for typing. */
+  userCode: string;
+  /** Deep link (`assetsnexus://link?code=…`) that opens the app directly. */
+  appLink: string;
+  /** Web fallback: the portal approval page. */
+  verificationUri: string;
+  expiresAt: string;
+  /** Recommended poll interval, seconds. */
+  interval: number;
+};
+
+export type DeviceLinkPollOutcome =
+  | { status: 'pending'; interval: number }
+  | { status: 'approved'; authState: AuthState }
+  | { status: 'denied' }
+  | { status: 'expired' };
 
 /** Identity / account switching (Phase 9). Serializable views of the store. */
 export type IdentityRow = {
@@ -154,6 +411,10 @@ export type MeetingRoomParticipantRow = {
   type: string;
   displayName: string | null;
   avatarUrl: string | null;
+  /** Phase 7d — persisted media moderation state on the room seat. */
+  muted?: boolean;
+  listening?: boolean;
+  videoEnabled?: boolean;
 };
 
 /**
@@ -205,14 +466,31 @@ export type DeviceStatus = {
 
 export type LocalModelBackendKind = 'ollama' | 'comfyui';
 
+/**
+ * One user-configured local model instance. The user may add 0..n of these
+ * (several Ollama boxes, a ComfyUI rig, …); each carries its own TLS policy so a
+ * self-signed cert on their own network can be trusted explicitly.
+ */
 export type LocalModelBackend = {
   id: string;
   kind: LocalModelBackendKind;
   label: string;
   baseUrl: string;
-  /** Disabled entries are placeholders (e.g. ComfyUI preview). */
+  /** Disabled entries are skipped by the prober and the router. */
   enabled: boolean;
+  /**
+   * Relax certificate validation for this instance only. Required for a
+   * self-signed `https` endpoint; never inferred, always explicit.
+   */
+  ignoreTls: boolean;
+  /** Optional bearer token for a protected instance. */
+  apiKey: string | null;
+  /** Optional PEM CA bundle to trust for this instance (instead of ignoring TLS). */
+  customCaPem: string | null;
 };
+
+/** How the next local job is routed across the configured instances. */
+export type LocalModelsRoutingPolicy = 'first_available' | 'least_busy' | 'round_robin';
 
 export type LocalModelHealth = 'healthy' | 'unreachable' | 'disabled' | 'checking' | 'unknown';
 
@@ -227,15 +505,29 @@ export type LocalModelBackendStatus = {
   health: LocalModelHealth;
   detail?: string;
   models: LocalModelRow[];
+  /** True when the instance reports in-flight work (loaded models / queued jobs). */
+  busy: boolean;
+  /** Ollama: model names currently held in memory. */
+  loadedModels: string[];
   checkedAt: string;
 };
 
 export type LocalModelsSnapshot = {
   backends: LocalModelBackendStatus[];
+  /** Instance the next job would be routed to, given the current policy. */
+  routedBackendId: string | null;
+  /** Active routing policy (mirrors the persisted setting). */
+  policy: LocalModelsRoutingPolicy;
+};
+
+/** The persisted instance list + routing policy (what the settings UI edits). */
+export type LocalModelsConfig = {
+  instances: LocalModelBackend[];
+  policy: LocalModelsRoutingPolicy;
 };
 
 /** Desktop-local speech models (Phase 11e): install + run STT/TTS on-device. */
-export type LocalVoiceModelKind = 'stt' | 'tts';
+export type LocalVoiceModelKind = 'stt' | 'tts' | 'vad' | 'wake';
 
 export type LocalVoiceInstallState =
   | 'not_installed'
@@ -253,6 +545,8 @@ export type LocalVoiceModelRow = {
   source: 'region' | 'custom';
   /** Primary download URL (public repo), or null for a custom endpoint. */
   downloadUrl: string | null;
+  /** Project / model card page (GitHub or HuggingFace) for attribution. */
+  sourceUrl: string | null;
   sizeBytes: number | null;
   /** Approximate VRAM this model needs when loaded on a GPU. */
   vramGiB: number | null;
@@ -323,6 +617,34 @@ export type LocalVoiceState = {
 };
 
 export type LocalVoiceSettingsPatch = Partial<LocalVoiceSettings>;
+
+/**
+ * State of the speech-engine runner binary (`whisper-server`) that the local
+ * wake / STT engines spawn. Downloaded by the app into its data folder, or
+ * resolved from an existing system install.
+ */
+export type VoiceBinaryStatus = {
+  id: 'whisper-server';
+  installed: boolean;
+  /** Where a runnable binary was found. */
+  source: 'managed' | 'path' | 'missing';
+  path: string | null;
+  installDir: string;
+  /** Whether a one-click install is possible on this platform/arch. */
+  canInstall: boolean;
+  assetLabel: string | null;
+  assetSizeBytes: number | null;
+  state: 'idle' | 'downloading' | 'extracting' | 'installing' | 'error';
+  downloadPercent: number | null;
+  error: string | null;
+  /** Honest per-OS setup steps, always shown (and used when install is impossible). */
+  instructions: {
+    command: string | null;
+    steps: string[];
+    manualRequired: boolean;
+    expectsOnPath: string;
+  };
+};
 
 /**
  * Local GPU runner (Phase 4): expose this machine's local model server to the
@@ -427,8 +749,27 @@ export type StorageFileRow = {
   revisionNo: number | null;
 };
 
-export type StoragePage = {
-  items: StorageFileRow[];
+// ─── Phase 3: bucket revision management ────────────────────────────────────
+
+export type StorageRevisionRow = {
+  revisionNo: number;
+  parentRevisionNo: number;
+  sizeBytes: number;
+  sha256: string;
+  contentType: string;
+  command: string;
+  reason: string | null;
+  createdAt: string | null;
+};
+
+export type StorageRevisionPage = {
+  fileId: string;
+  currentRevisionNo: number | null;
+  sha256: string | null;
+  items: StorageRevisionRow[];
+};
+
+export type StoragePage = {  items: StorageFileRow[];
   total: number | null;
   nextCursor: string | null;
   encryptionSummary: Record<string, number>;
@@ -460,18 +801,240 @@ export type StorageUploadRequest = {
   base64Data: string;
 };
 
+// ─── Phase 3: bucket-subdir <-> local-dir multi-sync ────────────────────────
+
+export type StorageSyncMode = 'two-way' | 'download-only' | 'upload-only';
+export type StorageSyncConflictPolicy = 'newest-wins' | 'local-wins' | 'remote-wins' | 'keep-both';
+
+/** One bucket-subdir -> local-dir link (serializable view of SyncBinding). */
+export type StorageSyncBindingRow = {
+  id: string;
+  name: string;
+  workspaceId: string;
+  workspaceName: string | null;
+  remoteFolderId: string | null;
+  remoteFolderPath: string;
+  localDir: string;
+  mode: StorageSyncMode;
+  conflictPolicy: StorageSyncConflictPolicy;
+  enabled: boolean;
+  intervalSeconds: number;
+  exclude: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StorageSyncBindingInput = {
+  name: string;
+  workspaceId: string;
+  remoteFolderId?: string | null;
+  remoteFolderPath?: string;
+  localDir: string;
+  mode?: StorageSyncMode;
+  conflictPolicy?: StorageSyncConflictPolicy;
+  enabled?: boolean;
+  intervalSeconds?: number;
+  exclude?: string[];
+};
+
+export type StorageSyncActionRow = {
+  kind: string;
+  relPath: string;
+  reason: string;
+  resolution?: string;
+};
+
+export type StorageSyncRunStatus = 'idle' | 'running' | 'ok' | 'error';
+
+/** Result of one sync pass for one binding. */
+export type StorageSyncRunResult = {
+  bindingId: string;
+  status: StorageSyncRunStatus;
+  startedAt: string;
+  finishedAt: string;
+  summary: Record<string, number>;
+  actions: StorageSyncActionRow[];
+  conflicts: StorageSyncActionRow[];
+  error?: string | null;
+};
+
+export type StorageSyncState = {
+  bindings: StorageSyncBindingRow[];
+  /** Last run per binding id. */
+  lastRuns: Record<string, StorageSyncRunResult>;
+  /** Whether the background scheduler is ticking. */
+  schedulerRunning: boolean;
+};
+
+/** A remote directory entry the user can pick as a sync target. */
+export type StorageRemoteFolderRow = {
+  id: string;
+  name: string;
+  path: string;
+  parentFolderId: string | null;
+};
+
+// ─── Phase 3: native mount daemon ───────────────────────────────────────────
+
+export type MountDeliveryMode = 'kernel' | 'mirror';
+export type MountStateName = 'stopped' | 'starting' | 'mounted' | 'degraded' | 'error';
+
+export type MountSessionRow = {
+  id: string;
+  workspaceId: string;
+  workspaceName: string | null;
+  remoteFolderId: string | null;
+  remoteFolderPath: string;
+  mountpoint: string;
+  mode: 'read-only' | 'read-write';
+  delivery: MountDeliveryMode;
+  state: MountStateName;
+  cacheDir: string;
+  journalPath: string;
+  volumeName: string;
+  createdAt: string;
+  updatedAt: string;
+  error: string | null;
+};
+
+export type MountSessionInput = {
+  workspaceId: string;
+  remoteFolderId?: string | null;
+  remoteFolderPath?: string;
+  mountpoint: string;
+  mode?: 'read-only' | 'read-write';
+  volumeName?: string;
+  delivery?: MountDeliveryMode;
+};
+
+export type MountCapabilitiesRow = {
+  platform: string;
+  driver: string;
+  helperPresent: boolean;
+  helperPath: string | null;
+  delivery: MountDeliveryMode;
+  warnings: string[];
+};
+
+export type MountSnapshot = {
+  capabilities: MountCapabilitiesRow;
+  sessions: MountSessionRow[];
+};
+
 /** Methods exposed on `window.nexus` by the preload bridge. */
 export type NexusBridge = {
   getVersion(): Promise<string>;
   getConnectionConfig(): Promise<DesktopConnectionConfig>;
   setConnectionConfig(patch: ConnectionConfigPatch): Promise<DesktopConnectionConfig>;
+  /** Non-secret UI preferences (locale, notifications). */
+  getUiSettings(): Promise<UiSettings>;
+  setUiSettings(patch: Partial<UiSettings>): Promise<UiSettings>;
+  /** Report an inbound chat message so main can raise an OS notification. */
+  notifyIncoming(
+    payload: DesktopNotificationPayload,
+    opts?: { force?: boolean },
+  ): Promise<void>;
+  /** Subscribe to a notification click, to route the renderer to the message. */
+  onNotificationActivated(
+    listener: (payload: DesktopNotificationPayload) => void,
+  ): () => void;
+  // Wake words (on-device detection + agent mapping).
+  wakeGetSettings(): Promise<WakeSettings>;
+  wakeSetSettings(next: WakeSettings): Promise<WakeSettings>;
+  /** Mappable agents for the wake settings picker (owned + public employees). */
+  wakeListAgents(): Promise<WakeAgentRow[]>;
+  /** Resolve a binding for arming, including installed model bytes. */
+  wakeResolveBinding(binding: WakeWordBinding | string): Promise<WakeBindingResolution | null>;
+  /** Report live listener state so the main process can track it (tray tooltip). */
+  wakeReportState(state: WakeListenState): Promise<void>;
+  /** A wake fired: main brings the window forward for the mapped agent. */
+  wakeActivated(payload: { phrase: string; agentId: string | null }): Promise<void>;
+  /** Subscribe to a wake activation routed from main (to open chat + dictate). */
+  onWakeActivated(
+    listener: (payload: { phrase: string; agentId: string | null }) => void,
+  ): () => void;
+  /** Unsubmitted wake transcripts kept for review (the `queue` unsent policy). */
+  wakeGetQueue(): Promise<QueuedUtterance[]>;
+  /** Replace the unsent queue (used after the user reviews/dismisses entries). */
+  wakeSetQueue(queue: QueuedUtterance[]): Promise<QueuedUtterance[]>;
+  /**
+   * Whether a wake can transcribe on-device right now (`stt_phrase` bindings),
+   * with an honest reason when it cannot. Local-only — never the region.
+   */
+  wakeSttStatus(): Promise<WakeSttStatus>;
+  /**
+   * Transcribe one wake utterance **on this machine**. Returns null when nothing
+   * was recognised. Audio never leaves the device; a non-local target is refused.
+   */
+  wakeTranscribeLocal(input: {
+    pcm: Float32Array;
+    sampleRate: number;
+  }): Promise<string | null>;
   getAuthState(): Promise<AuthState>;
   login(req: LoginRequest): Promise<AuthState>;
   submitTwoFactor(req: TwoFactorRequest): Promise<AuthState>;
+  /** Re-target which enrolled method the pending challenge uses. */
+  authSwitchTwoFactor(method: string): Promise<AuthState>;
+  // Country/region picker (public commands; no session required).
+  /** Active/preview countries for the login country picker. */
+  authListCountries(): Promise<CountryRow[]>;
+  /** Regions (incl. inactive) so a country can be resolved to its region. */
+  authListRegions(): Promise<RegionRow[]>;
+  /**
+   * Sandbox vs production for the connected region (public; no session needed).
+   * Mirrors the portal's `anx.config.environment` header-badge lookup. Resolves
+   * to null when the region cannot be read, so the UI fails closed and never
+   * blocks login.
+   */
+  authRegionEnvironment(): Promise<RegionEnvironment | null>;
+  /** Passwordless (email / SMS / voice) code sign-in, step 1. */
+  authStartPasswordless(input: { channel: PasswordlessChannel; identifier: string }): Promise<AuthState>;
+  /** Passwordless code sign-in, step 2. */
+  authVerifyPasswordless(input: { code: string }): Promise<AuthState>;
+  /** Re-send the passwordless code, optionally switching channel. */
+  authResendPasswordless(input?: { channel?: PasswordlessChannel }): Promise<AuthState>;
+  /** Abandon an in-flight password / passwordless challenge. */
+  authCancelChallenge(): Promise<AuthState>;
+  /** Start a QR "sign in with the Nexus app" link. */
+  authDeviceLinkStart(): Promise<DeviceLinkSessionStart>;
+  /** Poll an in-flight link; the approved branch signs this device in. */
+  authDeviceLinkPoll(): Promise<DeviceLinkPollOutcome>;
   logout(): Promise<void>;
+  /**
+   * Startup hydration: decide whether the stored session is still valid and what
+   * the renderer should show. Never signs a user out because the network is down.
+   */
+  hydrateSession(): Promise<SessionHydrationState>;
+  /** Subscribe to global session loss (device removed in the portal). */
+  onSessionLost(listener: (loss: { reason: string; deviceRevoked: boolean; message: string }) => void): () => void;
+  // App PIN lock (Deliverable 3). A UI gate only; never gates crypto or 2FA.
+  appLockGetState(): Promise<AppLockState>;
+  appLockSetPin(pin: string): Promise<AppLockState>;
+  appLockClearPin(): Promise<AppLockState>;
+  appLockUpdateSettings(patch: Partial<AppLockSettings>): Promise<AppLockState>;
+  /** Record user activity so the idle timer resets. */
+  appLockNoteActivity(): Promise<void>;
+  /** Ask main whether the UI should lock now (idle timeout elapsed). */
+  appLockEvaluate(): Promise<boolean>;
+  /** Attempt to unlock with the PIN; false when it is wrong. */
+  appLockUnlock(pin: string): Promise<boolean>;
+  /** Lock immediately (explicit "lock now"). */
+  appLockLock(): Promise<void>;
+  // Logout (Deliverable 5): the two-choice flow, never leaving the user stuck.
+  logoutRun(choice: LogoutChoice): Promise<LogoutReport>;
+  /** Retry only the steps a previous report listed as retryable. */
+  logoutRetry(steps: LogoutStep[], choice: LogoutChoice): Promise<LogoutReport>;
   getDeviceStatus(): Promise<DeviceStatus>;
   registerDevice(): Promise<DeviceStatus>;
   listLocalModels(refresh?: boolean): Promise<LocalModelsSnapshot>;
+  /** Configured local model instances + the persisted routing policy. */
+  localModelsGetConfig(): Promise<LocalModelsConfig>;
+  /** Add or replace one instance (by id); returns the new config. */
+  localModelsUpsert(instance: LocalModelBackend): Promise<LocalModelsConfig>;
+  localModelsRemove(id: string): Promise<LocalModelsConfig>;
+  localModelsSetPolicy(policy: LocalModelsRoutingPolicy): Promise<LocalModelsConfig>;
+  /** Probe a single instance (the settings "Test" button) without persisting. */
+  localModelsTest(instance: LocalModelBackend): Promise<LocalModelBackendStatus>;
   getToolsConfig(): Promise<ToolsConfig>;
   setWorkspaces(workspaces: WorkspaceRoot[]): Promise<ToolsConfig>;
   setLocalCommands(commands: LocalCommandSkill[]): Promise<ToolsConfig>;
@@ -490,10 +1053,30 @@ export type NexusBridge = {
   storageCapabilities(kind?: string): Promise<StorageCapabilities>;
   storageUpload(req: StorageUploadRequest): Promise<StorageFileRow>;
   storageDownloadUrl(fileId: string): Promise<{ url: string; presigned: boolean }>;
+  // Bucket revision management (Phase 3).
+  storageListRevisions(fileId: string, limit?: number): Promise<StorageRevisionPage>;
+  storageRevertRevision(fileId: string, revisionNo: number): Promise<{ revertedTo: number; revisionNo: number }>;
   storageTrashFile(fileId: string): Promise<void>;
   storageRestoreFile(fileId: string): Promise<void>;
   storageRenameFile(fileId: string, newName: string): Promise<void>;
   storageMoveFile(fileId: string, targetFolderId: string | null): Promise<void>;
+  // Bucket-subdir <-> local-dir multi-sync (Phase 3).
+  syncGetState(): Promise<StorageSyncState>;
+  syncListRemoteFolders(workspaceId: string): Promise<StorageRemoteFolderRow[]>;
+  syncAddBinding(input: StorageSyncBindingInput): Promise<StorageSyncState>;
+  syncUpdateBinding(id: string, patch: Partial<StorageSyncBindingInput>): Promise<StorageSyncState>;
+  syncRemoveBinding(id: string): Promise<StorageSyncState>;
+  syncRunNow(id: string): Promise<StorageSyncRunResult>;
+  syncRunAll(): Promise<StorageSyncState>;
+  /** Pick a local directory via the native dialog; null when cancelled. */
+  syncChooseLocalDir(): Promise<string | null>;
+  // Native mount daemon (Phase 3).
+  mountSnapshot(): Promise<MountSnapshot>;
+  mountAddSession(input: MountSessionInput): Promise<MountSnapshot>;
+  mountRemoveSession(id: string): Promise<MountSnapshot>;
+  mountStartSession(id: string): Promise<MountSnapshot>;
+  mountStopSession(id: string): Promise<MountSnapshot>;
+  mountChooseMountpoint(): Promise<string | null>;
   // Local GPU runner (Phase 4).
   runnerGetState(): Promise<LocalRunnerState>;
   runnerSetSettings(patch: Partial<LocalRunnerSettings>): Promise<LocalRunnerState>;
@@ -540,17 +1123,66 @@ export type NexusBridge = {
   localVoiceInstall(modelId: string): Promise<LocalVoiceState>;
   localVoiceCancelInstall(modelId: string): Promise<LocalVoiceState>;
   localVoiceRemove(modelId: string): Promise<LocalVoiceState>;
-  localVoiceProbeResources(): Promise<LocalVoiceResourceSnapshot>;};
+  localVoiceProbeResources(): Promise<LocalVoiceResourceSnapshot>;
+  // Speech-engine runner binary (`whisper-server`) — the executable the local
+  // STT / wake engines need, provisioned by the app so a downloaded model is
+  // runnable without a manual PATH install.
+  voiceBinaryStatus(): Promise<VoiceBinaryStatus>;
+  voiceBinaryInstall(): Promise<VoiceBinaryStatus>;
+  voiceBinaryCancelInstall(): Promise<VoiceBinaryStatus>;
+  voiceBinaryRemove(): Promise<VoiceBinaryStatus>;
+};
 
 /** IPC channel names. Kept explicit so main/preload stay in sync. */
 export const IPC = {
   version: 'nexus:version',
   configGet: 'nexus:config:get',
   configSet: 'nexus:config:set',
+  uiSettingsGet: 'nexus:ui-settings:get',
+  uiSettingsSet: 'nexus:ui-settings:set',
+  notifyIncoming: 'nexus:notify:incoming',
+  notifyActivated: 'nexus:notify:activated',
+  wakeGetSettings: 'nexus:wake:get-settings',
+  wakeSetSettings: 'nexus:wake:set-settings',
+  wakeListAgents: 'nexus:wake:list-agents',
+  wakeResolveBinding: 'nexus:wake:resolve-binding',
+  wakeReportState: 'nexus:wake:report-state',
+  wakeActivated: 'nexus:wake:activated',
+  wakeGetQueue: 'nexus:wake:get-queue',
+  wakeSetQueue: 'nexus:wake:set-queue',
+  wakeSttStatus: 'nexus:wake:stt-status',
+  wakeTranscribeLocal: 'nexus:wake:transcribe-local',
+  localModelsGetConfig: 'nexus:local-models:get-config',
+  localModelsUpsert: 'nexus:local-models:upsert',
+  localModelsRemove: 'nexus:local-models:remove',
+  localModelsSetPolicy: 'nexus:local-models:set-policy',
+  localModelsTest: 'nexus:local-models:test',
   authState: 'nexus:auth:state',
   authLogin: 'nexus:auth:login',
   authTwoFactor: 'nexus:auth:two-factor',
+  authSwitchTwoFactor: 'nexus:auth:switch-two-factor',
+  authListCountries: 'nexus:auth:list-countries',
+  authListRegions: 'nexus:auth:list-regions',
+  authRegionEnvironment: 'nexus:auth:region-environment',
+  authPasswordlessStart: 'nexus:auth:passwordless-start',
+  authPasswordlessVerify: 'nexus:auth:passwordless-verify',
+  authPasswordlessResend: 'nexus:auth:passwordless-resend',
+  authCancelChallenge: 'nexus:auth:cancel-challenge',
+  authDeviceLinkStart: 'nexus:auth:device-link-start',
+  authDeviceLinkPoll: 'nexus:auth:device-link-poll',
   authLogout: 'nexus:auth:logout',
+  authHydrate: 'nexus:auth:hydrate',
+  authSessionLost: 'nexus:auth:session-lost',
+  appLockGetState: 'nexus:app-lock:get-state',
+  appLockSetPin: 'nexus:app-lock:set-pin',
+  appLockClearPin: 'nexus:app-lock:clear-pin',
+  appLockUpdateSettings: 'nexus:app-lock:update-settings',
+  appLockNoteActivity: 'nexus:app-lock:note-activity',
+  appLockEvaluate: 'nexus:app-lock:evaluate',
+  appLockUnlock: 'nexus:app-lock:unlock',
+  appLockLock: 'nexus:app-lock:lock',
+  logoutRun: 'nexus:logout:run',
+  logoutRetry: 'nexus:logout:retry',
   deviceStatus: 'nexus:device:status',
   deviceRegister: 'nexus:device:register',
   localModelsList: 'nexus:local-models:list',
@@ -564,10 +1196,26 @@ export const IPC = {
   storageCapabilities: 'nexus:storage:capabilities',
   storageUpload: 'nexus:storage:upload',
   storageDownloadUrl: 'nexus:storage:download-url',
+  storageListRevisions: 'nexus:storage:list-revisions',
+  storageRevertRevision: 'nexus:storage:revert-revision',
   storageTrashFile: 'nexus:storage:trash-file',
   storageRestoreFile: 'nexus:storage:restore-file',
   storageRenameFile: 'nexus:storage:rename-file',
   storageMoveFile: 'nexus:storage:move-file',
+  syncGetState: 'nexus:sync:get-state',
+  syncListRemoteFolders: 'nexus:sync:list-remote-folders',
+  syncAddBinding: 'nexus:sync:add-binding',
+  syncUpdateBinding: 'nexus:sync:update-binding',
+  syncRemoveBinding: 'nexus:sync:remove-binding',
+  syncRunNow: 'nexus:sync:run-now',
+  syncRunAll: 'nexus:sync:run-all',
+  syncChooseLocalDir: 'nexus:sync:choose-local-dir',
+  mountSnapshot: 'nexus:mount:snapshot',
+  mountAddSession: 'nexus:mount:add-session',
+  mountRemoveSession: 'nexus:mount:remove-session',
+  mountStartSession: 'nexus:mount:start-session',
+  mountStopSession: 'nexus:mount:stop-session',
+  mountChooseMountpoint: 'nexus:mount:choose-mountpoint',
   runnerGetState: 'nexus:runner:get-state',
   runnerSetSettings: 'nexus:runner:set-settings',
   runnerStart: 'nexus:runner:start',
@@ -601,5 +1249,9 @@ export const IPC = {
   localVoiceCancelInstall: 'nexus:local-voice:cancel-install',
   localVoiceRemove: 'nexus:local-voice:remove',
   localVoiceProbeResources: 'nexus:local-voice:probe-resources',
+  voiceBinaryStatus: 'nexus:voice-binary:status',
+  voiceBinaryInstall: 'nexus:voice-binary:install',
+  voiceBinaryCancelInstall: 'nexus:voice-binary:cancel-install',
+  voiceBinaryRemove: 'nexus:voice-binary:remove',
   openExternal: 'nexus:open-external',
 } as const;

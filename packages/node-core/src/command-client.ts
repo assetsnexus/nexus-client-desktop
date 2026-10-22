@@ -47,6 +47,7 @@ export function createNodeCommandClient(
         responseCode: res.responseCode,
         responseObject: res.responseObject,
         message: res.message,
+        code: res.code,
         authorizationRequired: res.authorizationRequired,
         authRequestId: res.authRequestId,
       };
