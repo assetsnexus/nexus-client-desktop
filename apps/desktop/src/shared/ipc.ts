@@ -25,6 +25,11 @@ import type {
 } from './wake.js';
 import type { AppLockSettings, AppLockState } from './app-lock.js';
 import type { LogoutChoice, LogoutReport, LogoutStep } from './logout.js';
+import type {
+  InstalledNexusApp,
+  TrayAppItem,
+  TrayAppSettings,
+} from './nexus-apps.js';
 
 export type { RegionEnvironment } from './sandbox-environment.js';
 
@@ -61,6 +66,20 @@ export type { CompanionLaunch, CompanionMode } from './companion.js';
 export type { CountryRow, RegionRow } from '@nexus/node-core';
 export type { CountryRegionResolution } from './login-region.js';
 
+export type {
+  AppVisibilityMode,
+  CustomTrayApp,
+  InstalledNexusApp,
+  TrayAppGroup,
+  TrayAppItem,
+  TrayAppSettings,
+} from './nexus-apps.js';
+export {
+  DEFAULT_TRAY_APP_SETTINGS,
+  MAX_CUSTOM_TRAY_APPS,
+  isSafeExternalUrl,
+} from './nexus-apps.js';
+
 export type ConnectionConfigPatch = Partial<DesktopConnectionConfig>;
 
 /**
@@ -77,7 +96,50 @@ export type UiSettings = {
   loginCountry: string | null;
   /** App PIN inactivity-lock preferences (the PIN itself is never exposed). */
   appLock: AppLockSettings;
+  /** Tray "Nexus apps" visibility (allow/deny mode + custom entries). */
+  trayApps: TrayAppSettings;
+  /**
+   * Companion 3D debug surfaces (motion feed / gesture tester / status motions /
+   * walkable scene). All off by default; a developer can also force them on with
+   * `?companionDebug=1` in the companion window URL.
+   */
+  companionDebug: CompanionDebugSettings;
 };
+
+/**
+ * Which companion debug surfaces are visible. Everything defaults to `false` so
+ * a normal companion window stays clean; the surfaces are opt-in from Settings.
+ */
+export type CompanionDebugSettings = {
+  /** Live action-feed table (source / status / Δ / op / detail). */
+  motionFeed: boolean;
+  /** Gesture catalogue player (play one / play all one-shots). */
+  gestureTest: boolean;
+  /** Status-motion editor (thinking/writing/… clip pools). */
+  statusMotions: boolean;
+  /** Render the walkable SceneRoom (grid + room bounds) instead of the flat stage. */
+  sceneMode: boolean;
+};
+
+export const DEFAULT_COMPANION_DEBUG_SETTINGS: CompanionDebugSettings = {
+  motionFeed: false,
+  gestureTest: false,
+  statusMotions: false,
+  sceneMode: false,
+};
+
+/** Coerce a persisted/patched companion-debug block field-by-field. */
+export function normalizeCompanionDebugSettings(raw: unknown): CompanionDebugSettings {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_COMPANION_DEBUG_SETTINGS };
+  const rec = raw as Record<string, unknown>;
+  const flag = (key: keyof CompanionDebugSettings): boolean => rec[key] === true;
+  return {
+    motionFeed: flag('motionFeed'),
+    gestureTest: flag('gestureTest'),
+    statusMotions: flag('statusMotions'),
+    sceneMode: flag('sceneMode'),
+  };
+}
 
 /**
  * How a new-message OS notification is presented. The default is a full card
@@ -314,6 +376,8 @@ export type MembershipRow = {
   role: string | null;
   businessEmail: string | null;
   orgName: string | null;
+  /** Organisation logo (`orgLogo` from `anx.organization.membership.list`). */
+  orgLogo: string | null;
 };
 
 export type MembershipLoginStart = {
@@ -719,12 +783,54 @@ export type ToolsConfig = {
 export type ToolInvocation = {
   name: string;
   [k: string]: unknown;
+  /**
+   * Which agent requested the call, and the conversation it belongs to. Sent by
+   * the renderer tool bridge purely so the main process can correlate the audit
+   * entry with a conversation. **These are audit metadata only** — they grant no
+   * authority and are never used for policy. Both are optional; a call made
+   * outside a chat turn simply records `null`.
+   */
+  agentId?: string | null;
+  conversationId?: string | null;
 };
 
 export type ToolInvocationResult = {
   ok: boolean;
   data?: unknown;
   error?: string;
+};
+
+// ─── Client-tool audit trail (local-only, immutable by agents) ──────────────
+export type {
+  AuditFacet,
+  AuditFacets,
+  AuditFilter,
+  AuditRetention,
+  AuditOutcome,
+  ClientToolAuditEntry,
+} from './audit.js';
+export {
+  AUDIT_RETENTION_CHOICES,
+  DEFAULT_AUDIT_RETENTION,
+  BYTES_PER_MIB,
+} from './audit.js';
+
+/**
+ * Read-only snapshot the audit browser renders. `retention` is the configurable
+ * block; `path` is shown for transparency (main owns the file). There is
+ * deliberately **no** bridge method to append/clear/trim — the store is
+ * main-process only.
+ */
+export type AuditSnapshot = {
+  entries: import('./audit.js').ClientToolAuditEntry[];
+  retention: import('./audit.js').AuditRetention;
+  facets: import('./audit.js').AuditFacets;
+  /** Path of the append-only JSONL file (display only). */
+  path: string;
+  /** Retained entry count (before any UI filter). */
+  total: number;
+  /** Retained bytes on disk. */
+  sizeBytes: number;
 };
 
 /** Storage explorer (Phase 2): a thin, serializable view of the region data. */
@@ -767,6 +873,23 @@ export type StorageRevisionPage = {
   currentRevisionNo: number | null;
   sha256: string | null;
   items: StorageRevisionRow[];
+  /**
+   * True when the region does not serve `anx.file.revision.list`
+   * (`COMMAND_NOT_FOUND`). The explorer shows an explicit "not available on
+   * this region" state instead of a raw command error. Optional so older
+   * preload/main builds stay compatible.
+   */
+  unsupported?: boolean;
+  /**
+   * True when the request failed at the *transport* layer (a dropped/reset
+   * socket, e.g. a keep-alive race or a region restart) rather than being
+   * delivered and refused. The explorer shows a clear, retryable state instead
+   * of a raw `RegionAuthError: read ECONNRESET`. Enables the main-process
+   * adapter to degrade gracefully without weakening real command errors.
+   */
+  transportFailed?: boolean;
+  /** Human-readable transport failure copy; shown with the retry affordance. */
+  transportMessage?: string;
 };
 
 export type StoragePage = {  items: StorageFileRow[];
@@ -800,6 +923,107 @@ export type StorageUploadRequest = {
   /** Base64 payload (the renderer reads the file via the File API). */
   base64Data: string;
 };
+
+// ─── Phase: drag-and-drop transfer (upload queue + save/drag-out) ───────────
+
+/**
+ * How a transfer writes its bytes. `auto` prefers a streaming presign-PUT
+ * request body (real byte progress); `buffer` forces the legacy
+ * read-all-then-base64 command, which is honestly reported as indeterminate.
+ */
+export type StorageTransferMode = 'auto' | 'stream' | 'buffer';
+
+/**
+ * One file's upload. The renderer only has paths (`webUtils.getPathForFile`),
+ * so main reads the bytes itself and this request carries **no** base64 payload
+ * — that is what keeps hundreds of files off the renderer heap.
+ */
+export type StorageUploadOneRequest = {
+  /** Renderer-generated id; also the key for progress + cancel. */
+  transferId: string;
+  workspaceId: string;
+  /** Folder id to upload into; `null`/omitted means the workspace root. */
+  folderId?: string | null;
+  /** Workspace-relative folder prefix to materialize (`''` = target folder). */
+  prefix: string;
+  /** Destination file name inside the target folder. */
+  name: string;
+  /** Absolute source path on disk (from the OS drop). */
+  absPath: string;
+  contentType: string;
+  sizeBytes: number;
+  mode?: StorageTransferMode;
+};
+
+/** How each byte was actually delivered, so the UI can tell truth from guess. */
+export type StorageTransferTransport = 'stream' | 'buffer' | 'none';
+
+export type StorageUploadOneResult = {
+  transferId: string;
+  ok: boolean;
+  fileId: string | null;
+  transport: StorageTransferTransport;
+  /** Bytes flushed to the transport (0 when the path was indeterminate). */
+  sentBytes: number;
+  /** True when the path could not report byte granularity. */
+  indeterminate: boolean;
+  cancelled: boolean;
+  error?: string;
+};
+
+/** Per-file progress pushed from main while a transfer is running. */
+export type StorageTransferProgress = {
+  transferId: string;
+  sentBytes: number;
+  totalBytes: number;
+  indeterminate: boolean;
+};
+
+export type StorageTransferCancelResult = { transferId: string; cancelled: boolean };
+
+/** A resolved fetchable URL for a file (presigned GET, or the region proxy). */
+export type StorageDownloadLink = { url: string; presigned: boolean };
+
+/**
+ * Real bytes for an inline image/PDF preview, fetched by main and base64-encoded
+ * so the sandboxed renderer never has to reach the (cross-origin) storage host
+ * itself. `contentType` is the type the response actually served, so the
+ * renderer can build a correctly-typed `blob:` URL.
+ */
+export type StoragePreviewBytes =
+  | { ok: true; base64: string; contentType: string; sizeBytes: number }
+  | { ok: false; error?: string; tooLarge?: boolean };
+
+/** Result of saving one file to a user-chosen path via the native dialog. */
+export type StorageSaveResult = {
+  saved: boolean;
+  cancelled: boolean;
+  path: string | null;
+  bytes: number;
+  error?: string;
+};
+
+/** One file found by recursing a dropped directory (path relative to its root). */
+export type StorageDropFile = {
+  path: string;
+  relPath: string;
+  sizeBytes: number;
+};
+
+/** One top-level entry a drop or path-list produced. */
+export type StorageDropEntry = {
+  path: string;
+  name: string;
+  isDirectory: boolean;
+  /** Size for a plain file; 0 for a directory. */
+  sizeBytes: number;
+  /** Populated only for directories: every file found beneath it. */
+  children?: StorageDropFile[];
+  /** Set when a directory could not be read at all. */
+  error?: string;
+};
+
+export type StorageDropExpansion = { entries: StorageDropEntry[] };
 
 // ─── Phase 3: bucket-subdir <-> local-dir multi-sync ────────────────────────
 
@@ -921,14 +1145,59 @@ export type MountSnapshot = {
   sessions: MountSessionRow[];
 };
 
+/**
+ * Certificate trust ("trust this certificate").
+ *
+ * A TLS failure to the region / gateway that is *only* an untrusted certificate
+ * surfaces as a prompt; the user may pin that exact certificate for that exact
+ * host. Trust is a fingerprint scoped to a host — never a blanket accept.
+ */
+export type CertificateTrustReason =
+  | 'authority-invalid'
+  | 'self-signed'
+  | 'name-mismatch'
+  | 'expired'
+  | 'unknown';
+
+/** Certificate facts shown in the trust prompt. */
+export type CertificatePromptInfo = {
+  host: string;
+  fingerprint: string;
+  subject: string;
+  issuer: string;
+  validFrom: string | null;
+  validTo: string | null;
+  /** Chromium's verdict string, e.g. `CERT_AUTHORITY_INVALID`. */
+  verificationResult: string;
+  reason: CertificateTrustReason;
+};
+
+/** A persisted user trust decision (a fingerprint pinned to a host). */
+export type CertificateTrustEntry = {
+  host: string;
+  fingerprint: string;
+  subject: string;
+  issuer: string;
+  validFrom: string | null;
+  validTo: string | null;
+  trustedAt: number;
+};
+
 /** Methods exposed on `window.nexus` by the preload bridge. */
 export type NexusBridge = {
-  getVersion(): Promise<string>;
-  getConnectionConfig(): Promise<DesktopConnectionConfig>;
+  getVersion(): Promise<string>;  getConnectionConfig(): Promise<DesktopConnectionConfig>;
   setConnectionConfig(patch: ConnectionConfigPatch): Promise<DesktopConnectionConfig>;
   /** Non-secret UI preferences (locale, notifications). */
   getUiSettings(): Promise<UiSettings>;
   setUiSettings(patch: Partial<UiSettings>): Promise<UiSettings>;
+  /** Current user-approved TLS certificate pins (region/gateway). */
+  certTrustList(): Promise<CertificateTrustEntry[]>;
+  /** Revoke a pin; omit `fingerprint` to revoke every pin for that host. */
+  certTrustRevoke(host: string, fingerprint?: string): Promise<CertificateTrustEntry[]>;
+  /** A TLS connection needs trust: main asks the renderer to show the prompt. */
+  onCertTrustPrompt(listener: (info: CertificatePromptInfo) => void): () => void;
+  /** The user's answer to the trust prompt. */
+  certTrustRespond(decision: { host: string; fingerprint: string; trusted: boolean }): Promise<void>;
   /** Report an inbound chat message so main can raise an OS notification. */
   notifyIncoming(
     payload: DesktopNotificationPayload,
@@ -1039,6 +1308,16 @@ export type NexusBridge = {
   setWorkspaces(workspaces: WorkspaceRoot[]): Promise<ToolsConfig>;
   setLocalCommands(commands: LocalCommandSkill[]): Promise<ToolsConfig>;
   runTool(req: ToolInvocation): Promise<ToolInvocationResult>;
+  /**
+   * **Read-only** client-tool audit trail. The store is written exclusively by
+   * the main process; no method here can append, clear or trim it, and no
+   * agent-facing tool call can reach it. `auditSetRetention` only adjusts the
+   * configurable window (main applies the trim); it is a user settings action,
+   * never an agent one.
+   */
+  auditSnapshot(filter?: import('./audit.js').AuditFilter): Promise<AuditSnapshot>;
+  /** Update the retention window; the main process re-trims immediately. */
+  auditSetRetention(retention: Partial<import('./audit.js').AuditRetention>): Promise<AuditSnapshot>;
   // Storage explorer (Phase 2).
   storageWorkspaces(): Promise<StorageWorkspaceRow[]>;
   storageFolderList(workspaceId: string, parentFolderId?: string | null): Promise<StorageFolderRow[]>;
@@ -1060,6 +1339,40 @@ export type NexusBridge = {
   storageRestoreFile(fileId: string): Promise<void>;
   storageRenameFile(fileId: string, newName: string): Promise<void>;
   storageMoveFile(fileId: string, targetFolderId: string | null): Promise<void>;
+  // Drag-and-drop transfer: folder expansion, per-file uploads with real
+  // progress, cancel, and save/drag-out. All bytes are moved by the main
+  // process; the renderer only sends paths.
+  storageExpandDrop(paths: string[]): Promise<StorageDropExpansion>;
+  /** Upload one dropped file; resolves when it lands (or fails). */
+  storageUploadOne(req: StorageUploadOneRequest): Promise<StorageUploadOneResult>;
+  /** Cancel an in-flight single-file transfer; aborts the underlying request. */
+  storageTransferCancel(transferId: string): Promise<StorageTransferCancelResult>;
+  /** Subscribe to per-file upload progress pushed from main. */
+  onStorageTransferProgress(
+    listener: (progress: StorageTransferProgress) => void,
+  ): () => void;
+  /** Materialize a fetchable download URL (presigned GET or the proxy). */
+  storageDownloadLink(fileId: string): Promise<StorageDownloadLink>;
+  /** Save one file to a path chosen via the native dialog (streams to disk). */
+  storageSaveFile(fileId: string, suggestedName: string): Promise<StorageSaveResult>;
+  /** Pick a directory, then save many files into it (native dialog). */
+  storageSaveFilesToDir(
+    files: Array<{ fileId: string; name: string }>,
+  ): Promise<{ saved: number; cancelled: boolean; dir: string | null }>;
+  /** Stage a file into app temp storage for an OS drag-out; returns its path. */
+  storagePrepareDrag(fileId: string, name: string): Promise<{ path: string | null; error?: string; name?: string }>;
+  /** Start an OS drag-out of a staged file (called on `dragstart`). */
+  storageStartDrag(fileId: string, name: string): Promise<void>;
+  /** Clean up temp files staged for a drag-out (called on `dragend`). */
+  storageReleaseDrag(fileId: string): Promise<void>;
+  /** Fetch real bytes for an inline image/PDF preview (bounded; streams in main). */
+  storagePreviewBytes(fileId: string): Promise<StoragePreviewBytes>;
+  /**
+   * Absolute OS path for a dropped `File`. Electron 32+ removed the `file.path`
+   * property; `webUtils.getPathForFile` (preload-only) is the supported API and
+   * is exposed here because the sandboxed renderer cannot reach `webUtils`.
+   */
+  getPathForFile(file: File): string;
   // Bucket-subdir <-> local-dir multi-sync (Phase 3).
   syncGetState(): Promise<StorageSyncState>;
   syncListRemoteFolders(workspaceId: string): Promise<StorageRemoteFolderRow[]>;
@@ -1100,11 +1413,29 @@ export type NexusBridge = {
   assetAgentDiscoverySnapshot(): Promise<AssetAgentDiscoverySnapshot>;
   assetAgentDiscoveryScan(): Promise<AssetAgentDiscoverySnapshot>;
   assetAgentSetPreferLocal(enabled: boolean): Promise<AssetAgentDiscoverySnapshot>;
+  // Tray "Nexus apps" (Login-with-ANX installed apps + the section preview).
+  /**
+   * Installed Nexus apps (connected via Login with ANX) as the tray would list
+   * them right now — already filtered by the persisted allow/deny settings.
+   */
+  trayListApps(): Promise<InstalledNexusApp[]>;
+  /**
+   * The resolved tray list (installed + custom), for the settings preview.
+   * Never throws: an unreachable region yields the custom entries only.
+   */
+  trayResolvedApps(): Promise<TrayAppItem[]>;
   openExternal(url: string): Promise<void>;
   // Immersive companion window (Phase 7a).
   companionOpen(launch: CompanionLaunch): Promise<{ opened: boolean; contactId: string }>;
   companionClose(contactId: string): Promise<boolean>;
   companionList(): Promise<string[]>;
+  /**
+   * Pin / unpin a companion above other windows. Returns the applied state, or
+   * `null` when no companion is open for that contact.
+   */
+  companionSetAlwaysOnTop(contactId: string, onTop: boolean): Promise<boolean | null>;
+  /** Whether a contact's companion is currently pinned (`null` when not open). */
+  companionIsAlwaysOnTop(contactId: string): Promise<boolean | null>;
   // Desktop calendar (Phase 7b).
   calendarListEvents(input?: CalendarListInput): Promise<CalendarEventRow[]>;
   calendarUpcoming(): Promise<CalendarEventRow[]>;
@@ -1138,6 +1469,10 @@ export const IPC = {
   version: 'nexus:version',
   configGet: 'nexus:config:get',
   configSet: 'nexus:config:set',
+  certTrustList: 'nexus:cert-trust:list',
+  certTrustRevoke: 'nexus:cert-trust:revoke',
+  certTrustPrompt: 'nexus:cert-trust:prompt',
+  certTrustRespond: 'nexus:cert-trust:respond',
   uiSettingsGet: 'nexus:ui-settings:get',
   uiSettingsSet: 'nexus:ui-settings:set',
   notifyIncoming: 'nexus:notify:incoming',
@@ -1190,6 +1525,8 @@ export const IPC = {
   toolsSetWorkspaces: 'nexus:tools:set-workspaces',
   toolsSetLocalCommands: 'nexus:tools:set-local-commands',
   toolsRun: 'nexus:tools:run',
+  auditSnapshot: 'nexus:audit:snapshot',
+  auditSetRetention: 'nexus:audit:set-retention',
   storageWorkspaces: 'nexus:storage:workspaces',
   storageFolderList: 'nexus:storage:folder-list',
   storageListFiles: 'nexus:storage:list-files',
@@ -1202,6 +1539,17 @@ export const IPC = {
   storageRestoreFile: 'nexus:storage:restore-file',
   storageRenameFile: 'nexus:storage:rename-file',
   storageMoveFile: 'nexus:storage:move-file',
+  storageExpandDrop: 'nexus:storage:expand-drop',
+  storageUploadOne: 'nexus:storage:upload-one',
+  storageTransferCancel: 'nexus:storage:transfer-cancel',
+  storageTransferProgress: 'nexus:storage:transfer-progress',
+  storageDownloadLink: 'nexus:storage:download-link',
+  storageSaveFile: 'nexus:storage:save-file',
+  storageSaveFilesToDir: 'nexus:storage:save-files-to-dir',
+  storagePrepareDrag: 'nexus:storage:prepare-drag',
+  storageStartDrag: 'nexus:storage:start-drag',
+  storageReleaseDrag: 'nexus:storage:release-drag',
+  storagePreviewBytes: 'nexus:storage:preview-bytes',
   syncGetState: 'nexus:sync:get-state',
   syncListRemoteFolders: 'nexus:sync:list-remote-folders',
   syncAddBinding: 'nexus:sync:add-binding',
@@ -1231,9 +1579,13 @@ export const IPC = {
   assetAgentSnapshot: 'nexus:asset-agent:snapshot',
   assetAgentScan: 'nexus:asset-agent:scan',
   assetAgentSetPreferLocal: 'nexus:asset-agent:set-prefer-local',
+  trayAppsList: 'nexus:tray-apps:list',
+  trayAppsResolved: 'nexus:tray-apps:resolved',
   companionOpen: 'nexus:companion:open',
   companionClose: 'nexus:companion:close',
   companionList: 'nexus:companion:list',
+  companionSetAlwaysOnTop: 'nexus:companion:set-always-on-top',
+  companionIsAlwaysOnTop: 'nexus:companion:is-always-on-top',
   calendarListEvents: 'nexus:calendar:list-events',
   calendarUpcoming: 'nexus:calendar:upcoming',
   calendarCreateEvent: 'nexus:calendar:create-event',

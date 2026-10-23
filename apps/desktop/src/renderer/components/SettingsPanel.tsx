@@ -2,12 +2,20 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { LocalModelsPanel } from './LocalModelsPanel.js';
 import { LocalVoicePanel } from './LocalVoicePanel.js';
 import { WakeSettingsPanel } from './WakeSettingsPanel.js';
+import { AuditPanel } from './AuditPanel.js';
+import { NexusAppsPanel } from './NexusAppsPanel.js';
+import { CertTrustPanel } from './CertTrustPanel.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
 import { LanguageSelector } from './LanguageSelector.js';
 import { useI18n } from '../i18n/index.js';
 import {
   bridge,
+  LOCK_TIMEOUT_CHOICES,
+  PIN_MIN_LENGTH,
+  type AppLockSettings,
+  type AppLockState,
   type AssetAgentDiscoverySnapshot,
+  type CompanionDebugSettings,
   type DesktopConnectionConfig,
   type LocalCommandSkill,
   type LocalRunnerSettings,
@@ -19,7 +27,12 @@ import {
 
 const wrap: CSSProperties = {
   height: '100%',
-  overflow: 'auto',
+  width: '100%',
+  boxSizing: 'border-box',
+  minWidth: 0,
+  minHeight: 0,
+  overflowY: 'auto',
+  overflowX: 'hidden',
   padding: 24,
   display: 'flex',
   flexDirection: 'column',
@@ -141,8 +154,49 @@ export function SettingsPanel({
   const [notificationsBusy, setNotificationsBusy] = useState(false);
   const [testSent, setTestSent] = useState(false);
 
+  const [appLock, setAppLock] = useState<AppLockState | null>(null);
+  const [pinDraft, setPinDraft] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
+
+  const [companionDebug, setCompanionDebug] = useState<CompanionDebugSettings | null>(null);
+  const [companionDebugBusy, setCompanionDebugBusy] = useState(false);
+
   useEffect(() => {
-    void bridge.getUiSettings().then((ui) => setNotifications(ui.notifications));
+    void bridge.getUiSettings().then((ui) => {
+      setNotifications(ui.notifications);
+      setCompanionDebug(ui.companionDebug);
+    });
+    void bridge.appLockGetState().then(setAppLock).catch(() => setAppLock(null));
+  }, []);
+
+  const patchAppLock = useCallback(
+    async (patch: Partial<AppLockSettings>) => {
+      try {
+        setAppLock(await bridge.appLockUpdateSettings(patch));
+      } catch (err) {
+        setPinError(err instanceof Error ? err.message : 'could not update the lock');
+      }
+    },
+    [],
+  );
+
+  const savePin = useCallback(async () => {
+    setPinError(null);
+    try {
+      setAppLock(await bridge.appLockSetPin(pinDraft.trim()));
+      setPinDraft('');
+    } catch (err) {
+      setPinError(err instanceof Error ? err.message : 'could not set the PIN');
+    }
+  }, [pinDraft]);
+
+  const clearPin = useCallback(async () => {
+    setPinError(null);
+    try {
+      setAppLock(await bridge.appLockClearPin());
+    } catch (err) {
+      setPinError(err instanceof Error ? err.message : 'could not clear the PIN');
+    }
   }, []);
 
   const patchNotifications = useCallback(
@@ -160,6 +214,22 @@ export function SettingsPanel({
       }
     },
     [notifications],
+  );
+
+  const patchCompanionDebug = useCallback(
+    async (patch: Partial<CompanionDebugSettings>) => {
+      if (!companionDebug) return;
+      setCompanionDebugBusy(true);
+      try {
+        const ui = await bridge.setUiSettings({
+          companionDebug: { ...companionDebug, ...patch },
+        });
+        setCompanionDebug(ui.companionDebug);
+      } finally {
+        setCompanionDebugBusy(false);
+      }
+    },
+    [companionDebug],
   );
 
   const sendTestNotification = useCallback(async () => {
@@ -344,6 +414,23 @@ export function SettingsPanel({
               </span>
             </label>
 
+            <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={notifications.suppressWhenLocked}
+                disabled={notificationsBusy || !notifications.enabled}
+                onChange={(e) => void patchNotifications({ suppressWhenLocked: e.target.checked })}
+              />
+              <span style={{ color: '#e8eef4' }}>
+                {t('settings.notifications.suppressWhenLocked')}{' '}
+                <span style={{ color: '#6b7784' }}>
+                  {notifications.suppressWhenLocked
+                    ? '(on — locked cards show no content)'
+                    : '(off — content is shown even while locked)'}
+                </span>
+              </span>
+            </label>
+
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <button
                 type="button"
@@ -359,6 +446,143 @@ export function SettingsPanel({
                 </span>
               ) : null}
             </div>
+          </>
+        ) : (
+          <p style={{ color: '#6b7784', fontSize: 12 }}>Loading…</p>
+        )}
+      </section>
+
+      <section style={section}>
+        <h2 style={{ margin: 0, fontSize: 16 }}>App lock</h2>
+        <p style={{ margin: 0, color: '#6b7784', fontSize: 12 }}>
+          Lock the interface behind a PIN after a period of inactivity. The lock hides the screen
+          only — it never blocks sign-in, 2FA, or any secure operation. Forgot the PIN? Sign out or
+          switch user to clear it.
+        </p>
+        {appLock ? (
+          <>
+            <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={appLock.settings.enabled}
+                disabled={!appLock.hasPin}
+                onChange={(e) => void patchAppLock({ enabled: e.target.checked })}
+              />
+              <span style={{ color: '#e8eef4' }}>
+                Lock the app after inactivity
+                {!appLock.hasPin ? (
+                  <span style={{ color: '#6b7784' }}> (set a PIN first)</span>
+                ) : null}
+              </span>
+            </label>
+
+            <label style={field}>
+              <span>Lock after (minutes of inactivity)</span>
+              <select
+                style={input}
+                value={appLock.settings.timeoutMinutes}
+                disabled={!appLock.settings.enabled}
+                onChange={(e) => void patchAppLock({ timeoutMinutes: Number(e.target.value) })}
+              >
+                {LOCK_TIMEOUT_CHOICES.map((m) => (
+                  <option key={m} value={m}>
+                    {m === 1 ? '1 minute' : `${m} minutes`}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={field}>
+              <span>{appLock.hasPin ? 'Replace PIN' : `Set a PIN (${PIN_MIN_LENGTH}–12 digits)`}</span>
+              <input
+                style={input}
+                type="password"
+                inputMode="numeric"
+                value={pinDraft}
+                placeholder="••••"
+                onChange={(e) => setPinDraft(e.target.value.replace(/[^0-9]/g, ''))}
+              />
+            </label>
+            {pinError ? <span style={{ color: '#f2a1a1', fontSize: 12 }}>{pinError}</span> : null}
+
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button
+                type="button"
+                style={button}
+                disabled={pinDraft.trim().length < PIN_MIN_LENGTH}
+                onClick={() => void savePin()}
+              >
+                {appLock.hasPin ? 'Replace PIN' : 'Set PIN'}
+              </button>
+              {appLock.hasPin ? (
+                <button
+                  type="button"
+                  style={{ ...button, background: '#1c2430', borderColor: '#3a4654' }}
+                  onClick={() => void clearPin()}
+                >
+                  Remove PIN
+                </button>
+              ) : null}
+              {appLock.armed ? (
+                <span style={{ color: '#4ade80', fontSize: 12 }}>
+                  Armed · locks after {appLock.settings.timeoutMinutes} min
+                </span>
+              ) : (
+                <span style={{ color: '#6b7784', fontSize: 12 }}>Not armed</span>
+              )}
+              <span style={{ flex: 1 }} />
+              {appLock.armed ? (
+                <button
+                  type="button"
+                  style={{ ...button, background: '#1c2430', borderColor: '#3a4654' }}
+                  onClick={() => void bridge.appLockLock()}
+                >
+                  Lock now
+                </button>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <p style={{ color: '#6b7784', fontSize: 12 }}>Loading…</p>
+        )}
+      </section>
+
+      <section style={section}>
+        <h2 style={{ margin: 0, fontSize: 16 }}>Companion debug</h2>
+        <p style={{ margin: 0, color: '#6b7784', fontSize: 12 }}>
+          Developer surfaces for the 3D agent companion. All off by default; a normal companion
+          window stays clean. The motion feed shows the live action stream (source / status / op),
+          the gesture tester plays any loaded clip, and the status-motion editor tunes the clips an
+          agent uses while working. Scene mode swaps the flat stage for a walkable room so the
+          character tools (walk / approach / turn) are visible. You can also force all of these on
+          with <code>?companionDebug=1</code> in the companion window URL.
+        </p>
+        {companionDebug ? (
+          <>
+            {(
+              [
+                ['motionFeed', 'Motion feed panel', 'Live action feed (source / status / Δ / op / detail).'],
+                ['gestureTest', 'Gesture tester', 'Play any loaded clip, or run all one-shots.'],
+                ['statusMotions', 'Status motions editor', 'Clips cycled while the agent is thinking / writing.'],
+                ['sceneMode', 'Walkable scene', 'Ground grid + room bounds so walk / approach is visible.'],
+              ] as const
+            ).map(([key, label, hint]) => (
+              <label
+                key={key}
+                style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={companionDebug[key]}
+                  disabled={companionDebugBusy}
+                  onChange={(e) => void patchCompanionDebug({ [key]: e.target.checked })}
+                />
+                <span style={{ color: '#e8eef4' }}>
+                  {label}
+                  <span style={{ color: '#6b7784' }}> — {hint}</span>
+                </span>
+              </label>
+            ))}
           </>
         ) : (
           <p style={{ color: '#6b7784', fontSize: 12 }}>Loading…</p>
@@ -416,6 +640,14 @@ export function SettingsPanel({
         </div>
       </section>
 
+      <ErrorBoundary label="Nexus apps">
+        <NexusAppsPanel />
+      </ErrorBoundary>
+
+      <ErrorBoundary label="Trusted certificates">
+        <CertTrustPanel />
+      </ErrorBoundary>
+
       <ErrorBoundary label="Local models">
         <LocalModelsPanel />
       </ErrorBoundary>
@@ -426,6 +658,10 @@ export function SettingsPanel({
 
       <ErrorBoundary label="Wake words">
         <WakeSettingsPanel />
+      </ErrorBoundary>
+
+      <ErrorBoundary label="Client-tool audit trail">
+        <AuditPanel />
       </ErrorBoundary>
 
       <section style={section}>

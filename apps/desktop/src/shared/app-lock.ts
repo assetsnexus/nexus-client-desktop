@@ -119,6 +119,23 @@ export function signOutClearsPin(): true {
   return true;
 }
 
+/**
+ * Whether the PIN gate overlay should render right now.
+ *
+ * The gate must never cover the lock-out recovery surface: the "forgot the PIN"
+ * action opens the logout dialog, and the gate keeps re-reporting `locked` from
+ * the main process (it only clears on unlock/sign-out), so without this the
+ * overlay would re-cover the dialog on the next poll and trap the user. While
+ * recovery is open, the gate stays hidden; if recovery is cancelled it returns.
+ */
+export function lockGateVisible(input: {
+  locked: boolean;
+  signedIn: boolean;
+  recoveryOpen: boolean;
+}): boolean {
+  return input.locked && input.signedIn && !input.recoveryOpen;
+}
+
 /** Renderer-visible lock state (safe to expose; never carries the PIN/hash). */
 export type AppLockState = {
   settings: AppLockSettings;

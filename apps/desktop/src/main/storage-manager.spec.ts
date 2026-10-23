@@ -107,4 +107,48 @@ describe('createStorageManager', () => {
       targetFolderId: 'd2',
     });
   });
+
+  it('lists revisions and marks the page as not transport-failed', async () => {
+    const { manager } = managerWith({
+      'anx.file.revision.list': {
+        responseCode: 200,
+        responseObject: {
+          fileId: 'f1',
+          currentRevisionNo: 3,
+          sha256: 'cur',
+          items: [{ revisionNo: 2, parentRevisionNo: 1, sizeBytes: 5, sha256: 'r2', command: 'x' }],
+        },
+      },
+    });
+    const page = await manager.listRevisions('f1', 100);
+    expect(page.currentRevisionNo).toBe(3);
+    expect(page.items[0]?.revisionNo).toBe(2);
+    expect(page.transportFailed).toBe(false);
+  });
+
+  it('degrades a dropped-socket failure into a clear, retryable state', async () => {
+    // A keep-alive reset must NOT surface as `RegionAuthError: read ECONNRESET`
+    // to the renderer; it becomes a typed transport state the UI can retry.
+    const manager = createStorageManager({
+      getSender: async () => ({
+        send: async () => {
+          throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+        },
+      }),
+      getRegionUrl: () => 'https://region.test',
+    });
+    const page = await manager.listRevisions('f1');
+    expect(page).toMatchObject({ fileId: 'f1', transportFailed: true, items: [] });
+    expect(page.transportMessage).toBeTruthy();
+  });
+
+  it('still throws a genuine command error (never hides a real failure)', async () => {
+    const { manager } = managerWith({
+      'anx.file.revision.list': {
+        responseCode: 404,
+        errorObjects: [{ code: 'NOT_FOUND', message: 'no such file' }],
+      },
+    });
+    await expect(manager.listRevisions('missing')).rejects.toThrow(/NOT_FOUND|no such file/);
+  });
 });

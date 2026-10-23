@@ -31,6 +31,9 @@ export {
 
 export {
   RegionAuthError,
+  RegionTransportError,
+  isIdempotentRegionCommand,
+  isRetryableTransportError,
   login,
   listCountries,
   listRegions,
@@ -82,8 +85,11 @@ export {
   certificateFingerprints,
   parseCertificates,
   certificateFingerprint,
+  certificateValidity,
+  describeCertificate,
   verifyLeafIssuedByCa,
   isIpLiteral,
+  type CertificateDetails,
   type LeafVerification,
   type LeafVerificationReason,
   type NodeTlsOptions,

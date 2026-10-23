@@ -78,9 +78,12 @@ export function buildNotificationContent(
   opts: { locked?: boolean } = {},
 ): NotificationContent {
   // The lock gate wins over everything: a locked app shows no content at all.
+  // The *title* must be neutral too — it is the conversation/agent title, which
+  // for a direct message is the sender's own name, so keeping it would leak
+  // exactly who is writing while the machine is locked.
   if (opts.locked && settings.suppressWhenLocked) {
     return {
-      title: payload.title?.trim() || 'Nexus',
+      title: 'Nexus',
       body: 'New message (hidden while the app is locked)',
       silent: !settings.sound,
     };

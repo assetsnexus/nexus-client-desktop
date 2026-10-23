@@ -13,14 +13,30 @@ describe('listMemberships', () => {
       responseCode: 200,
       responseObject: {
         memberships: [
-          { membershipId: 'm1', orgId: 'o1', role: 'admin', businessEmail: 'a@b.c', orgName: 'Acme' },
+          { membershipId: 'm1', orgId: 'o1', role: 'admin', businessEmail: 'a@b.c', orgName: 'Acme', orgLogo: 'https://cdn/x.png' },
           { _id: 'm2', orgId: 'o2' },
         ],
       },
     }));
     const rows = await listMemberships(send as never);
-    expect(rows[0]).toMatchObject({ membershipId: 'm1', orgId: 'o1', role: 'admin', orgName: 'Acme' });
-    expect(rows[1]).toMatchObject({ membershipId: 'm2', orgId: 'o2', role: null });
+    expect(rows[0]).toMatchObject({ membershipId: 'm1', orgId: 'o1', role: 'admin', orgName: 'Acme', orgLogo: 'https://cdn/x.png' });
+    expect(rows[1]).toMatchObject({ membershipId: 'm2', orgId: 'o2', role: null, orgLogo: null });
+  });
+
+  it('falls back to the nested org slice for name + logo', async () => {
+    const send = vi.fn(async () => ({
+      responseCode: 200,
+      responseObject: {
+        memberships: [
+          { membershipId: 'm1', orgId: 'o1', org: { name: 'Beta Inc', logo: '/public-files/orgs/b.png' } },
+        ],
+      },
+    }));
+    const rows = await listMemberships(send as never);
+    expect(rows[0]).toMatchObject({
+      orgName: 'Beta Inc',
+      orgLogo: '/public-files/orgs/b.png',
+    });
   });
 
   it('throws a typed error on failure', async () => {

@@ -18,6 +18,13 @@ export type MembershipRow = {
   role: string | null;
   businessEmail: string | null;
   orgName: string | null;
+  /**
+   * Organisation logo as returned by `anx.organization.membership.list`
+   * (`orgLogo`, denormalised from `Org.logo`; also carried on the nested `org`).
+   * May be an absolute URL, an inline `data:image/...` URL, or a root-relative
+   * region path — the renderer resolves it via `resolveOrgLogoUrl`.
+   */
+  orgLogo: string | null;
 };
 
 export type MembershipLoginResult =
@@ -98,13 +105,17 @@ export async function listMemberships(send: MembershipSend): Promise<MembershipR
   const rows = Array.isArray(body.memberships) ? body.memberships : [];
   return rows.map((m) => {
     const r = asRecord(m);
+    const org = asRecord(r.org);
     const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
     return {
       membershipId: str(r.membershipId ?? r._id ?? r.id) ?? '',
       orgId: str(r.orgId),
       role: str(r.role),
       businessEmail: str(r.businessEmail),
-      orgName: str(r.orgName ?? r.organizationName),
+      orgName: str(r.orgName ?? r.organizationName ?? org.name),
+      // `orgLogo` is the denormalised field; the nested `org.logo` is the fallback
+      // for a payload that only carried the org slice.
+      orgLogo: str(r.orgLogo ?? org.logo),
     };
   });
 }

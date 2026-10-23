@@ -8,6 +8,7 @@
  */
 
 import { createStorageClient, type StorageCommandSender } from '@nexus/storage-browser';
+import { RegionTransportError, isRetryableTransportError } from '@nexus/node-core';
 import type {
   StorageCapabilities,
   StorageFileRow,
@@ -107,22 +108,45 @@ export function createStorageManager(options: StorageManagerOptions) {
     },
 
     async listRevisions(fileId: string, limit?: number) {
-      const page = await (await client()).listRevisions({ fileId, limit });
-      return {
-        fileId: page.fileId,
-        currentRevisionNo: page.currentRevisionNo,
-        sha256: page.sha256,
-        items: page.items.map((r) => ({
-          revisionNo: r.revisionNo,
-          parentRevisionNo: r.parentRevisionNo,
-          sizeBytes: r.sizeBytes,
-          sha256: r.sha256,
-          contentType: r.contentType,
-          command: r.command,
-          reason: r.reason,
-          createdAt: r.createdAt,
-        })),
-      };
+      try {
+        const page = await (await client()).listRevisions({ fileId, limit });
+        return {
+          fileId: page.fileId,
+          currentRevisionNo: page.currentRevisionNo,
+          sha256: page.sha256,
+          unsupported: page.unsupported,
+          transportFailed: false,
+          items: page.items.map((r) => ({
+            revisionNo: r.revisionNo,
+            parentRevisionNo: r.parentRevisionNo,
+            sizeBytes: r.sizeBytes,
+            sha256: r.sha256,
+            contentType: r.contentType,
+            command: r.command,
+            reason: r.reason,
+            createdAt: r.createdAt,
+          })),
+        };
+      } catch (err) {
+        // A transport failure (dropped/reset socket) is not a command error the
+        // user can act on, and it must never surface as `RegionAuthError:
+        // read ECONNRESET`. Report a deliberately *retryable* state; the
+        // explorer shows a "try again" affordance. Genuine command failures
+        // (NOT_FOUND, FORBIDDEN, …) still throw, so a real error is never hidden.
+        if (isRetryableTransportError(err) || err instanceof RegionTransportError) {
+          return {
+            fileId,
+            currentRevisionNo: null,
+            sha256: null,
+            items: [],
+            unsupported: false,
+            transportFailed: true,
+            transportMessage:
+              err instanceof Error ? err.message : 'Could not reach the region.',
+          };
+        }
+        throw err;
+      }
     },
 
     async revertRevision(fileId: string, revisionNo: number) {

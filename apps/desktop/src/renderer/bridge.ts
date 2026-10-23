@@ -16,4 +16,17 @@ declare global {
 export const bridge: NexusBridge = window.nexus;
 
 export * from '../shared/ipc.js';
+export { stepLabel } from '../shared/logout.js';
+export type { LogoutChoice, LogoutReport, LogoutStep } from '../shared/logout.js';
+export { DEFAULT_APP_LOCK_SETTINGS, LOCK_TIMEOUT_CHOICES, PIN_MIN_LENGTH } from '../shared/app-lock.js';
+export type { AppLockSettings, AppLockState } from '../shared/app-lock.js';
+export { DEFAULT_TRAY_APP_SETTINGS, MAX_CUSTOM_TRAY_APPS, isSafeExternalUrl } from '../shared/nexus-apps.js';
+export type {
+  AppVisibilityMode,
+  CustomTrayApp,
+  InstalledNexusApp,
+  TrayAppGroup,
+  TrayAppItem,
+  TrayAppSettings,
+} from '../shared/nexus-apps.js';
 export type { DesktopConnectionConfig };

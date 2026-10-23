@@ -112,6 +112,54 @@ describe('buildNotificationContent', () => {
     expect(buildNotificationContent(basePayload, settings()).silent).toBe(true);
     expect(buildNotificationContent(basePayload, settings({ sound: true })).silent).toBe(false);
   });
+
+  // ── Deliverable 4: the locked-UI gate ──────────────────────────────────────
+  it('locked + suppressWhenLocked replaces the card with a neutral notice', () => {
+    const c = buildNotificationContent(basePayload, settings({ suppressWhenLocked: true }), {
+      locked: true,
+    });
+    expect(c.body).not.toContain('Hello there');
+    expect(c.body).not.toContain('Ada');
+    expect(c.body).toMatch(/locked/i);
+  });
+
+  it('locked + suppressWhenLocked hides the title too (sender-name leak)', () => {
+    // For a direct message the title is the sender's display name, so keeping it
+    // would still reveal who is writing while the machine is locked.
+    const c = buildNotificationContent(basePayload, settings({ suppressWhenLocked: true }), {
+      locked: true,
+    });
+    expect(c.title).not.toContain('Ada');
+    expect(c.title).toBe('Nexus');
+  });
+
+  it('locked but suppressWhenLocked OFF keeps the normal card', () => {
+    const c = buildNotificationContent(basePayload, settings({ suppressWhenLocked: false }), {
+      locked: true,
+    });
+    expect(c.title).toBe('Ada');
+    expect(c.body).toBe('Hello there');
+  });
+
+  it('does not suppress when the app is unlocked', () => {
+    const c = buildNotificationContent(basePayload, settings({ suppressWhenLocked: true }), {
+      locked: false,
+    });
+    expect(c.body).toBe('Hello there');
+  });
+
+  it('a locked+suppressed card still honours the sound setting', () => {
+    expect(
+      buildNotificationContent(basePayload, settings({ suppressWhenLocked: true, sound: false }), {
+        locked: true,
+      }).silent,
+    ).toBe(true);
+    expect(
+      buildNotificationContent(basePayload, settings({ suppressWhenLocked: true, sound: true }), {
+        locked: true,
+      }).silent,
+    ).toBe(false);
+  });
 });
 
 describe('shouldNotify', () => {
@@ -231,5 +279,46 @@ describe('createNotificationManager', () => {
     expect(manager.notify(basePayload)).toBe(true);
     manager.reset();
     expect(manager.notify(basePayload)).toBe(true);
+  });
+
+  // ── Deliverable 4: the manager consults the live lock state ────────────────
+  it('suppresses content when isLocked() reports true', () => {
+    const create = vi.fn((_c: NotificationContent) => fakeNotification().notification);
+    const manager = createNotificationManager({
+      getSettings: () => settings({ suppressWhenLocked: true }),
+      getAttention: () => blurred,
+      isLocked: () => true,
+      createNotification: create,
+      isSupported: () => true,
+    });
+    expect(manager.notify(basePayload)).toBe(true);
+    const content = create.mock.calls[0][0];
+    expect(content.body).not.toContain('Hello there');
+    expect(content.body).toMatch(/locked/i);
+  });
+
+  it('shows content when the user disabled suppression while locked', () => {
+    const create = vi.fn((_c: NotificationContent) => fakeNotification().notification);
+    const manager = createNotificationManager({
+      getSettings: () => settings({ suppressWhenLocked: false }),
+      getAttention: () => blurred,
+      isLocked: () => true,
+      createNotification: create,
+      isSupported: () => true,
+    });
+    manager.notify(basePayload);
+    expect(create.mock.calls[0][0].body).toBe('Hello there');
+  });
+
+  it('treats a missing isLocked dep as unlocked', () => {
+    const create = vi.fn((_c: NotificationContent) => fakeNotification().notification);
+    const manager = createNotificationManager({
+      getSettings: () => settings({ suppressWhenLocked: true }),
+      getAttention: () => blurred,
+      createNotification: create,
+      isSupported: () => true,
+    });
+    manager.notify(basePayload);
+    expect(create.mock.calls[0][0].body).toBe('Hello there');
   });
 });

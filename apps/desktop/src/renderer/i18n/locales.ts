@@ -9,6 +9,8 @@
  * never shows raw keys.
  */
 
+import { AUDIT_LOCALE_MESSAGES } from './locales-audit.js';
+
 export const SUPPORTED_LOCALES = [
   'en',
   'de',
@@ -161,6 +163,7 @@ const en = {
   'settings.notifications.sound.help': 'Off by default.',
   'settings.notifications.test': 'Send a test notification',
   'settings.notifications.testSent': 'Test notification sent.',
+  'settings.notifications.suppressWhenLocked': "Hide message content while the app is locked",
 
   // Shell chrome
   'shell.tab.chat': 'Chat',
@@ -172,7 +175,37 @@ const en = {
   'shell.identities': 'Identities',
   'shell.settings': 'Settings',
   'shell.settingsClose': 'Close settings',
+  'shell.starting': "Starting…",
+  'shell.offline.title': "Region unreachable",
+  'shell.offline.message': "The region is unreachable right now. Check your connection, then retry.",
+  'shell.offline.retry': "Retry",
+  'shell.offline.signIn': "Sign in as another user",
   'shell.signOut': 'Sign out',
+
+  // Client-tool audit trail (local-only, immutable by agents)
+  'settings.audit': 'Client-tool audit trail',
+  'settings.audit.help':
+    'Every client tool an agent runs on this machine is recorded locally, with the agent, the conversation it came from, and the (redacted) call payload. The store is written by the main process only — agents cannot read, change or delete it.',
+  'settings.audit.retention': 'Retention',
+  'settings.audit.maxEntries': 'Keep at most (entries)',
+  'settings.audit.maxAgeDays': 'Keep for (days)',
+  'settings.audit.maxBytes': 'Keep under',
+  'settings.audit.unlimited': 'Unlimited',
+  'settings.audit.storedAt': 'Stored locally at',
+  'settings.audit.title': 'Recorded calls',
+  'settings.audit.agent': 'Agent',
+  'settings.audit.conversation': 'Conversation',
+  'settings.audit.tool': 'Tool',
+  'settings.audit.all': 'All',
+  'settings.audit.search': 'Search tools, agents, conversations…',
+  'settings.audit.showing': 'Showing {count} of {total} recorded calls',
+  'settings.audit.empty': 'No client tools have been called yet.',
+  'settings.audit.outcomeOk': 'ok',
+  'settings.audit.outcomeError': 'error',
+  'settings.audit.openConversation': 'Trace to conversation',
+  'settings.audit.args': 'Arguments (redacted)',
+  'settings.audit.result': 'Result (redacted)',
+  'settings.audit.error': 'Error',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -265,6 +298,7 @@ const de: Dictionary = {
   'settings.notifications.sound.help': 'Standardmäßig aus.',
   'settings.notifications.test': 'Testbenachrichtigung senden',
   'settings.notifications.testSent': 'Testbenachrichtigung gesendet.',
+  'settings.notifications.suppressWhenLocked': "Nachrichteninhalt ausblenden, während die App gesperrt ist",
   'shell.tab.chat': 'Chat',
   'shell.tab.storage': 'Speicher',
   'shell.tab.sync': 'Synchronisierung',
@@ -274,6 +308,11 @@ const de: Dictionary = {
   'shell.identities': 'Identitäten',
   'shell.settings': 'Einstellungen',
   'shell.settingsClose': 'Einstellungen schließen',
+  'shell.starting': "Wird gestartet…",
+  'shell.offline.title': "Region nicht erreichbar",
+  'shell.offline.message': "Die Region ist derzeit nicht erreichbar. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+  'shell.offline.retry': "Erneut versuchen",
+  'shell.offline.signIn': "Als anderer Benutzer anmelden",
   'shell.signOut': 'Abmelden',
 };
 
@@ -363,6 +402,7 @@ const es: Dictionary = {
   'settings.notifications.sound.help': 'Desactivado por defecto.',
   'settings.notifications.test': 'Enviar notificación de prueba',
   'settings.notifications.testSent': 'Notificación de prueba enviada.',
+  'settings.notifications.suppressWhenLocked': "Ocultar el contenido del mensaje mientras la app está bloqueada",
   'shell.tab.chat': 'Chat',
   'shell.tab.storage': 'Almacenamiento',
   'shell.tab.sync': 'Sincronización',
@@ -372,6 +412,11 @@ const es: Dictionary = {
   'shell.identities': 'Identidades',
   'shell.settings': 'Ajustes',
   'shell.settingsClose': 'Cerrar ajustes',
+  'shell.starting': "Iniciando…",
+  'shell.offline.title': "Región inaccesible",
+  'shell.offline.message': "La región no está disponible ahora mismo. Comprueba tu conexión y reinténtalo.",
+  'shell.offline.retry': "Reintentar",
+  'shell.offline.signIn': "Iniciar sesión como otro usuario",
   'shell.signOut': 'Cerrar sesión',
 };
 
@@ -461,6 +506,7 @@ const fr: Dictionary = {
   'settings.notifications.sound.help': 'Désactivé par défaut.',
   'settings.notifications.test': 'Envoyer une notification de test',
   'settings.notifications.testSent': 'Notification de test envoyée.',
+  'settings.notifications.suppressWhenLocked': "Masquer le contenu du message lorsque l'application est verrouillée",
   'shell.tab.chat': 'Discussion',
   'shell.tab.storage': 'Stockage',
   'shell.tab.sync': 'Synchronisation',
@@ -470,6 +516,11 @@ const fr: Dictionary = {
   'shell.identities': 'Identités',
   'shell.settings': 'Paramètres',
   'shell.settingsClose': 'Fermer les paramètres',
+  'shell.starting': "Démarrage…",
+  'shell.offline.title': "Région injoignable",
+  'shell.offline.message': "La région est actuellement injoignable. Vérifiez votre connexion, puis réessayez.",
+  'shell.offline.retry': "Réessayer",
+  'shell.offline.signIn': "Se connecter en tant qu’un autre utilisateur",
   'shell.signOut': 'Se déconnecter',
 };
 
@@ -559,6 +610,7 @@ const ru: Dictionary = {
   'settings.notifications.sound.help': 'По умолчанию выключено.',
   'settings.notifications.test': 'Отправить тестовое уведомление',
   'settings.notifications.testSent': 'Тестовое уведомление отправлено.',
+  'settings.notifications.suppressWhenLocked': "Скрывать текст сообщения, пока приложение заблокировано",
   'shell.tab.chat': 'Чат',
   'shell.tab.storage': 'Хранилище',
   'shell.tab.sync': 'Синхронизация',  'shell.tab.mounts': 'Диски',
@@ -567,6 +619,11 @@ const ru: Dictionary = {
   'shell.identities': 'Идентичности',
   'shell.settings': 'Настройки',
   'shell.settingsClose': 'Закрыть настройки',
+  'shell.starting': "Запуск…",
+  'shell.offline.title': "Регион недоступен",
+  'shell.offline.message': "Регион сейчас недоступен. Проверьте подключение и повторите.",
+  'shell.offline.retry': "Повторить",
+  'shell.offline.signIn': "Войти как другой пользователь",
   'shell.signOut': 'Выйти',
 };
 
@@ -656,6 +713,7 @@ const uk: Dictionary = {
   'settings.notifications.sound.help': 'Вимкнено за замовчуванням.',
   'settings.notifications.test': 'Надіслати тестове сповіщення',
   'settings.notifications.testSent': 'Тестове сповіщення надіслано.',
+  'settings.notifications.suppressWhenLocked': "Приховувати вміст повідомлення, поки застосунок заблоковано",
   'shell.tab.chat': 'Чат',
   'shell.tab.storage': 'Сховище',
   'shell.tab.sync': 'Синхронізація',
@@ -665,6 +723,11 @@ const uk: Dictionary = {
   'shell.identities': 'Ідентичності',
   'shell.settings': 'Налаштування',
   'shell.settingsClose': 'Закрити налаштування',
+  'shell.starting': "Запуск…",
+  'shell.offline.title': "Регіон недоступний",
+  'shell.offline.message': "Регіон наразі недоступний. Перевірте з’єднання та повторіть.",
+  'shell.offline.retry': "Повторити",
+  'shell.offline.signIn': "Увійти як інший користувач",
   'shell.signOut': 'Вийти',
 };
 
@@ -754,6 +817,7 @@ const et: Dictionary = {
   'settings.notifications.sound.help': 'Vaikimisi väljas.',
   'settings.notifications.test': 'Saada testteavitus',
   'settings.notifications.testSent': 'Testteavitus saadetud.',
+  'settings.notifications.suppressWhenLocked': "Peida sõnumi sisu, kui rakendus on lukustatud",
   'shell.tab.chat': 'Vestlus',
   'shell.tab.storage': 'Salvestusruum',
   'shell.tab.sync': 'Sünkroonimine',
@@ -763,6 +827,11 @@ const et: Dictionary = {
   'shell.identities': 'Identiteedid',
   'shell.settings': 'Seaded',
   'shell.settingsClose': 'Sulge seaded',
+  'shell.starting': "Käivitamine…",
+  'shell.offline.title': "Regioon pole kättesaadav",
+  'shell.offline.message': "Regioon ei ole praegu kättesaadav. Kontrollige ühendust ja proovige uuesti.",
+  'shell.offline.retry': "Proovi uuesti",
+  'shell.offline.signIn': "Logi sisse teise kasutajana",
   'shell.signOut': 'Logi välja',
 };
 
@@ -852,6 +921,7 @@ const it: Dictionary = {
   'settings.notifications.sound.help': 'Disattivato per impostazione predefinita.',
   'settings.notifications.test': 'Invia una notifica di prova',
   'settings.notifications.testSent': 'Notifica di prova inviata.',
+  'settings.notifications.suppressWhenLocked': "Nascondi il contenuto del messaggio mentre l'app è bloccata",
   'shell.tab.chat': 'Chat',
   'shell.tab.storage': 'Archivio',
   'shell.tab.sync': 'Sincronizzazione',
@@ -861,6 +931,11 @@ const it: Dictionary = {
   'shell.identities': 'Identità',
   'shell.settings': 'Impostazioni',
   'shell.settingsClose': 'Chiudi impostazioni',
+  'shell.starting': "Avvio…",
+  'shell.offline.title': "Regione irraggiungibile",
+  'shell.offline.message': "La regione non è raggiungibile al momento. Controlla la connessione e riprova.",
+  'shell.offline.retry': "Riprova",
+  'shell.offline.signIn': "Accedi come un altro utente",
   'shell.signOut': 'Esci',
 };
 
@@ -950,6 +1025,7 @@ const pt: Dictionary = {
   'settings.notifications.sound.help': 'Desativado por predefinição.',
   'settings.notifications.test': 'Enviar notificação de teste',
   'settings.notifications.testSent': 'Notificação de teste enviada.',
+  'settings.notifications.suppressWhenLocked': "Ocultar o conteúdo da mensagem enquanto a app está bloqueada",
   'shell.tab.chat': 'Conversa',
   'shell.tab.storage': 'Armazenamento',
   'shell.tab.sync': 'Sincronização',
@@ -959,6 +1035,11 @@ const pt: Dictionary = {
   'shell.identities': 'Identidades',
   'shell.settings': 'Definições',
   'shell.settingsClose': 'Fechar definições',
+  'shell.starting': "A iniciar…",
+  'shell.offline.title': "Região inacessível",
+  'shell.offline.message': "A região está inacessível neste momento. Verifique a ligação e tente novamente.",
+  'shell.offline.retry': "Tentar novamente",
+  'shell.offline.signIn': "Iniciar sessão como outro utilizador",
   'shell.signOut': 'Terminar sessão',
 };
 
@@ -1048,6 +1129,7 @@ const nl: Dictionary = {
   'settings.notifications.sound.help': 'Standaard uit.',
   'settings.notifications.test': 'Testmelding verzenden',
   'settings.notifications.testSent': 'Testmelding verzonden.',
+  'settings.notifications.suppressWhenLocked': "Berichtinhoud verbergen terwijl de app vergrendeld is",
   'shell.tab.chat': 'Chat',
   'shell.tab.storage': 'Opslag',
   'shell.tab.sync': 'Synchronisatie',
@@ -1057,6 +1139,11 @@ const nl: Dictionary = {
   'shell.identities': 'Identiteiten',
   'shell.settings': 'Instellingen',
   'shell.settingsClose': 'Instellingen sluiten',
+  'shell.starting': "Starten…",
+  'shell.offline.title': "Regio onbereikbaar",
+  'shell.offline.message': "De regio is momenteel onbereikbaar. Controleer je verbinding en probeer het opnieuw.",
+  'shell.offline.retry': "Opnieuw",
+  'shell.offline.signIn': "Aanmelden als een andere gebruiker",
   'shell.signOut': 'Afmelden',
 };
 
@@ -1146,6 +1233,7 @@ const pl: Dictionary = {
   'settings.notifications.sound.help': 'Domyślnie wyłączone.',
   'settings.notifications.test': 'Wyślij powiadomienie testowe',
   'settings.notifications.testSent': 'Powiadomienie testowe wysłane.',
+  'settings.notifications.suppressWhenLocked': "Ukryj treść wiadomości, gdy aplikacja jest zablokowana",
   'shell.tab.chat': 'Czat',
   'shell.tab.storage': 'Pamięć',
   'shell.tab.sync': 'Synchronizacja',
@@ -1155,6 +1243,11 @@ const pl: Dictionary = {
   'shell.identities': 'Tożsamości',
   'shell.settings': 'Ustawienia',
   'shell.settingsClose': 'Zamknij ustawienia',
+  'shell.starting': "Uruchamianie…",
+  'shell.offline.title': "Region nieosiągalny",
+  'shell.offline.message': "Region jest teraz nieosiągalny. Sprawdź połączenie i spróbuj ponownie.",
+  'shell.offline.retry': "Ponów",
+  'shell.offline.signIn': "Zaloguj się jako inny użytkownik",
   'shell.signOut': 'Wyloguj się',
 };
 
@@ -1244,6 +1337,7 @@ const tr: Dictionary = {
   'settings.notifications.sound.help': 'Varsayılan olarak kapalı.',
   'settings.notifications.test': 'Test bildirimi gönder',
   'settings.notifications.testSent': 'Test bildirimi gönderildi.',
+  'settings.notifications.suppressWhenLocked': "Uygulama kilitliyken mesaj içeriğini gizle",
   'shell.tab.chat': 'Sohbet',
   'shell.tab.storage': 'Depolama',
   'shell.tab.sync': 'Eşitleme',
@@ -1253,6 +1347,11 @@ const tr: Dictionary = {
   'shell.identities': 'Kimlikler',
   'shell.settings': 'Ayarlar',
   'shell.settingsClose': 'Ayarları kapat',
+  'shell.starting': "Başlatılıyor…",
+  'shell.offline.title': "Bölgeye ulaşılamıyor",
+  'shell.offline.message': "Bölgeye şu anda ulaşılamıyor. Bağlantınızı kontrol edip tekrar deneyin.",
+  'shell.offline.retry': "Yeniden dene",
+  'shell.offline.signIn': "Başka bir kullanıcı olarak oturum aç",
   'shell.signOut': 'Çıkış yap',
 };
 
@@ -1342,6 +1441,7 @@ const ar: Dictionary = {
   'settings.notifications.sound.help': 'معطّل افتراضيًا.',
   'settings.notifications.test': 'إرسال إشعار تجريبي',
   'settings.notifications.testSent': 'تم إرسال الإشعار التجريبي.',
+  'settings.notifications.suppressWhenLocked': "إخفاء محتوى الرسالة أثناء قفل التطبيق",
   'shell.tab.chat': 'المحادثة',
   'shell.tab.storage': 'التخزين',
   'shell.tab.sync': 'المزامنة',
@@ -1351,6 +1451,11 @@ const ar: Dictionary = {
   'shell.identities': 'الهويات',
   'shell.settings': 'الإعدادات',
   'shell.settingsClose': 'إغلاق الإعدادات',
+  'shell.starting': "جارٍ البدء…",
+  'shell.offline.title': "المنطقة غير قابلة للوصول",
+  'shell.offline.message': "تعذّر الوصول إلى المنطقة حاليًا. تحقّق من اتصالك ثم أعد المحاولة.",
+  'shell.offline.retry': "إعادة المحاولة",
+  'shell.offline.signIn': "تسجيل الدخول كمستخدم آخر",
   'shell.signOut': 'تسجيل الخروج',
 };
 
@@ -1440,6 +1545,7 @@ const hi: Dictionary = {
   'settings.notifications.sound.help': 'डिफ़ॉल्ट रूप से बंद।',
   'settings.notifications.test': 'परीक्षण सूचना भेजें',
   'settings.notifications.testSent': 'परीक्षण सूचना भेजी गई।',
+  'settings.notifications.suppressWhenLocked': "ऐप लॉक रहने के दौरान संदेश सामग्री छिपाएँ",
   'shell.tab.chat': 'चैट',
   'shell.tab.storage': 'संग्रहण',
   'shell.tab.sync': 'सिंक',
@@ -1449,6 +1555,11 @@ const hi: Dictionary = {
   'shell.identities': 'पहचान',
   'shell.settings': 'सेटिंग्स',
   'shell.settingsClose': 'सेटिंग्स बंद करें',
+  'shell.starting': "शुरू हो रहा है…",
+  'shell.offline.title': "क्षेत्र पहुँच से बाहर",
+  'shell.offline.message': "क्षेत्र अभी पहुँच से बाहर है। अपना कनेक्शन जाँचें, फिर पुनः प्रयास करें।",
+  'shell.offline.retry': "पुनः प्रयास करें",
+  'shell.offline.signIn': "किसी अन्य उपयोगकर्ता के रूप में साइन इन करें",
   'shell.signOut': 'साइन आउट',
 };
 
@@ -1535,6 +1646,7 @@ const zh: Dictionary = {
   'settings.notifications.sound.help': '默认关闭。',
   'settings.notifications.test': '发送测试通知',
   'settings.notifications.testSent': '测试通知已发送。',
+  'settings.notifications.suppressWhenLocked': "应用锁定时隐藏消息内容",
   'shell.tab.chat': '聊天',
   'shell.tab.storage': '存储',
   'shell.tab.sync': '同步',
@@ -1544,6 +1656,11 @@ const zh: Dictionary = {
   'shell.identities': '身份',
   'shell.settings': '设置',
   'shell.settingsClose': '关闭设置',
+  'shell.starting': "正在启动…",
+  'shell.offline.title': "无法连接区域",
+  'shell.offline.message': "本区域当前无法访问。请检查您的连接，然后重试。",
+  'shell.offline.retry': "重试",
+  'shell.offline.signIn': "以其他用户身份登录",
   'shell.signOut': '退出登录',
 };
 
@@ -1633,6 +1750,7 @@ const ja: Dictionary = {
   'settings.notifications.sound.help': 'デフォルトではオフです。',
   'settings.notifications.test': 'テスト通知を送信',
   'settings.notifications.testSent': 'テスト通知を送信しました。',
+  'settings.notifications.suppressWhenLocked': "アプリのロック中はメッセージ内容を隠す",
   'shell.tab.chat': 'チャット',
   'shell.tab.storage': 'ストレージ',
   'shell.tab.sync': '同期',
@@ -1642,6 +1760,11 @@ const ja: Dictionary = {
   'shell.identities': 'ID',
   'shell.settings': '設定',
   'shell.settingsClose': '設定を閉じる',
+  'shell.starting': "起動中…",
+  'shell.offline.title': "リージョンに接続できません",
+  'shell.offline.message': "現在リージョンに接続できません。接続を確認して再試行してください。",
+  'shell.offline.retry': "再試行",
+  'shell.offline.signIn': "別のユーザーでサインイン",
   'shell.signOut': 'サインアウト',
 };
 
@@ -1731,6 +1854,7 @@ const ko: Dictionary = {
   'settings.notifications.sound.help': '기본적으로 꺼져 있습니다.',
   'settings.notifications.test': '테스트 알림 보내기',
   'settings.notifications.testSent': '테스트 알림을 보냈습니다.',
+  'settings.notifications.suppressWhenLocked': "앱이 잠겨 있는 동안 메시지 내용 숨기기",
   'shell.tab.chat': '채팅',
   'shell.tab.storage': '저장소',
   'shell.tab.sync': '동기화',
@@ -1740,6 +1864,11 @@ const ko: Dictionary = {
   'shell.identities': 'ID',
   'shell.settings': '설정',
   'shell.settingsClose': '설정 닫기',
+  'shell.starting': "시작하는 중…",
+  'shell.offline.title': "리전에 연결할 수 없음",
+  'shell.offline.message': "현재 리전에 연결할 수 없습니다. 연결을 확인한 후 다시 시도하세요.",
+  'shell.offline.retry': "다시 시도",
+  'shell.offline.signIn': "다른 사용자로 로그인",
   'shell.signOut': '로그아웃',
 };
 
@@ -1762,5 +1891,12 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
   ja,
   ko,
 };
+
+// Merge the (self-contained) client-tool audit strings into every dictionary so
+// the audit UI is fully localised without restructuring this shared file. `en`
+// already declares the keys above; the other locales pick them up here.
+for (const locale of SUPPORTED_LOCALES) {
+  Object.assign(DICTIONARIES[locale], AUDIT_LOCALE_MESSAGES[locale]);
+}
 
 export const EN_MESSAGES = en;

@@ -86,6 +86,13 @@ export function createNodeFetch(options: NodeFetchOptions = {}): typeof fetch {
     ...(ca ? { ca } : {}),
     rejectUnauthorized: !insecure,
     keepAlive: true,
+    // Node reads the server's `Keep-Alive: timeout=N` hint and retires an idle
+    // socket `agentKeepAliveTimeoutBuffer` ms before the server would close it,
+    // so the next request dials a fresh socket instead of writing to a
+    // half-closed one. The default (1000ms) is fine, but we set it explicitly so
+    // a future Node default change cannot silently reintroduce the
+    // "read ECONNRESET" keep-alive race for a region that advertises `timeout=5`.
+    agentKeepAliveTimeoutBuffer: 1000,
   });
 
   const doFetch = async (input: string, init: FetchInit, redirectsLeft: number): Promise<MinimalResponse> => {

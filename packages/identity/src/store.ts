@@ -193,9 +193,16 @@ export function pruneExpired(state: IdentityStoreState, now: Date = new Date()):
       return { ...a, identities, activeKey };
     })
     .filter((a) => a.identities.length > 0);
+  // Preserve an explicit sign-out (`activeUserId: null`) across a reload: the
+  // user ended the active session while keeping the accounts (the switch-user
+  // logout), so the loader must not silently pick an account and sign them back
+  // in. The fallback only repairs a *previously active* account that is now
+  // gone (e.g. it was pruned), matching `removeAccount`'s fallback.
   const activeUserId =
-    state.activeUserId && accounts.some((a) => a.userId === state.activeUserId)
-      ? state.activeUserId
-      : accounts[0]?.userId ?? null;
+    state.activeUserId == null
+      ? null
+      : accounts.some((a) => a.userId === state.activeUserId)
+        ? state.activeUserId
+        : accounts[0]?.userId ?? null;
   return { ...state, accounts, activeUserId };
 }

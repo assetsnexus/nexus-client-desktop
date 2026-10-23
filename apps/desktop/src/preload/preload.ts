@@ -5,8 +5,8 @@
  * surface backed by `ipcRenderer.invoke`. No Node APIs leak to the renderer.
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
-import { IPC, type DesktopNotificationPayload, type NexusBridge } from '../shared/ipc.js';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { IPC, type CertificatePromptInfo, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
 
 const bridge: NexusBridge = {
   getVersion: () => ipcRenderer.invoke(IPC.version),
@@ -14,6 +14,14 @@ const bridge: NexusBridge = {
   setConnectionConfig: (patch) => ipcRenderer.invoke(IPC.configSet, patch),
   getUiSettings: () => ipcRenderer.invoke(IPC.uiSettingsGet),
   setUiSettings: (patch) => ipcRenderer.invoke(IPC.uiSettingsSet, patch),
+  certTrustList: () => ipcRenderer.invoke(IPC.certTrustList),
+  certTrustRevoke: (host, fingerprint) => ipcRenderer.invoke(IPC.certTrustRevoke, host, fingerprint),
+  certTrustRespond: (decision) => ipcRenderer.invoke(IPC.certTrustRespond, decision),
+  onCertTrustPrompt: (listener) => {
+    const handler = (_e: unknown, info: CertificatePromptInfo) => listener(info);
+    ipcRenderer.on(IPC.certTrustPrompt, handler);
+    return () => ipcRenderer.removeListener(IPC.certTrustPrompt, handler);
+  },
   notifyIncoming: (payload, opts) => ipcRenderer.invoke(IPC.notifyIncoming, payload, opts),
   onNotificationActivated: (listener) => {
     const handler = (_e: unknown, payload: DesktopNotificationPayload) => listener(payload);
@@ -73,6 +81,10 @@ const bridge: NexusBridge = {
   setWorkspaces: (workspaces) => ipcRenderer.invoke(IPC.toolsSetWorkspaces, workspaces),
   setLocalCommands: (commands) => ipcRenderer.invoke(IPC.toolsSetLocalCommands, commands),
   runTool: (req) => ipcRenderer.invoke(IPC.toolsRun, req),
+  // Read-only audit trail + the configurable retention setting. No mutation
+  // channel exists (see `shared/ipc.ts`); the store is main-process only.
+  auditSnapshot: (filter) => ipcRenderer.invoke(IPC.auditSnapshot, filter),
+  auditSetRetention: (retention) => ipcRenderer.invoke(IPC.auditSetRetention, retention),
   storageWorkspaces: () => ipcRenderer.invoke(IPC.storageWorkspaces),
   storageFolderList: (workspaceId, parentFolderId) =>
     ipcRenderer.invoke(IPC.storageFolderList, workspaceId, parentFolderId),
@@ -87,6 +99,28 @@ const bridge: NexusBridge = {
   storageRenameFile: (fileId, newName) => ipcRenderer.invoke(IPC.storageRenameFile, fileId, newName),
   storageMoveFile: (fileId, targetFolderId) =>
     ipcRenderer.invoke(IPC.storageMoveFile, fileId, targetFolderId),
+  // Drag-and-drop transfer. `onStorageTransferProgress` pairs with main's
+  // `IPC.storageTransferProgress` push so the renderer sees real byte counts.
+  storageExpandDrop: (paths) => ipcRenderer.invoke(IPC.storageExpandDrop, paths),
+  storageUploadOne: (req) => ipcRenderer.invoke(IPC.storageUploadOne, req),
+  storageTransferCancel: (transferId) => ipcRenderer.invoke(IPC.storageTransferCancel, transferId),
+  onStorageTransferProgress: (listener) => {
+    const handler = (_e: unknown, progress: StorageTransferProgress) => listener(progress);
+    ipcRenderer.on(IPC.storageTransferProgress, handler);
+    return () => ipcRenderer.removeListener(IPC.storageTransferProgress, handler);
+  },
+  storageDownloadLink: (fileId) => ipcRenderer.invoke(IPC.storageDownloadLink, fileId),
+  storageSaveFile: (fileId, suggestedName) => ipcRenderer.invoke(IPC.storageSaveFile, fileId, suggestedName),
+  storageSaveFilesToDir: (files) => ipcRenderer.invoke(IPC.storageSaveFilesToDir, files),
+  storagePrepareDrag: (fileId, name) => ipcRenderer.invoke(IPC.storagePrepareDrag, fileId, name),
+  storageStartDrag: (fileId, name) => ipcRenderer.invoke(IPC.storageStartDrag, fileId, name),
+  storageReleaseDrag: (fileId) => ipcRenderer.invoke(IPC.storageReleaseDrag, fileId),
+  storagePreviewBytes: (fileId) => ipcRenderer.invoke(IPC.storagePreviewBytes, fileId),
+  // Electron 32+ removed the `File.path` augmentation; `webUtils.getPathForFile`
+  // is the supported replacement and only exists in the (preload) renderer
+  // process, so it is exposed here rather than read directly by the sandboxed
+  // renderer. This is the pattern from Electron's own 32.x migration guide.
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   syncGetState: () => ipcRenderer.invoke(IPC.syncGetState),
   syncListRemoteFolders: (workspaceId) => ipcRenderer.invoke(IPC.syncListRemoteFolders, workspaceId),
   syncAddBinding: (input) => ipcRenderer.invoke(IPC.syncAddBinding, input),
@@ -121,9 +155,15 @@ const bridge: NexusBridge = {
   assetAgentDiscoverySnapshot: () => ipcRenderer.invoke(IPC.assetAgentSnapshot),
   assetAgentDiscoveryScan: () => ipcRenderer.invoke(IPC.assetAgentScan),
   assetAgentSetPreferLocal: (enabled) => ipcRenderer.invoke(IPC.assetAgentSetPreferLocal, enabled),
+  trayListApps: () => ipcRenderer.invoke(IPC.trayAppsList),
+  trayResolvedApps: () => ipcRenderer.invoke(IPC.trayAppsResolved),
   companionOpen: (launch) => ipcRenderer.invoke(IPC.companionOpen, launch),
   companionClose: (contactId) => ipcRenderer.invoke(IPC.companionClose, contactId),
   companionList: () => ipcRenderer.invoke(IPC.companionList),
+  companionSetAlwaysOnTop: (contactId, onTop) =>
+    ipcRenderer.invoke(IPC.companionSetAlwaysOnTop, contactId, onTop),
+  companionIsAlwaysOnTop: (contactId) =>
+    ipcRenderer.invoke(IPC.companionIsAlwaysOnTop, contactId),
   calendarListEvents: (input) => ipcRenderer.invoke(IPC.calendarListEvents, input),
   calendarUpcoming: () => ipcRenderer.invoke(IPC.calendarUpcoming),
   calendarCreateEvent: (input) => ipcRenderer.invoke(IPC.calendarCreateEvent, input),

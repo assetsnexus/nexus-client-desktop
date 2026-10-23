@@ -17,6 +17,7 @@ describe('buildCompanionHash / parseCompanionHash', () => {
       avatarUrl: 'https://x/avatar.png',
       autoStart: true,
       mode: 'split' as const,
+      alwaysOnTop: true,
     };
     expect(parseCompanionHash(buildCompanionHash(launch))).toEqual(launch);
   });
@@ -32,12 +33,20 @@ describe('buildCompanionHash / parseCompanionHash', () => {
       avatarUrl: null,
       autoStart: true,
       mode: 'fullscreen',
+      alwaysOnTop: false,
     });
   });
 
   it('round-trips the split mode', () => {
     const parsed = parseCompanionHash(buildCompanionHash({ contactId: 've-1', mode: 'split' }));
     expect(parsed?.mode).toBe('split');
+  });
+
+  it('round-trips alwaysOnTop (and defaults it off)', () => {
+    expect(parseCompanionHash(buildCompanionHash({ contactId: 've-1' }))?.alwaysOnTop).toBe(false);
+    expect(parseCompanionHash(buildCompanionHash({ contactId: 've-1', alwaysOnTop: true }))?.alwaysOnTop).toBe(
+      true,
+    );
   });
 
   it('round-trips autoStart:false', () => {

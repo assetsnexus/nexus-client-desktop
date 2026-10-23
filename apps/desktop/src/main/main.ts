@@ -21,7 +21,19 @@ import {
   type AuthClientOptions,
   type DesktopConnectionConfig,
 } from '@nexus/node-core';
-import { createCustomCaVerifier } from './custom-ca.js';
+import { createCertificateVerifyProc } from './custom-ca.js';
+import {
+  createCertPromptBridge,
+  createCertTrustStore,
+  type CertPromptInfo,
+} from './trusted-certs.js';
+import {
+  createSenderGuard,
+  hardenWebContents,
+  installPermissionGuard,
+  installSenderGuard,
+  type SessionLike,
+} from './ipc-guard.js';
 import { createSettingsStore } from './settings-store.js';
 import { SafeStorageStore } from './secure-store.js';
 import { createAuthManager } from './auth-manager.js';
@@ -29,13 +41,21 @@ import { readRegionEnvironment } from './region-environment.js';
 import { probeBackend, probeLocalModels } from './local-models.js';
 import { createLocalModelsStore } from './local-models-store.js';
 import { createToolsStore } from './tools-store.js';
-import { runTool } from './tool-runner.js';
+import { createLogger } from './logger.js';
+import { createAuditStore } from './audit-store.js';
+import { createToolAuditor } from './tool-audit.js';
+import { filterAuditEntries, auditFacets } from '../shared/audit.js';
 import { createStorageManager } from './storage-manager.js';
+import { createStorageTransferManager } from './storage-transfer-manager.js';
 import { createSyncManager } from './sync-manager.js';
 import { createMountDaemon } from './mount-daemon.js';
 import { createRunnerManager } from './runner-manager.js';
 import { createIdentityManager } from './identity-manager.js';
 import { createAssetAgentDiscoveryManager } from './asset-agent-discovery.js';
+import { createAppLockManager } from './app-lock.js';
+import { createLogoutManager } from './logout-manager.js';
+import { createNexusAppsProvider } from './nexus-apps.js';
+import { buildTrayMenu } from './tray-menu.js';
 import { createBonjourBackend } from './mdns-bonjour.js';
 import { createCompanionWindowManager, defaultCompanionPreloadPath } from './companion-window.js';
 import { createCalendarManager } from './calendar-manager.js';
@@ -54,19 +74,31 @@ import { createWakeManager } from './wake-manager.js';
 import { createWakeAgentDirectory } from './wake-agents.js';
 import {
   IPC,
+  type AppLockSettings,
+  type AuditSnapshot,
   type CalendarAttendeeStatus,
   type CalendarCreateInput,
   type CalendarListInput,
+  type CertificatePromptInfo,
+  type CertificateTrustEntry,
   type CompanionLaunch,
   type ConnectionConfigPatch,
   type LocalRunnerSettings,
   type LoginRequest,
+  type LogoutChoice,
+  type LogoutStep,
   type StorageUploadRequest,
+  type StorageUploadOneRequest,
   type ToolInvocation,
   type TwoFactorRequest,
   type UiSettings,
 } from '../shared/ipc.js';
-
+import {
+  isSafeExternalUrl,
+  resolveTrayApps,
+  type InstalledNexusApp,
+  type TrayAppItem,
+} from '../shared/nexus-apps.js';
 // The main + preload bundles are emitted as CJS (see scripts/build-main.mjs /
 // dev.mjs), so `import.meta.url` is empty and unusable here. Node's CJS loader
 // provides `__dirname` for the running `dist-electron/main.cjs`, which is the
@@ -102,6 +134,96 @@ function resolveWindowIcon(): string | undefined {
 }
 
 const settings = createSettingsStore();
+
+/**
+ * User-approved TLS certificate pins ("trust this certificate") + the prompt
+ * coalescer that asks the user before anything is trusted. Both are main-process
+ * only; the renderer sees them through the narrow IPC surface below.
+ */
+const certTrustStore = createCertTrustStore();
+const certPrompt = createCertPromptBridge({
+  store: certTrustStore,
+  confirm: (info) => askTrustCertificate(info),
+  // A new pin must re-pin the session so Chromium re-runs verification (its
+  // verify-proc result is cached) and the retried request succeeds.
+  onChanged: () => void applyCustomCa(settings.getConnectionConfig()),
+});
+
+/**
+ * Ask the user whether to trust a presented certificate. Prefers the in-window
+ * renderer prompt (rich certificate details + explicit action) and falls back to
+ * a native main-process dialog when no window is available. Resolves true only on
+ * explicit approval, false on cancel / dismiss / any error.
+ */
+async function askTrustCertificate(info: CertPromptInfo): Promise<boolean> {
+  const win = mainWindow;
+  if (win && !win.isDestroyed()) {
+    return new Promise<boolean>((resolve) => {
+      const payload: CertificatePromptInfo = { ...info };
+      const settle = (trusted: boolean) => {
+        certTrustPending = null;
+        resolve(trusted);
+      };
+      certTrustPending = { host: info.host, fingerprint: info.fingerprint, settle };
+      try {
+        win.webContents.send(IPC.certTrustPrompt, payload);
+      } catch {
+        settle(false);
+        return;
+      }
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    });
+  }
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Cancel', 'Trust this certificate'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      title: 'Untrusted certificate',
+      message: `The connection to ${info.host} presented a certificate that is not trusted.`,
+      detail: [
+        info.subject ? `Subject: ${info.subject}` : '',
+        info.issuer ? `Issuer: ${info.issuer}` : '',
+        info.validTo ? `Valid to: ${info.validTo}` : '',
+        `SHA-256: ${info.fingerprint}`,
+        '',
+        'Only trust this if the server is your own. Trusting a certificate you do not recognise could let a third party read or change your traffic.',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    });
+    return response === 1;
+  } catch {
+    return false;
+  }
+}
+
+/** The trust prompt awaiting a renderer answer (null when none is open). */
+let certTrustPending: {
+  host: string;
+  fingerprint: string;
+  settle: (trusted: boolean) => void;
+} | null = null;
+
+/**
+ * Structured local logging + the client-tool audit store (both main-process
+ * only). The log lands at `<userData>/logs/desktop.log`; the append-only audit
+ * JSONL at `<userData>/audit/client-tools.jsonl`. `userData` is available once
+ * the app module is loaded, which it is here.
+ */
+const dataDir = app.getPath('userData');
+const logger = createLogger({ dir: join(dataDir, 'logs'), minLevel: isDev ? 'debug' : 'info' });
+const auditStore = createAuditStore({
+  filePath: join(dataDir, 'audit', 'client-tools.jsonl'),
+  logger,
+});
+// Audit sink wired at the tool choke point. The store is passed in (never the
+// renderer), so nothing an agent can reach can read, mutate or truncate it.
+const toolAuditor = createToolAuditor({ audit: auditStore, logger });
 
 /**
  * Redirect the client at a locally-running region node + portal for testing.
@@ -142,6 +264,19 @@ const storageManager = createStorageManager({
   getRegionUrl: () => settings.getConnectionConfig().regionUrl,
   fetchFn: regionFetch(),
 });
+// Drag-and-drop transfer: folder expansion, per-file uploads with real byte
+// progress (streamed presign-PUT), cancel, save-to-disk and OS drag-out. The
+// renderer only sends paths; all file IO stays in the main process.
+const storageTransfer = createStorageTransferManager({
+  getSender: () => getAuthManager().createSender(),
+  getRegionUrl: () => settings.getConnectionConfig().regionUrl,
+  getWebContents: () => mainWindow?.webContents ?? null,
+  getTls: () => {
+    const cfg = settings.getConnectionConfig();
+    return { caPem: cfg.customCaPem ?? null, allowInsecure: (cfg as { allowInsecure?: boolean }).allowInsecure === true };
+  },
+  fetchFn: regionFetch(),
+});
 // Phase 3: link bucket sub-dirs to local dirs, multiple syncs at once.
 const syncManager = createSyncManager({
   getSender: () => getAuthManager().createSender(),
@@ -161,6 +296,19 @@ const runnerManager = createRunnerManager({
 });
 const identityManager = createIdentityManager({
   getSender: () => getAuthManager().createSender(),
+});
+
+/**
+ * App PIN inactivity lock (Deliverable 3). A **UI gate only**: it hides the
+ * renderer behind a PIN after idle time; it never blocks a command, a region
+ * call or biometric/2FA. The PIN is salted-hashed in the secure store and is
+ * cleared by any sign-out / switch-user / permanent-logout (the recovery path),
+ * so the user can never be permanently locked out.
+ */
+const appLockManager = createAppLockManager({
+  secureStore,
+  getSettings: () => settings.getUiSettings().appLock,
+  setSettings: (patch) => settings.setUiSettings({ appLock: { ...settings.getUiSettings().appLock, ...patch } }).appLock,
 });
 // Phase 10: LAN/intranet asset-agent discovery. Contacts come from the region's
 // asset-agent list; the region slug comes from the region directory.
@@ -210,6 +358,11 @@ let isQuitting = false;
 const companionWindows = createCompanionWindowManager({
   resolveRendererUrl,
   preloadPath: defaultCompanionPreloadPath(),
+  harden: (contents) =>
+    hardenWebContents(contents, {
+      trustedUrls: trustedRendererUrls,
+      openExternal: (url) => void openExternalUrl(url),
+    }),
 });
 
 // Phase 7b: desktop calendar. Region-node owns the calendar; this only calls it.
@@ -303,9 +456,24 @@ const wakeHost = createWakeHost({
 });
 
 // Wake settings picker: the mappable agents, read straight from the region
-// (the chat SPA is not mounted while settings is open).
+// (the chat SPA is not mounted while settings is open). Agents are scoped to
+// the JWT tenant, so the directory fans out over every stored membership and
+// unions the rows — otherwise an app agent installed by a non-active org (e.g.
+// `xcamp`) never appears.
 const wakeAgentDirectory = createWakeAgentDirectory({
   getSender: () => getAuthManager().createSender(),
+  listIdentities: () =>
+    identityManager
+      .listSessions()
+      .filter((session) => session.token)
+      .map((session) => ({
+        key: session.key,
+        userId: session.userId,
+        orgId: session.orgId,
+        token: session.token,
+        deviceId: session.deviceId,
+      })),
+  getClientOptions: () => authClientOptions(),
 });
 
 /**
@@ -323,6 +491,8 @@ const notificationManager = createNotificationManager({
       focused: mainWindow.isFocused(),
     };
   },
+  // Locked UI => the card must not leak sender/content (Deliverable 4).
+  isLocked: () => appLockManager.isLockedNow(),
   isSupported: () => Notification.isSupported(),
   createNotification: (content) =>
     new Notification({ title: content.title, body: content.body, silent: content.silent }),
@@ -338,6 +508,107 @@ const notificationManager = createNotificationManager({
 
 let tray: Tray | null = null;
 
+/**
+ * Installed Nexus apps for the tray menu.
+ *
+ * "Installed apps" are the third-party apps the user connected over *Login with
+ * ANX* (OAuth2). The region exposes them as OAuth2 grants, and the list command
+ * is **identity-scoped** (personal session vs. one org membership), so the
+ * provider calls it once per stored session and unions the rows by `clientId`
+ * (see `nexus-apps.ts`). Cached briefly so opening the tray repeatedly does not
+ * hammer the region; rebuilt on demand when auth state changes.
+ */
+let installedAppsCache: { at: number; apps: InstalledNexusApp[] } | null = null;
+const INSTALLED_APPS_TTL_MS = 60_000;
+
+const nexusAppsProvider = createNexusAppsProvider({
+  listIdentities: () =>
+    identityManager
+      .listSessions()
+      .filter((session) => session.token)
+      .map((session) => ({
+        key: session.key,
+        userId: session.userId,
+        orgId: session.orgId,
+        // The identity label is the org name for a business session (falling back
+        // to the business email), which is exactly the submenu heading we want.
+        orgName:
+          session.orgId && session.label && session.label !== session.orgId ? session.label : null,
+        token: session.token,
+        // Device validation is mandatory for every authenticated command.
+        deviceId: session.deviceId,
+      })),
+  getClientOptions: () => authClientOptions(),
+});
+
+/**
+ * Installed apps, cached for a short window. A region failure never throws: the
+ * tray keeps "Show Nexus" + "Open portal" and simply omits the app section.
+ */
+async function loadInstalledApps(): Promise<InstalledNexusApp[]> {
+  if (!identityManager.hasActiveSession()) return [];
+  if (installedAppsCache && Date.now() - installedAppsCache.at < INSTALLED_APPS_TTL_MS) {
+    return installedAppsCache.apps;
+  }
+  try {
+    const { apps } = await nexusAppsProvider.list();
+    installedAppsCache = { at: Date.now(), apps };
+    return apps;
+  } catch {
+    return [];
+  }
+}
+
+/** Drop the cache so the next tray rebuild refetches (auth/login/logout/settings). */
+function invalidateInstalledApps(): void {
+  installedAppsCache = null;
+}
+
+/** The full resolved tray list: installed (filtered) + custom entries. */
+async function resolveTrayAppItems(): Promise<TrayAppItem[]> {
+  const installed = await loadInstalledApps();
+  return resolveTrayApps({ installed, settings: settings.getUiSettings().trayApps });
+}
+
+/** Open an http(s) URL externally; anything else is refused in main. */
+async function openExternalUrl(url: string): Promise<void> {
+  if (!isSafeExternalUrl(url)) return;
+  await shell.openExternal(url);
+}
+
+/**
+ * (Re)build the tray context menu from the current auth state, portal URL and
+ * resolved app list. Safe to call repeatedly — each call replaces the menu.
+ */
+async function refreshTrayMenu(): Promise<void> {
+  if (!tray) return;
+  const signedIn = identityManager.hasActiveSession();
+  const appItems = signedIn ? await resolveTrayAppItems() : [];
+  const template = buildTrayMenu({
+    signedIn,
+    portalUrl: settings.getConnectionConfig().portalUrl ?? null,
+    appItems,
+    onShow: () => showMainWindow(),
+    onQuit: () => app.quit(),
+    onOpenUrl: (url) => void openExternalUrl(url),
+  });
+  if (!tray) return;
+  try {
+    tray.setContextMenu(Menu.buildFromTemplate(template as Electron.MenuItemConstructorOptions[]));
+  } catch (error) {
+    // A malformed template must never leave the old (or an empty) menu in place
+    // without a way out; fall back to the two essential items.
+    console.warn('[tray] failed to build context menu:', error);
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { id: 'show', label: 'Show Nexus', click: () => showMainWindow() },
+        { type: 'separator' },
+        { id: 'quit', label: 'Quit', click: () => app.quit() },
+      ]),
+    );
+  }
+}
+
 /** Show + focus the main window (used by tray click and notification click). */
 function showMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -349,7 +620,7 @@ function showMainWindow(): void {
 /**
  * Tray icon so the app can keep running (and receiving messages) with no window
  * on screen — which is exactly when notifications matter. Left-click toggles the
- * window; the context menu offers show/quit.
+ * window; the context menu offers show + portal + the user's Nexus apps + quit.
  */
 function createTray(): void {
   if (tray) return;
@@ -363,16 +634,73 @@ function createTray(): void {
     return;
   }
   tray.setToolTip('Nexus');
-  const menu = Menu.buildFromTemplate([
-    { label: 'Show Nexus', click: () => showMainWindow() },
-    { type: 'separator' },
-    { label: 'Quit', click: () => app.quit() },
-  ]);
-  tray.setContextMenu(menu);
+  // Seed with the essential items synchronously so the tray is never menu-less,
+  // then refresh with the dynamic app list once it resolves.
+  try {
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { id: 'show', label: 'Show Nexus', click: () => showMainWindow() },
+        { type: 'separator' },
+        { id: 'quit', label: 'Quit', click: () => app.quit() },
+      ]),
+    );
+  } catch (error) {
+    console.warn('[tray] failed to seed the context menu:', error);
+  }
+  void refreshTrayMenu();
   tray.on('click', () => {
     if (mainWindow?.isVisible() && mainWindow.isFocused()) mainWindow.hide();
     else showMainWindow();
   });
+}
+
+/**
+ * Logout (Deliverable 5). Two explicit choices, neither leaving the user stuck:
+ * "switch user" keeps local data (optionally unmounting), "permanent" wipes it.
+ * Each teardown step is wrapped so a failure is reported per-step and retryable.
+ */
+const logoutManager = createLogoutManager({
+  stopSync: () => syncManager.stop(),
+  unmountAll: async () => {
+    const snap = await mountDaemon.snapshot();
+    for (const session of snap.sessions) {
+      await mountDaemon.removeSession(session.id);
+    }
+  },
+  clearSyncBindings: async () => {
+    for (const binding of syncManager._readBindings()) {
+      await syncManager.removeBinding(binding.id);
+    }
+  },
+  clearWakeQueue: async () => {
+    wakeManager.setQueue([]);
+  },
+  clearIdentityStore: () => {
+    identityManager.reset();
+  },
+  clearSecureStore: async () => {
+    await secureStore.clear();
+  },
+  endSession: async () => {
+    await getAuthManager().logout();
+    // The identity store is the token authority (Phase 9), so ending the *auth
+    // manager's* session is not enough: while an identity stays active,
+    // `activeToken()` keeps handing the old token back to every sender and
+    // `getState()` reports `signed_in` — a switch-user logout that silently did
+    // not sign out. Deactivate the active session (keeping the stored accounts).
+    identityManager.endActiveSession();
+    // Clearing the PIN here is the documented lock-out recovery path: sign-out /
+    // switch-user / permanent logout must never leave a forgotten PIN armed, or
+    // the next session would be gated behind it with no way in.
+    await appLockManager.clearPin();
+    appLockManager.resetLocked();
+  },
+});
+
+/** Rebuild the tray after any identity change (switch org / account / logout). */
+function afterIdentityChange(): void {
+  invalidateInstalledApps();
+  void refreshTrayMenu();
 }
 
 const viewerUserId = () => {
@@ -445,6 +773,10 @@ function getAuthManager(): ReturnType<typeof createAuthManager> {
       // Phase 9: the identity store is the token authority (multi-account +
       // org identity switching).
       getActiveToken: () => identityManager.activeToken(),
+      // The store also owns the session identity; the auth manager folds it
+      // (plus the device keypair) back into the identity it sends, so a
+      // restarted process still carries a valid `deviceId`.
+      getActiveIdentity: () => identityManager.activeSession(),
       onAuthenticated: ({ token, identity }) => {
         if (!identity.userId) return;
         identityManager.recordLogin({
@@ -455,6 +787,9 @@ function getAuthManager(): ReturnType<typeof createAuthManager> {
           token,
           deviceId: identity.deviceId,
         });
+        // New session -> the tray's app list may change; refetch and rebuild.
+        invalidateInstalledApps();
+        void refreshTrayMenu();
       },
       // Device removed in the portal (or token revoked): lose ALL access at once
       // — money-grade teardown of storage, sync schedules and mounts.
@@ -472,6 +807,7 @@ function getAuthManager(): ReturnType<typeof createAuthManager> {
  * scheduler and mount, and tells the renderer to return to the sign-in screen.
  */
 async function handleSessionLost(loss: { reason: string; deviceRevoked: boolean; message: string }): Promise<void> {
+  invalidateInstalledApps();
   try {
     identityManager.reset();
   } catch {
@@ -494,6 +830,9 @@ async function handleSessionLost(loss: { reason: string; deviceRevoked: boolean;
       /* window may be gone */
     }
   }
+  // The session teardown cleared the identity store: rebuild the tray so the
+  // app section drops and only "Show Nexus" + "Open portal" remain.
+  void refreshTrayMenu();
 }
 
 /**
@@ -502,26 +841,60 @@ async function handleSessionLost(loss: { reason: string; deviceRevoked: boolean;
  *
  * The verify proc is a *pin*, not a bypass: we accept a chain only when the
  * presented leaf is genuinely issued by a certificate we were explicitly given
- * in `customCaPem`. Chromium only hands us the leaf for a private/self-signed CA
- * (no issuer chain), so we cannot compare fingerprints against the CA bundle —
- * instead we verify the leaf's signature against the CA public key, check
- * validity windows, and check the leaf covers the requested host. An empty or
- * missing CA reverts to Chromium's default verification (never a blanket accept).
+ * in `customCaPem`, or when the user has explicitly pinned that exact
+ * certificate (fingerprint) for that exact host through the trust prompt.
+ * Chromium only hands us the leaf for a private/self-signed CA (no issuer
+ * chain), so a fingerprint comparison against the CA bundle could never match —
+ * instead we verify the leaf's signature against the CA public key, check the
+ * validity windows, and check the leaf covers the requested host.
+ *
+ * The proc is installed on **every** session the app can render into (the
+ * default session + any named partition), because a `webview`/partitioned
+ * context does not inherit the default session's handler — so custom-CA trust
+ * does not silently depend on where a surface happens to be hosted. Both
+ * sessions share the same decision core.
  */
 async function applyCustomCa(connection: DesktopConnectionConfig): Promise<void> {
-  if (!looksLikePemCertificate(connection.customCaPem)) {
-    // No custom CA configured: restore default verification in case a previous
-    // session (e.g. after a settings change) had installed a pin.
-    session.defaultSession.setCertificateVerifyProc(null);
-    return;
+  const caPem = connection.customCaPem;
+  const hasCa = typeof caPem === 'string' && looksLikePemCertificate(caPem);
+  const trusted = hasCa ? certificateFingerprints(caPem) : new Set<string>();
+
+  // Only a *parsed* CA bundle (or a user pin) justifies installing our proc; an
+  // absent or broken config clears any previously-installed pin so stale custom
+  // trust never lingers.
+  const active = hasCa && trusted.size > 0;
+  const verify = active
+    ? createCertificateVerifyProc({
+        caPem: caPem as string,
+        trustedFingerprints: trusted,
+        trustStore: certTrustStore,
+        requestTrust: (info) => certPrompt.requestTrust(info),
+      })
+    : null;
+
+  for (const target of [
+    session.defaultSession as unknown as { setCertificateVerifyProc: (p: unknown) => void },
+    ...SAFE_PARTITION_SESSIONS.map(
+      (name) => session.fromPartition(name) as unknown as { setCertificateVerifyProc: (p: unknown) => void },
+    ),
+  ]) {
+    try {
+      target.setCertificateVerifyProc(verify ? (request: unknown, callback: (code: number) => void) => {
+        callback(verify(request as Parameters<typeof verify>[0]));
+      } : null);
+    } catch {
+      // Never let a session-pinning failure crash the main process.
+    }
   }
-  const trusted = certificateFingerprints(connection.customCaPem);
-  if (!trusted.size) return;
-  const verify = createCustomCaVerifier(connection.customCaPem, trusted);
-  session.defaultSession.setCertificateVerifyProc((request, callback) => {
-    callback(verify(request));
-  });
 }
+
+/**
+ * Named partitions the app can host content in. A `webview`/partitioned context
+ * does not inherit `defaultSession`'s verify proc, so we install ours on these
+ * too. Kept as an explicit allowlist (not a wildcard) so we never mutate sessions
+ * we do not own.
+ */
+const SAFE_PARTITION_SESSIONS = ['persist:nexus', 'persist:nexus-chat', 'persist:nexus-companion'] as const;
 
 function resolveRendererUrl(): string {
   const devServer = process.env.NEXUS_RENDERER_URL;
@@ -530,6 +903,15 @@ function resolveRendererUrl(): string {
   // __dirname_ (dist-electron) it is a sibling `dist/` folder, not `renderer/`.
   return `file://${join(__dirname_, '../dist/renderer/index.html')}`;
 }
+
+/**
+ * The only renderer location the bridge trusts. Resolved lazily (the URL is
+ * fixed at boot) and used for both IPC sender validation and navigation guards.
+ */
+const trustedRendererUrls = (): readonly string[] => [resolveRendererUrl()];
+
+/** Validates the sender of every `ipcMain.handle` before its body runs. */
+const senderGuard = createSenderGuard(trustedRendererUrls);
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -554,6 +936,13 @@ async function createWindow(): Promise<void> {
   // reliably reach `_NET_WM_ICON` on Linux, whereas setIcon() does.
   const icon = resolveWindowIcon();
   if (icon) mainWindow.setIcon(icon);
+
+  // Block navigation off the app's own origin (the preload — hence
+  // `window.nexus` — is re-injected on every navigation) and deny `window.open`.
+  hardenWebContents(mainWindow.webContents, {
+    trustedUrls: trustedRendererUrls,
+    openExternal: (url) => void openExternalUrl(url),
+  });
 
   // Closing the window hides it to the tray rather than quitting, so the app can
   // keep receiving messages (and raising notifications) in the background. A real
@@ -599,9 +988,29 @@ async function createWindow(): Promise<void> {
   }
 }
 
-function registerIpc(): void {
-  ipcMain.handle(IPC.version, () => app.getVersion());
+/**
+ * Build the read-only snapshot the audit browser renders. Applies the UI filter
+ * for the rows but computes the facet lists from the whole retained set, so the
+ * filter dropdowns never collapse to the current selection.
+ */
+function buildAuditSnapshot(filter: import('../shared/audit.js').AuditFilter): AuditSnapshot {
+  const all = auditStore.list();
+  return {
+    entries: filterAuditEntries(all, filter),
+    retention: auditStore.getRetention(),
+    facets: auditFacets(all),
+    path: auditStore.filePath(),
+    total: all.length,
+    sizeBytes: auditStore.sizeBytes(),
+  };
+}
 
+function registerIpc(): void {
+  // Validate the sender of every registered handler before its body runs. Must
+  // run before the first `ipcMain.handle` below (it wraps the method itself).
+  installSenderGuard(ipcMain, senderGuard);
+
+  ipcMain.handle(IPC.version, () => app.getVersion());
   ipcMain.handle(IPC.configGet, () => settings.getConnectionConfig());
   ipcMain.handle(IPC.configSet, (_e, patch: ConnectionConfigPatch) => {
     const next = settings.setConnectionConfig(patch ?? {});
@@ -609,12 +1018,46 @@ function registerIpc(): void {
     // Re-pin the renderer's certificate trust so a CA change takes effect
     // without an app restart (main-process fetch resolves it per call).
     void applyCustomCa(next);
+    // A new portal URL (or region) changes the "Open portal" item and where the
+    // tray app list is fetched from.
+    invalidateInstalledApps();
+    void refreshTrayMenu();
     return next;
   });
 
   ipcMain.handle(IPC.uiSettingsGet, () => settings.getUiSettings());
-  ipcMain.handle(IPC.uiSettingsSet, (_e, patch: Partial<UiSettings>) =>
-    settings.setUiSettings(patch ?? {}),
+  ipcMain.handle(IPC.uiSettingsSet, (_e, patch: Partial<UiSettings>) => {
+    const next = settings.setUiSettings(patch ?? {});
+    // A visibility/custom-entry change must be reflected in the tray at once.
+    if (patch && 'trayApps' in patch) {
+      invalidateInstalledApps();
+      void refreshTrayMenu();
+    }
+    return next;
+  });
+
+  // TLS certificate trust. `list`/`revoke` are the Settings surface; `respond`
+  // settles the prompt raised by the verify proc. Trusting or revoking re-pins
+  // the session so Chromium re-runs verification on the next request.
+  ipcMain.handle(IPC.certTrustList, (): CertificateTrustEntry[] => certTrustStore.list());
+  ipcMain.handle(IPC.certTrustRevoke, (_e, host: string, fingerprint?: string): CertificateTrustEntry[] => {
+    certTrustStore.revoke(String(host ?? ''), fingerprint ? String(fingerprint) : undefined);
+    void applyCustomCa(settings.getConnectionConfig());
+    return certTrustStore.list();
+  });
+  ipcMain.handle(
+    IPC.certTrustRespond,
+    (_e, decision: { host?: string; fingerprint?: string; trusted?: boolean }): void => {
+      // Only the prompt that is currently open may be settled, and only for the
+      // exact (host, fingerprint) it asked about — a renderer cannot answer a
+      // different certificate or pin arbitrary trust.
+      const pending = certTrustPending;
+      if (!pending) return;
+      if (String(decision?.host ?? '') !== pending.host) return;
+      if (String(decision?.fingerprint ?? '') !== pending.fingerprint) return;
+      certTrustPending = null;
+      pending.settle(decision?.trusted === true);
+    },
   );
   ipcMain.handle(IPC.notifyIncoming, (_e, payload: NotificationPayload, opts?: { force?: boolean }) => {
     if (!payload || typeof payload !== 'object' || typeof payload.messageId !== 'string') return;
@@ -690,6 +1133,26 @@ function registerIpc(): void {
   ipcMain.handle(IPC.authLogout, () => getAuthManager().logout());
   ipcMain.handle(IPC.authHydrate, () => getAuthManager().hydrateSession());
 
+  // App PIN lock (Deliverable 3). A UI gate only; the PIN is hashed in main.
+  ipcMain.handle(IPC.appLockGetState, () => appLockManager.getState());
+  ipcMain.handle(IPC.appLockSetPin, (_e, pin: string) => appLockManager.setPin(pin));
+  ipcMain.handle(IPC.appLockClearPin, () => appLockManager.clearPin());
+  ipcMain.handle(IPC.appLockUpdateSettings, (_e, patch: Partial<AppLockSettings>) =>
+    appLockManager.updateSettings(patch ?? {}),
+  );
+  ipcMain.handle(IPC.appLockNoteActivity, () => {
+    appLockManager.noteActivity();
+  });
+  ipcMain.handle(IPC.appLockEvaluate, () => appLockManager.evaluateLocked());
+  ipcMain.handle(IPC.appLockUnlock, (_e, pin: string) => appLockManager.unlock(pin));
+  ipcMain.handle(IPC.appLockLock, () => appLockManager.lock());
+
+  // Logout with two explicit choices (Deliverable 5).
+  ipcMain.handle(IPC.logoutRun, (_e, choice: LogoutChoice) => logoutManager.run(choice));
+  ipcMain.handle(IPC.logoutRetry, (_e, steps: LogoutStep[], choice: LogoutChoice) =>
+    logoutManager.retry(Array.isArray(steps) ? steps : [], choice),
+  );
+
   ipcMain.handle(IPC.deviceStatus, () => getAuthManager().getDeviceStatus());
   ipcMain.handle(IPC.deviceRegister, () => getAuthManager().registerDevice());
 
@@ -711,7 +1174,21 @@ function registerIpc(): void {
   ipcMain.handle(IPC.toolsSetLocalCommands, (_e, commands) =>
     toolsStore.setLocalCommands(commands),
   );
-  ipcMain.handle(IPC.toolsRun, (_e, req: ToolInvocation) => runTool(req as never, { store: toolsStore }));
+  ipcMain.handle(IPC.toolsRun, (_e, req: ToolInvocation) =>
+    toolAuditor.invoke(req, { store: toolsStore }),
+  );
+
+  // Client-tool audit trail. Read-only snapshot + the configurable retention
+  // setting. This is the ENTIRE audit IPC surface: there is deliberately no
+  // channel to append, clear or trim, so no renderer/agent path can mutate the
+  // store (which is written only inside `toolAuditor`).
+  ipcMain.handle(IPC.auditSnapshot, (_e, filter?: Partial<import('../shared/audit.js').AuditFilter>) =>
+    buildAuditSnapshot(filter ?? {}),
+  );
+  ipcMain.handle(IPC.auditSetRetention, (_e, patch: Partial<import('../shared/audit.js').AuditRetention>) => {
+    auditStore.setRetention(patch ?? {});
+    return buildAuditSnapshot({});
+  });
 
   // Storage explorer (Phase 2).
   ipcMain.handle(IPC.storageWorkspaces, () => storageManager.workspaces());
@@ -735,6 +1212,60 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.storageMoveFile, (_e, fileId: string, targetFolderId: string | null) =>
     storageManager.moveFile(fileId, targetFolderId),
+  );
+
+  // Drag-and-drop transfer (renderer UX ownership). Every handler moves bytes in
+  // the main process; the renderer sends paths only. Progress is pushed back on
+  // `IPC.storageTransferProgress` so the queue shows real byte counts.
+  ipcMain.handle(IPC.storageExpandDrop, (_e, paths: string[]) =>
+    storageTransfer.expandDrop(Array.isArray(paths) ? paths : []),
+  );
+  ipcMain.handle(IPC.storageUploadOne, (_e, req: StorageUploadOneRequest) => storageTransfer.uploadOne(req));
+  ipcMain.handle(IPC.storageTransferCancel, (_e, transferId: string) => storageTransfer.cancel(transferId));
+  ipcMain.handle(IPC.storageDownloadLink, (_e, fileId: string) => storageTransfer.downloadLink(fileId));
+  ipcMain.handle(IPC.storageSaveFile, (_e, fileId: string, suggestedName: string) =>
+    storageTransfer.saveFile(fileId, suggestedName, async (name) => {
+      const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+      const result = win
+        ? await dialog.showSaveDialog(win, { defaultPath: name })
+        : await dialog.showSaveDialog({ defaultPath: name });
+      return result.canceled || !result.filePath ? null : result.filePath;
+    }),
+  );
+  ipcMain.handle(IPC.storageSaveFilesToDir, (_e, files: Array<{ fileId: string; name: string }>) =>
+    storageTransfer.saveFilesToDir(Array.isArray(files) ? files : [], async () => {
+      const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+      const result = win
+        ? await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] })
+        : await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
+      return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
+    }),
+  );
+  ipcMain.handle(IPC.storagePrepareDrag, (_e, fileId: string, name: string) =>
+    storageTransfer.prepareDrag(fileId, name),
+  );
+  ipcMain.handle(IPC.storageStartDrag, async (event, fileId: string, name: string) => {
+    const wc = event.sender;
+    if (!wc || wc.isDestroyed()) return false;
+    // A 1x1 transparent icon satisfies macOS, which requires a non-empty drag
+    // image; every other platform ignores it.
+    const icon = nativeImage.createFromDataURL(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+    );
+    const driver = { icon, startDrag: (item: { file: string; icon: unknown }) => wc.startDrag(item as never) };
+    // Hover warm-up normally staged the file already, so this is a synchronous
+    // start inside the drag gesture. If the warm-up has not finished (or never
+    // ran), stage now and start once the bytes are on disk.
+    if (storageTransfer.startDrag(fileId, driver)) return true;
+    const prepared = await storageTransfer.prepareDrag(fileId, typeof name === 'string' ? name : '');
+    if (!prepared.path) return false;
+    return storageTransfer.startDrag(fileId, driver);
+  });
+  ipcMain.handle(IPC.storageReleaseDrag, (_e, fileId: string) => {
+    storageTransfer.releaseDrag(fileId);
+  });
+  ipcMain.handle(IPC.storagePreviewBytes, (_e, fileId: string) =>
+    storageTransfer.readBytesForPreview(fileId),
   );
 
   // Bucket-subdir <-> local-dir multi-sync (Phase 3).
@@ -777,18 +1308,34 @@ function registerIpc(): void {
   // Identity / account switching (Phase 9).
   ipcMain.handle(IPC.identitySnapshot, () => identityManager.getSnapshot());
   ipcMain.handle(IPC.identityListMemberships, () => identityManager.listMemberships());
-  ipcMain.handle(IPC.identitySwitch, (_e, key: string) => identityManager.switchIdentity(key));
-  ipcMain.handle(IPC.identitySwitchAccount, (_e, userId: string) => identityManager.switchAccount(userId));
-  ipcMain.handle(IPC.identityLogout, (_e, key?: string) => identityManager.logout(key));
-  ipcMain.handle(
-    IPC.identityStartMembership,
-    (_e, req: { membershipId: string; businessEmail: string; password?: string }) =>
-      identityManager.startMembership(req),
+  ipcMain.handle(IPC.identitySwitch, (_e, key: string) => {
+    const next = identityManager.switchIdentity(key);
+    afterIdentityChange();
+    return next;
+  });
+  ipcMain.handle(IPC.identitySwitchAccount, (_e, userId: string) => {
+    const next = identityManager.switchAccount(userId);
+    afterIdentityChange();
+    return next;
+  });
+  ipcMain.handle(IPC.identityLogout, (_e, key?: string) => {
+    const next = identityManager.logout(key);
+    afterIdentityChange();
+    return next;
+  });
+  ipcMain.handle(IPC.identityStartMembership,
+    async (_e, req: { membershipId: string; businessEmail: string; password?: string }) => {
+      const out = await identityManager.startMembership(req);
+      afterIdentityChange();
+      return out;
+    },
   );
-  ipcMain.handle(
-    IPC.identityCompleteMembership,
-    (_e, req: { loginToken: string; method: string; code: string; businessEmail?: string }) =>
-      identityManager.completeMembership(req),
+  ipcMain.handle(IPC.identityCompleteMembership,
+    async (_e, req: { loginToken: string; method: string; code: string; businessEmail?: string }) => {
+      const out = await identityManager.completeMembership(req);
+      afterIdentityChange();
+      return out;
+    },
   );
 
   // Local asset-agent discovery (Phase 10).
@@ -798,12 +1345,38 @@ function registerIpc(): void {
     assetAgentDiscovery.setPreferLocal(enabled === true),
   );
 
+  // Tray "Nexus apps": the settings panel shows what the tray would list.
+  ipcMain.handle(IPC.trayAppsList, async () => {
+    if (!identityManager.hasActiveSession()) return [];
+    const installed = await loadInstalledApps();
+    return resolveTrayApps({ installed, settings: settings.getUiSettings().trayApps }).filter(
+      (item) => item.source === 'installed',
+    );
+  });
+  ipcMain.handle(IPC.trayAppsResolved, async () => {
+    if (!identityManager.hasActiveSession()) {
+      // Signed out: the tray still shows the user's custom entries.
+      return resolveTrayApps({ installed: [], settings: settings.getUiSettings().trayApps });
+    }
+    try {
+      return await resolveTrayAppItems();
+    } catch {
+      return resolveTrayApps({ installed: [], settings: settings.getUiSettings().trayApps });
+    }
+  });
+
   // Immersive companion window (Phase 7a).
   ipcMain.handle(IPC.companionOpen, (_e, launch: CompanionLaunch) =>
     companionWindows.open(launch),
   );
   ipcMain.handle(IPC.companionClose, (_e, contactId: string) => companionWindows.close(contactId));
   ipcMain.handle(IPC.companionList, () => companionWindows.openContactIds());
+  ipcMain.handle(IPC.companionSetAlwaysOnTop, (_e, contactId: string, onTop: boolean) =>
+    companionWindows.setAlwaysOnTop(contactId, onTop === true),
+  );
+  ipcMain.handle(IPC.companionIsAlwaysOnTop, (_e, contactId: string) =>
+    companionWindows.isAlwaysOnTop(contactId),
+  );
 
   // Desktop calendar (Phase 7b).
   ipcMain.handle(IPC.calendarListEvents, (_e, input?: CalendarListInput) =>
@@ -867,7 +1440,19 @@ app.whenReady().then(async () => {
   // from the matching shortcut. Without this the window icon set below is
   // ignored on Windows and the app shows up as a generic Electron entry.
   app.setAppUserModelId(DESKTOP_APP_ID);
+  // Predictable local paths for the structured log + the append-only client-tool
+  // audit trail, so both are discoverable without digging through userData.
+  logger.info('desktop starting', {
+    version: app.getVersion(),
+    logFile: logger.filePath(),
+    auditFile: auditStore.filePath(),
+    retention: auditStore.getRetention(),
+  });
   applyEnvConnectionOverrides();
+  // Deny every session permission the app does not need (geolocation, MIDI, HID,
+  // USB, serial, …) without a prompt; keep only media / screen-share / fullscreen
+  // for the app's own renderer. Installed before any window exists.
+  installPermissionGuard(session.defaultSession as unknown as SessionLike, trustedRendererUrls);
   registerIpc();
   createTray();
   localVoiceManager.start();

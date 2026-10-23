@@ -160,4 +160,25 @@ describe('expiry', () => {
     expect(next.accounts[0].identities).toHaveLength(1);
     expect(activeIdentity(next)?.orgId).toBe('o1');
   });
+
+  it('keeps an explicit sign-out (null activeUserId) across a reload', () => {
+    // A switch-user logout sets `activeUserId: null` while keeping the accounts.
+    // Reloading must not silently re-activate an account and sign the user back
+    // in; only a *stale* active id (its account pruned) is repaired.
+    let s = upsertIdentity(createIdentityStoreState(), privateId('u1'));
+    s = { ...s, activeUserId: null };
+    const next = pruneExpired(s);
+    expect(next.accounts).toHaveLength(1);
+    expect(next.activeUserId).toBeNull();
+    expect(activeIdentity(next)).toBeNull();
+  });
+
+  it('still repairs an active id whose account disappeared', () => {
+    let s = upsertIdentity(createIdentityStoreState(), privateId('u1'));
+    s = upsertIdentity(s, privateId('u2'));
+    // Simulate the active account being removed out from under the id.
+    s = { ...s, accounts: s.accounts.filter((a) => a.userId !== s.activeUserId) };
+    const next = pruneExpired(s);
+    expect(next.activeUserId).toBe('u1');
+  });
 });

@@ -24,6 +24,41 @@ function manager(fetchFn: typeof fetch, store = createMemorySecureStore()) {
   };
 }
 
+/**
+ * Route by command name. Sign-in now also registers the device, so call-order
+ * mocks are brittle; a test names the commands it cares about and any other
+ * command is a loud failure instead of a silently-wrong assertion.
+ */
+function routeByCommand(
+  handlers: Record<string, (envelope: Record<string, any>) => Response>,
+): typeof fetch {
+  return vi.fn(async (_url: string, init?: RequestInit) => {
+    const envelope = JSON.parse(String(init?.body));
+    const handler = handlers[envelope.command];
+    if (!handler) throw new Error(`unexpected command in test: ${envelope.command}`);
+    return handler(envelope);
+  }) as unknown as typeof fetch;
+}
+
+// The region echoes back the device id it was sent (`deviceId: payload.deviceId`),
+// so the mock must do the same or the persisted id drifts from the login id.
+const okDevice = (envelope: Record<string, any>) =>
+  jsonResponse({ responseCode: 200, responseObject: { deviceId: envelope.payload.deviceId } });
+
+/** The envelope of the last request whose command matches. */
+function envelopeFor(fetchFn: typeof fetch, command: string): Record<string, any> {
+  const calls = (fetchFn as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls;
+  const match = calls.find((call) => {
+    try {
+      return JSON.parse(String(call[1]?.body)).command === command;
+    } catch {
+      return false;
+    }
+  });
+  if (!match) throw new Error(`no request found for command ${command}`);
+  return JSON.parse(String(match[1].body));
+}
+
 describe('createAuthManager', () => {
   it('starts signed out with no stored token', async () => {
     const { auth } = manager(async () => jsonResponse({}) as unknown as Response);
@@ -31,10 +66,12 @@ describe('createAuthManager', () => {
   });
 
   it('completes an immediate login and persists the token', async () => {
-    const fetchFn = vi.fn(async () =>
-      jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1' } }),
-    );
-    const { auth, store } = manager(fetchFn as unknown as typeof fetch, createMemorySecureStore());
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
+        jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1' } }),
+      'anx.device.register': okDevice,
+    });
+    const { auth, store } = manager(fetchFn, createMemorySecureStore());
     const state = await auth.login({ email: 'a@b.c', password: 'pw' });
     expect(state.status).toBe('signed_in');
     expect(await store.get(TOKEN_KEY)).toBe('jwt');
@@ -42,15 +79,17 @@ describe('createAuthManager', () => {
   });
 
   it('unwraps an object AuthToken on login (regression: TOTP read as failure)', async () => {
-    const fetchFn = vi.fn(async () =>
-      jsonResponse({
-        responseCode: 200,
-        responseObject: {
-          token: { token: 'jwt-obj', userId: 'u1', orgId: 'o1', role: 'owner', sid: 's1' },
-        },
-      }),
-    );
-    const { auth, store } = manager(fetchFn as unknown as typeof fetch, createMemorySecureStore());
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
+        jsonResponse({
+          responseCode: 200,
+          responseObject: {
+            token: { token: 'jwt-obj', userId: 'u1', orgId: 'o1', role: 'owner', sid: 's1' },
+          },
+        }),
+      'anx.device.register': okDevice,
+    });
+    const { auth, store } = manager(fetchFn, createMemorySecureStore());
     const state = await auth.login({ email: 'a@b.c', password: 'pw' });
     expect(state.status).toBe('signed_in');
     if (state.status !== 'signed_in') throw new Error('expected signed_in');
@@ -60,54 +99,71 @@ describe('createAuthManager', () => {
   });
 
   it('passes the resolved region through on login', async () => {
-    const fetchFn = vi.fn(async () =>
-      jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1' } }),
-    );
-    const { auth } = manager(fetchFn as unknown as typeof fetch);
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
+        jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1' } }),
+      'anx.device.register': okDevice,
+    });
+    const { auth } = manager(fetchFn);
     await auth.login({ email: 'a@b.c', password: 'pw', region: 'eu-west' });
-    const call = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
-    const envelope = JSON.parse(String(call[1].body));
-    expect(envelope.payload).toMatchObject({ region: 'eu-west' });
+    expect(envelopeFor(fetchFn, 'anx.auth.login').payload).toMatchObject({ region: 'eu-west' });
+  });
+
+  it('binds the login to this machine so the region can issue the device grant', async () => {
+    // Regression: without a deviceId on the login the region logs `device=none`,
+    // issues no device-enrolment grant, and the follow-up registration stalls on
+    // 2FA — leaving the session with no deviceId and every command 401.
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
+        jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1' } }),
+      'anx.device.register': okDevice,
+    });
+    const { auth, store } = manager(fetchFn, createMemorySecureStore());
+    await auth.login({ email: 'a@b.c', password: 'pw' });
+
+    const loginPayload = envelopeFor(fetchFn, 'anx.auth.login').payload;
+    expect(typeof loginPayload.deviceId).toBe('string');
+    expect(loginPayload.deviceId).toBeTruthy();
+    // The same id is the one sent to registration and persisted locally.
+    expect(envelopeFor(fetchFn, 'anx.device.register').payload.deviceId).toBe(loginPayload.deviceId);
+    expect(JSON.parse(String(await store.get(SECURE_KEYS.deviceKeys))).deviceId).toBe(loginPayload.deviceId);
   });
 
   it('lists countries and regions for the picker', async () => {
-    const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
-      const { command } = JSON.parse(String(init.body));
-      if (command === 'anx.country.list') {
-        return jsonResponse({
+    const fetchFn = routeByCommand({
+      'anx.country.list': () =>
+        jsonResponse({
           responseCode: 200,
           responseObject: { countries: [{ code: 'DE', name: 'Germany', state: 'active' }] },
-        });
-      }
-      return jsonResponse({
-        responseCode: 200,
-        responseObject: { regions: [{ slug: 'eu-west', name: 'EU West', state: 'active', countryCodes: ['DE'] }] },
-      });
+        }),
+      'anx.region.list': () =>
+        jsonResponse({
+          responseCode: 200,
+          responseObject: { regions: [{ slug: 'eu-west', name: 'EU West', state: 'active', countryCodes: ['DE'] }] },
+        }),
     });
-    const { auth } = manager(fetchFn as unknown as typeof fetch);
+    const { auth } = manager(fetchFn);
     expect((await auth.listCountries()).map((c) => c.code)).toEqual(['DE']);
     expect((await auth.listRegions()).map((r) => r.slug)).toEqual(['eu-west']);
   });
 
   it('surfaces a 2FA challenge and completes it', async () => {
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse(
-          {
-            responseCode: 200,
-            responseObject: {
-              requiresTwoFactor: true,
-              loginToken: 'lt-1',
-              twoFactorMethods: ['email'],
-              twoFactorChallengeHint: { channelType: 'email', sentTo: 'a***@b.c' },
-            },
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
+        jsonResponse({
+          responseCode: 200,
+          responseObject: {
+            requiresTwoFactor: true,
+            loginToken: 'lt-1',
+            twoFactorMethods: ['email'],
+            twoFactorChallengeHint: { channelType: 'email', sentTo: 'a***@b.c' },
           },
-          200,
-        ),
-      )
-      .mockResolvedValueOnce(jsonResponse({ responseCode: 200, responseObject: { token: 'jwt-2' } }));
-    const { auth } = manager(fetchFn as unknown as typeof fetch, createMemorySecureStore());
+        }),
+      'anx.auth.twoFactorLogin': () =>
+        jsonResponse({ responseCode: 200, responseObject: { token: 'jwt-2' } }),
+      'anx.device.register': okDevice,
+    });
+    const { auth } = manager(fetchFn, createMemorySecureStore());
 
     const first = await auth.login({ email: 'a@b.c', password: 'pw' });
     expect(first.status).toBe('two_factor_required');
@@ -121,43 +177,39 @@ describe('createAuthManager', () => {
 
     const done = await auth.submitTwoFactor({ code: '123456', method: 'email' });
     expect(done.status).toBe('signed_in');
-    // The region receives the temporary loginToken, not an authRequestId.
-    const verifyEnvelope = JSON.parse(String((fetchFn.mock.calls[1] as [string, RequestInit])[1].body));
-    expect(verifyEnvelope.command).toBe('anx.auth.twoFactorLogin');
-    expect(verifyEnvelope.payload.loginToken).toBe('lt-1');
-    expect(verifyEnvelope.payload.method).toBe('email');
+    // The region receives the temporary loginToken, not an authRequestId, and
+    // the presenting device id so it can bind the enrolment grant.
+    const verify = envelopeFor(fetchFn, 'anx.auth.twoFactorLogin');
+    expect(verify.payload.loginToken).toBe('lt-1');
+    expect(verify.payload.method).toBe('email');
+    expect(typeof verify.payload.deviceId).toBe('string');
+    expect(verify.payload.deviceId).toBe(envelopeFor(fetchFn, 'anx.auth.login').payload.deviceId);
   });
 
   it('resolves the managed region and completes a passwordless sign-in', async () => {
-    const fetchFn = vi
-      .fn()
-      // 1. region discovery
-      .mockResolvedValueOnce(
+    const fetchFn = routeByCommand({
+      'anx.region.node.info': () =>
         jsonResponse({
           responseCode: 200,
           responseObject: { managedRegions: [{ slug: 'eu-west', state: 'active' }] },
         }),
-      )
-      // 2. passwordless start
-      .mockResolvedValueOnce(
+      'anx.auth.passwordless.start': () =>
         jsonResponse({
           responseCode: 200,
           responseObject: { challengeToken: 'ct-1', channel: 'email', maskedTarget: 'a***@b.c' },
         }),
-      )
-      // 3. passwordless verify -> session
-      .mockResolvedValueOnce(
+      'anx.auth.passwordless.verify': () =>
         jsonResponse({ responseCode: 200, responseObject: { token: 'jwt-3', userId: 'u3' } }),
-      );
-
-    const { auth, store } = manager(fetchFn as unknown as typeof fetch, createMemorySecureStore());
+      'anx.device.register': okDevice,
+    });
+    const { auth, store } = manager(fetchFn, createMemorySecureStore());
 
     const started = await auth.startPasswordless({ channel: 'email', identifier: 'a@b.c' });
     expect(started.status).toBe('two_factor_required');
-    const startEnvelope = JSON.parse(String((fetchFn.mock.calls[1] as [string, RequestInit])[1].body));
-    expect(startEnvelope.command).toBe('anx.auth.passwordless.start');
-    expect(startEnvelope.payload.region).toBe('eu-west');
-    expect(startEnvelope.payload.channel).toBe('email');
+    const start = envelopeFor(fetchFn, 'anx.auth.passwordless.start');
+    expect(start.payload.region).toBe('eu-west');
+    expect(start.payload.channel).toBe('email');
+    expect(typeof start.payload.deviceId).toBe('string');
 
     const done = await auth.verifyPasswordless({ code: '123456' });
     expect(done.status).toBe('signed_in');
@@ -165,10 +217,12 @@ describe('createAuthManager', () => {
   });
 
   it('clears the token on logout', async () => {
-    const fetchFn = vi.fn(async () =>
-      jsonResponse({ responseCode: 200, responseObject: { token: 'jwt' } }),
-    );
-    const { auth, store } = manager(fetchFn as unknown as typeof fetch, createMemorySecureStore());
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
+        jsonResponse({ responseCode: 200, responseObject: { token: 'jwt' } }),
+      'anx.device.register': okDevice,
+    });
+    const { auth, store } = manager(fetchFn, createMemorySecureStore());
     await auth.login({ email: 'a', password: 'b' });
     await auth.logout();
     expect((await auth.getState()).status).toBe('signed_out');
@@ -185,14 +239,12 @@ describe('createAuthManager', () => {
   });
 
   it('registers a device, generating and persisting a keypair', async () => {
-    const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
-      const envelope = JSON.parse(String(init?.body));
-      if (envelope.command === 'anx.auth.login') {
-        return jsonResponse({ responseCode: 200, responseObject: { token: 'jwt' } });
-      }
-      return jsonResponse({ responseCode: 200, responseObject: { deviceId: 'dev-7' } });
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () => jsonResponse({ responseCode: 200, responseObject: { token: 'jwt' } }),
+      'anx.device.register': () =>
+        jsonResponse({ responseCode: 200, responseObject: { deviceId: 'dev-7' } }),
     });
-    const { auth, store } = manager(fetchFn as unknown as typeof fetch, createMemorySecureStore());
+    const { auth, store } = manager(fetchFn, createMemorySecureStore());
     await auth.login({ email: 'a', password: 'b' });
 
     const status = await auth.registerDevice();
@@ -202,30 +254,196 @@ describe('createAuthManager', () => {
   });
 
   it('created sender tags commands with the token', async () => {
-    const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
-      const envelope = JSON.parse(String(init?.body));
-      if (envelope.command === 'anx.auth.login') {
-        return jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1' } });
-      }
-      return jsonResponse({ responseCode: 200, responseObject: { pong: true } });
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
+        jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1' } }),
+      'anx.device.register': okDevice,
+      'anx.ping': () => jsonResponse({ responseCode: 200, responseObject: { pong: true } }),
     });
-    const { auth } = manager(fetchFn as unknown as typeof fetch, createMemorySecureStore());
+    const { auth } = manager(fetchFn, createMemorySecureStore());
     await auth.login({ email: 'a', password: 'b' });
 
     const sender = await auth.createSender();
     const res = await sender.send('anx.ping');
     expect(res.ok).toBe(true);
-    const lastCall = fetchFn.mock.calls.at(-1) as [string, RequestInit];
-    const envelope = JSON.parse(String(lastCall[1].body));
+    expect(envelopeFor(fetchFn, 'anx.ping').identity.token).toBe('jwt');
+  });
+});
+
+describe('createAuthManager — device identity on the command path', () => {
+  it('sends the registered deviceId with an authenticated command', async () => {
+    // The 401 regression: `anx.communicate.conversations.list` was rejected with
+    // "Device validation failed: Device ID is required" because the sender
+    // carried a token but no deviceId.
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
+        jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1' } }),
+      'anx.device.register': () =>
+        jsonResponse({ responseCode: 200, responseObject: { deviceId: 'dev-registered' } }),
+      'anx.communicate.conversations.list': () =>
+        jsonResponse({ responseCode: 200, responseObject: { conversations: [] } }),
+    });
+    const { auth } = manager(fetchFn, createMemorySecureStore());
+    await auth.login({ email: 'a@b.c', password: 'pw' });
+
+    const sender = await auth.createSender();
+    const res = await sender.send('anx.communicate.conversations.list', {});
+
+    expect(res.ok).toBe(true);
+    const envelope = envelopeFor(fetchFn, 'anx.communicate.conversations.list');
     expect(envelope.identity.token).toBe('jwt');
+    expect(envelope.identity.deviceId).toBe('dev-registered');
+  });
+
+  it('repairs a missing deviceId from the stored keypair (restart / pre-registration session)', async () => {
+    // A restarted process has only the identity store + device keypair left. The
+    // identity store session may predate registration, so the resolved identity
+    // must fold in the acknowledged device id instead of sending none.
+    const store = createMemorySecureStore();
+    await store.set(TOKEN_KEY, 'jwt');
+    await store.set(
+      SECURE_KEYS.deviceKeys,
+      JSON.stringify({ deviceId: 'dev-from-keys', registeredAt: '2026-01-01T00:00:00.000Z' }),
+    );
+    const fetchFn = routeByCommand({
+      'anx.communicate.conversations.list': () =>
+        jsonResponse({ responseCode: 200, responseObject: { conversations: [] } }),
+    });
+    const auth = createAuthManager({
+      secureStore: store,
+      clientOptions: { baseUrl: 'https://region.example', fetchFn },
+      deviceName: 'test',
+      platform: 'linux',
+      appVersion: '0.1.0',
+      getActiveToken: () => 'jwt',
+      // The persisted session record has no deviceId (recorded pre-registration).
+      getActiveIdentity: () => ({ userId: 'u1', orgId: null, role: null, deviceId: null }),
+    });
+
+    const state = await auth.getState();
+    expect(state.status).toBe('signed_in');
+    if (state.status !== 'signed_in') throw new Error('expected signed_in');
+    expect(state.identity.deviceId).toBe('dev-from-keys');
+
+    const sender = await auth.createSender();
+    const res = await sender.send('anx.communicate.conversations.list', {});
+    expect(res.ok).toBe(true);
+    expect(envelopeFor(fetchFn, 'anx.communicate.conversations.list').identity.deviceId).toBe(
+      'dev-from-keys',
+    );
+  });
+
+  it('self-heals: registers on the first command when the region-acknowledged device is missing', async () => {
+    // A session can outlive a refused registration (the region answered 202 at
+    // login, so no device row was created). Without a repair, EVERY command is
+    // answered with a device-validation 401; the sender must register once and
+    // then carry the id.
+    const store = createMemorySecureStore();
+    await store.set(TOKEN_KEY, 'jwt');
+    // A local keypair that was never acknowledged by the region.
+    await store.set(SECURE_KEYS.deviceKeys, JSON.stringify({ deviceId: 'dev-local', registeredAt: null }));
+    const fetchFn = routeByCommand({
+      'anx.device.register': (env) =>
+        jsonResponse({ responseCode: 200, responseObject: { deviceId: env.payload.deviceId } }),
+      'anx.communicate.conversations.list': () =>
+        jsonResponse({ responseCode: 200, responseObject: { conversations: [] } }),
+    });
+    const auth = createAuthManager({
+      secureStore: store,
+      clientOptions: { baseUrl: 'https://region.example', fetchFn },
+      deviceName: 'test',
+      platform: 'linux',
+      appVersion: '0.1.0',
+      getActiveToken: () => 'jwt',
+      getActiveIdentity: () => ({ userId: 'u1', orgId: null, role: null, deviceId: null }),
+    });
+
+    const sender = await auth.createSender();
+    const res = await sender.send('anx.communicate.conversations.list', {});
+
+    expect(res.ok).toBe(true);
+    // Registered exactly once, and the command carried the id the region echoed.
+    expect(JSON.parse(String(await store.get(SECURE_KEYS.deviceKeys))).registeredAt).toBeTruthy();
+    expect(envelopeFor(fetchFn, 'anx.communicate.conversations.list').identity.deviceId).toBe('dev-local');
+  });
+
+  it('never asserts a deviceId the region has not acknowledged', async () => {
+    // A locally generated id is sent at login (to bind the enrolment grant) but
+    // an unknown id is *rejected* by the region, so it must not be presented as
+    // an identity claim until registration confirms it.
+    const store = createMemorySecureStore();
+    await store.set(TOKEN_KEY, 'jwt');
+    await store.set(SECURE_KEYS.deviceKeys, JSON.stringify({ deviceId: 'dev-unregistered' }));
+    const fetchFn = routeByCommand({
+      'anx.device.register': () =>
+        jsonResponse({ responseCode: 202, responseObject: { authorizationRequired: true } }, 202),
+    });
+    const auth = createAuthManager({
+      secureStore: store,
+      clientOptions: { baseUrl: 'https://region.example', fetchFn },
+      deviceName: 'test',
+      platform: 'linux',
+      appVersion: '0.1.0',
+      getActiveToken: () => 'jwt',
+      getActiveIdentity: () => ({ userId: 'u1', orgId: null, role: null, deviceId: null }),
+    });
+
+    const state = await auth.getState();
+    if (state.status !== 'signed_in') throw new Error('expected signed_in');
+    expect(state.identity.deviceId).toBeNull();
+  });
+
+  it('treats an already-registered device as success rather than failing the session', async () => {
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
+        jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1' } }),
+      'anx.device.register': () =>
+        jsonResponse(
+          { responseCode: 409, errorObjects: [{ code: 'DEVICE_ALREADY_REGISTERED', message: 'already registered' }] },
+          409,
+        ),
+    });
+    const { auth } = manager(fetchFn, createMemorySecureStore());
+    const state = await auth.login({ email: 'a@b.c', password: 'pw' });
+    expect(state.status).toBe('signed_in');
+    if (state.status !== 'signed_in') throw new Error('expected signed_in');
+    // The keypair is ours, so the id holds; the session is not left deviceless.
+    expect(state.identity.deviceId).toBe(envelopeFor(fetchFn, 'anx.auth.login').payload.deviceId);
+  });
+
+  it('as a last resort asks the region to register when signing in without a device id', async () => {
+    // Hydration with a stored token and no keypair: registration must run before
+    // the first command, otherwise it would be rejected for a missing deviceId.
+    const store = createMemorySecureStore();
+    await store.set(TOKEN_KEY, 'jwt');
+    const fetchFn = routeByCommand({
+      'anx.device.list': () => jsonResponse({ responseCode: 200, responseObject: {} }),
+      'anx.device.register': () =>
+        jsonResponse({ responseCode: 200, responseObject: { deviceId: 'dev-hydrated' } }),
+    });
+    const auth = createAuthManager({
+      secureStore: store,
+      clientOptions: { baseUrl: 'https://region.example', fetchFn },
+      deviceName: 'test',
+      platform: 'linux',
+      appVersion: '0.1.0',
+      getActiveToken: () => 'jwt',
+      getActiveIdentity: () => ({ userId: 'u1', orgId: null, role: null, deviceId: null }),
+    });
+
+    const hydration = await auth.hydrateSession();
+    expect(hydration.view).toBe('signed_in');
+    const state = await auth.getState();
+    if (state.status !== 'signed_in') throw new Error('expected signed_in');
+    expect(state.identity.deviceId).toBe('dev-hydrated');
   });
 });
 
 describe('createAuthManager — device link', () => {
   it('starts a link, hides the secret, and signs in on approval', async () => {
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValueOnce(
+    let pollCount = 0;
+    const fetchFn = routeByCommand({
+      'anx.auth.device-link.start': () =>
         jsonResponse({
           responseCode: 200,
           responseObject: {
@@ -236,24 +454,28 @@ describe('createAuthManager — device link', () => {
             interval: 5,
           },
         }),
-      )
-      // First poll: still pending.
-      .mockResolvedValueOnce(
-        jsonResponse({ responseCode: 200, responseObject: { status: 'pending', interval: 5 } }),
-      )
-      // Second poll: approved, with the minted session.
-      .mockResolvedValueOnce(
-        jsonResponse({
+      'anx.auth.device-link.poll': () => {
+        pollCount += 1;
+        if (pollCount === 1) {
+          return jsonResponse({ responseCode: 200, responseObject: { status: 'pending', interval: 5 } });
+        }
+        return jsonResponse({
           responseCode: 200,
           responseObject: {
             status: 'approved',
             token: 'jwt-link',
-            session: { id: 'sess-1', userId: 'u9', token: { token: 'jwt-link', userId: 'u9', orgId: 'org-2', role: 'owner' } },
+            session: {
+              id: 'sess-1',
+              userId: 'u9',
+              token: { token: 'jwt-link', userId: 'u9', orgId: 'org-2', role: 'owner' },
+            },
           },
-        }),
-      );
+        });
+      },
+      'anx.device.register': okDevice,
+    });
 
-    const { auth, store } = manager(fetchFn as unknown as typeof fetch, createMemorySecureStore());
+    const { auth, store } = manager(fetchFn, createMemorySecureStore());
 
     const started = await auth.startDeviceLink();
     expect(started.userCode).toBe('H7K2-9QFP');
@@ -263,9 +485,7 @@ describe('createAuthManager — device link', () => {
 
     expect((await auth.pollDeviceLink()).status).toBe('pending');
     // Secret deviceCode was sent to the region on poll, not leaked upward.
-    const pollEnvelope = JSON.parse(String((fetchFn.mock.calls[1] as [string, RequestInit])[1].body));
-    expect(pollEnvelope.command).toBe('anx.auth.device-link.poll');
-    expect(pollEnvelope.payload.deviceCode).toBe('secret-123');
+    expect(envelopeFor(fetchFn, 'anx.auth.device-link.poll').payload.deviceCode).toBe('secret-123');
 
     const done = await auth.pollDeviceLink();
     expect(done.status).toBe('approved');
@@ -292,22 +512,20 @@ describe('createAuthManager — device revocation', () => {
     await store.set(TOKEN_KEY, 'jwt');
     await store.set(SECURE_KEYS.deviceKeys, JSON.stringify({ deviceId: 'dev-1' }));
 
-    // login first so the manager caches identity, then a command is rejected.
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValueOnce(
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
         jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1', deviceId: 'dev-1' } }),
-      )
-      .mockResolvedValueOnce(
+      'anx.device.register': okDevice,
+      'anx.storage.workspace.list': () =>
         jsonResponse(
           { responseCode: 401, message: 'Device validation failed: Device has been removed and is no longer active' },
           401,
         ),
-      );
+    });
 
     const auth = createAuthManager({
       secureStore: store,
-      clientOptions: { baseUrl: 'https://region.example', fetchFn: fetchFn as unknown as typeof fetch },
+      clientOptions: { baseUrl: 'https://region.example', fetchFn },
       deviceName: 'test',
       platform: 'linux',
       appVersion: '0.1.0',
@@ -331,16 +549,17 @@ describe('createAuthManager — device revocation', () => {
   it('does not tear down on ordinary business errors', async () => {
     const onSessionLost = vi.fn();
     const store = createMemorySecureStore();
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValueOnce(
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
         jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1' } }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ responseCode: 400, message: 'invalid folder name' }, 400));
+      'anx.device.register': okDevice,
+      'anx.storage.workspace.folder.create': () =>
+        jsonResponse({ responseCode: 400, message: 'invalid folder name' }, 400),
+    });
 
     const auth = createAuthManager({
       secureStore: store,
-      clientOptions: { baseUrl: 'https://region.example', fetchFn: fetchFn as unknown as typeof fetch },
+      clientOptions: { baseUrl: 'https://region.example', fetchFn },
       deviceName: 'test',
       platform: 'linux',
       appVersion: '0.1.0',
@@ -360,18 +579,17 @@ describe('createAuthManager — device revocation', () => {
     // session loss, and signed the user out — the panel opened then vanished.
     const onSessionLost = vi.fn();
     const store = createMemorySecureStore();
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValueOnce(
+    const fetchFn = routeByCommand({
+      'anx.auth.login': () =>
         jsonResponse({ responseCode: 200, responseObject: { token: 'jwt', userId: 'u1' } }),
-      )
-      .mockResolvedValueOnce(
+      'anx.device.register': okDevice,
+      'anx.ai-agents.virtual-employees.list': () =>
         jsonResponse({ responseCode: 403, errorObjects: [{ code: 'FORBIDDEN', message: 'Access denied' }] }, 403),
-      );
+    });
 
     const auth = createAuthManager({
       secureStore: store,
-      clientOptions: { baseUrl: 'https://region.example', fetchFn: fetchFn as unknown as typeof fetch },
+      clientOptions: { baseUrl: 'https://region.example', fetchFn },
       deviceName: 'test',
       platform: 'linux',
       appVersion: '0.1.0',
@@ -394,13 +612,14 @@ describe('createAuthManager — device revocation', () => {
     // device; tearing down here would wipe a session that does not exist yet.
     const onSessionLost = vi.fn();
     const store = createMemorySecureStore();
-    const fetchFn = vi.fn(async () =>
-      jsonResponse({ responseCode: 401, errorObjects: [{ code: 'UNAUTHORIZED', message: 'Authentication required' }] }, 401),
-    );
+    const fetchFn = routeByCommand({
+      'anx.ai-agents.virtual-employees.list': () =>
+        jsonResponse({ responseCode: 401, errorObjects: [{ code: 'UNAUTHORIZED', message: 'Authentication required' }] }, 401),
+    });
 
     const auth = createAuthManager({
       secureStore: store,
-      clientOptions: { baseUrl: 'https://region.example', fetchFn: fetchFn as unknown as typeof fetch },
+      clientOptions: { baseUrl: 'https://region.example', fetchFn },
       deviceName: 'test',
       platform: 'linux',
       appVersion: '0.1.0',

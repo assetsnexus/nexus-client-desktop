@@ -11,8 +11,17 @@
  * tested without Electron.
  */
 
-/** Default size of the popped-out companion window. */
-export const COMPANION_DEFAULT_SIZE = { width: 720, height: 820 } as const;
+/**
+ * Default size of the popped-out companion window.
+ *
+ * Deliberately *small* and album-like (a phone-shaped side companion), not a
+ * full app instance — the main window still owns the full chat chrome. Users can
+ * resize down to {@link COMPANION_MIN_SIZE}.
+ */
+export const COMPANION_DEFAULT_SIZE = { width: 560, height: 740 } as const;
+
+/** Smallest sensible companion (keeps the avatar + expandable chat usable). */
+export const COMPANION_MIN_SIZE = { width: 380, height: 480 } as const;
 
 /** `#companion?...` hash segment identifying the companion route. */
 export const COMPANION_HASH_PREFIX = 'companion';
@@ -37,6 +46,12 @@ export type CompanionLaunch = {
   autoStart?: boolean;
   /** Stage layout; defaults to `fullscreen`. */
   mode?: CompanionMode;
+  /**
+   * Draw above other windows (an "always-on-top style" side companion). Default
+   * `false` so the app never surprises the user; the companion header exposes a
+   * pin toggle that flips this live.
+   */
+  alwaysOnTop?: boolean;
 };
 
 function clean(value: unknown): string | null {
@@ -64,6 +79,7 @@ export function buildCompanionHash(launch: CompanionLaunch): string {
   if (avatarUrl) params.set('avatarUrl', avatarUrl);
   if (launch.autoStart === false) params.set('autoStart', '0');
   if (launch.mode === 'split') params.set('mode', 'split');
+  if (launch.alwaysOnTop === true) params.set('onTop', '1');
   return `#${COMPANION_HASH_PREFIX}?${params.toString()}`;
 }
 
@@ -88,6 +104,7 @@ export function parseCompanionHash(hash: string): CompanionLaunch | null {
     avatarUrl: clean(params.get('avatarUrl')),
     autoStart: params.get('autoStart') !== '0',
     mode: params.get('mode') === 'split' ? 'split' : 'fullscreen',
+    alwaysOnTop: params.get('onTop') === '1',
   };
 }
 

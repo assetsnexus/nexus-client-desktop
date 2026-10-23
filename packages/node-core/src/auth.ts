@@ -102,6 +102,115 @@ export class RegionAuthError extends Error {
   }
 }
 
+/**
+ * A *transport* failure while reaching the region — the socket was reset, hung
+ * up, refused or timed out before a response was read. Distinct from a command
+ * that was delivered and refused.
+ *
+ * A dropped socket proves nothing about the session, so this deliberately is
+ * **not** a {@link RegionAuthError}: reporting `read ECONNRESET` as an auth
+ * failure sent users (and the UI) down the wrong path — an auth error implies
+ * "sign in again", while the real remedy is "retry the request".
+ */
+export class RegionTransportError extends Error {
+  /** Always `true` — lets callers branch without a string comparison. */
+  readonly transport = true;
+  /** Syscall/error code (`ECONNRESET`, `EPIPE`, `ECONNREFUSED`, …) when known. */
+  readonly code: string | null;
+  /** A single retry on a fresh socket is a sensible next step. */
+  readonly retryable: boolean;
+  constructor(
+    message: string,
+    options: { code?: string | null; retryable?: boolean; cause?: unknown } = {},
+  ) {
+    super(message);
+    this.name = 'RegionTransportError';
+    this.code = options.code ?? null;
+    this.retryable = options.retryable ?? false;
+    if (options.cause !== undefined) {
+      (this as { cause?: unknown }).cause = options.cause;
+    }
+  }
+}
+
+/**
+ * Connection-level codes that a *reused idle socket* can produce: the server
+ * closed its side of a keep-alive connection while the client held it (a classic
+ * keep-alive race, made far more likely when the main process' event loop is
+ * paused — e.g. a Node inspector attach — past the server's advertised
+ * `Keep-Alive: timeout`). `ECONNREFUSED` is included because a region restart
+ * briefly refuses connections and the retry is free for read commands.
+ */
+const RETRYABLE_TRANSPORT_CODES = new Set(['ECONNRESET', 'EPIPE', 'ECONNREFUSED', 'ETIMEDOUT']);
+
+/** Read-only verbs that make a region command safe to repeat. */
+const IDEMPOTENT_READ_VERBS = new Set([
+  'list',
+  'list-files',
+  'list-mine',
+  'get',
+  'info',
+  'read',
+  'catalog',
+  'capabilities',
+  'describe',
+  'search',
+  'count',
+  'preview',
+]);
+
+function transportCodeOf(err: unknown): string | null {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const code = (err as { code?: unknown }).code;
+    if (typeof code === 'string' && code.trim()) return code;
+  }
+  return null;
+}
+
+/**
+ * `true` for a socket error a retry could plausibly clear. Deliberately narrow:
+ * an HTTP-level refusal (a 401/403 *response*) never reaches here because
+ * `sendCommand` only throws on transport failure.
+ */
+export function isRetryableTransportError(err: unknown): boolean {
+  if (err instanceof RegionTransportError) return err.retryable;
+  const code = transportCodeOf(err);
+  if (code && RETRYABLE_TRANSPORT_CODES.has(code)) return true;
+  const message = err instanceof Error ? err.message : '';
+  return /socket hang up|read ECONNRESET|write EPIPE|connection reset|ECONNRESET/i.test(message);
+}
+
+/**
+ * Whether repeating `command` is safe. The region names commands
+ * `anx.<domain>.<entity>.<verb>`; only read-only verbs qualify, so uploads,
+ * writes and anything state-changing are never auto-retried. Conservative by
+ * construction: an unrecognised verb is treated as non-idempotent.
+ */
+export function isIdempotentRegionCommand(command: string): boolean {
+  const verb = command.trim().toLowerCase().split('.').pop() ?? '';
+  return IDEMPOTENT_READ_VERBS.has(verb);
+}
+
+/**
+ * Human-readable transport copy. The raw syscall string (`read ECONNRESET`) is
+ * shown to users via IPC, so translate it into something actionable while
+ * keeping the code for support.
+ */
+function describeTransportError(code: string | null, raw: string): string {
+  const base =
+    code === 'ECONNRESET'
+      ? 'Connection to the region was reset mid-request.'
+      : code === 'EPIPE'
+        ? 'The region closed the connection while the request was being sent.'
+        : code === 'ECONNREFUSED'
+          ? 'The region refused the connection (it may be restarting).'
+          : code === 'ETIMEDOUT'
+            ? 'The request to the region timed out.'
+            : 'Could not reach the region.';
+  const detail = code ?? (raw && raw !== base ? raw : '');
+  return detail ? `${base} (${detail})` : base;
+}
+
 /** Command envelope shape accepted by the region `/command` endpoint. */
 export type CommandEnvelope = {
   command: string;
@@ -171,24 +280,45 @@ export async function sendCommand(
     timestamp: new Date().toISOString(),
   };
 
-  let res: Response;
-  try {
-    res = await fetchFn(`${base}/command`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(send.token ? { authorization: `Bearer ${send.token}` } : {}),
-        ...(opts.headers ?? {}),
-      },
-      body: JSON.stringify(envelope),
-      signal: send.signal,
-    });
-  } catch (err) {
-    throw new RegionAuthError(
-      err instanceof Error ? err.message : 'network error contacting region',
-      0,
-    );
+  /**
+   * POST the envelope, retrying **once on a fresh socket** when the first
+   * attempt fails at the transport layer and the command is a read.
+   *
+   * A keep-alive socket the region closed while it sat idle fails the first
+   * request written to it (`socket hang up` / `read ECONNRESET`). Node evicts
+   * the dead socket from the agent pool, so a single retry dials a new
+   * connection. Only idempotent reads are retried — never uploads/writes — and
+   * only when the caller has not aborted.
+   */
+  async function postEnvelope(): Promise<Response> {
+    const canRetry = isIdempotentRegionCommand(command);
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await fetchFn(`${base}/command`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...(send.token ? { authorization: `Bearer ${send.token}` } : {}),
+            ...(opts.headers ?? {}),
+          },
+          body: JSON.stringify(envelope),
+          signal: send.signal,
+        });
+      } catch (err) {
+        const retryable = isRetryableTransportError(err);
+        if (retryable && canRetry && attempt < 2 && !send.signal?.aborted) continue;
+        // Transport failure, not an auth failure: the command may never have
+        // been delivered, so it proves nothing about the session.
+        const code = transportCodeOf(err);
+        throw new RegionTransportError(
+          describeTransportError(code, err instanceof Error ? err.message : ''),
+          { code, retryable, cause: err },
+        );
+      }
+    }
   }
+
+  const res = await postEnvelope();
 
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   const responseCode = Number(json.responseCode ?? json.status ?? res.status ?? 0);
@@ -205,13 +335,27 @@ export async function sendCommand(
       : typeof firstError?.message === 'string'
         ? (firstError.message as string)
         : undefined;
+  // A 2FA gate is reported two ways depending on the path: the dispatcher's
+  // command-authorization gate returns `202` with the flag nested *inside*
+  // `responseObject`, while the app-approval gate returns it at the top level.
+  // Reading only the top level would let a 202 look like a plain success, and a
+  // caller that trusts it (e.g. device registration) records work the region
+  // never did.
+  const responseObject = (json.responseObject ?? json.data ?? json) as Record<string, unknown>;
+  const authorizationRequired =
+    Boolean(json.authorizationRequired) || Boolean(responseObject.authorizationRequired);
   return {
     responseCode,
-    responseObject: json.responseObject ?? json.data ?? json,
+    responseObject,
     message,
     code: typeof firstError?.code === 'string' ? (firstError.code as string) : undefined,
-    authorizationRequired: Boolean(json.authorizationRequired),
-    authRequestId: typeof json.authRequestId === 'string' ? json.authRequestId : undefined,
+    authorizationRequired,
+    authRequestId:
+      typeof json.authRequestId === 'string'
+        ? json.authRequestId
+        : typeof responseObject.authRequestId === 'string'
+          ? (responseObject.authRequestId as string)
+          : undefined,
   };
 }
 

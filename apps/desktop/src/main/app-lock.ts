@@ -11,21 +11,91 @@
  * a forgotten PIN can never permanently lock the user out.
  */
 
+import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
-  createPinRecord,
   normalizeAppLockSettings,
-  parsePinRecord,
   shouldLock,
-  verifyPin,
   validatePin,
   isLockArmed,
   type AppLockSettings,
   type AppLockState,
-  type PinRecord,
 } from '../shared/app-lock.js';
 import type { SecureStore } from '@nexus/node-core';
 
 export const PIN_SECURE_KEY = 'app.lock.pin';
+
+/**
+ * A stored PIN: salted PBKDF2-SHA256. Serialized as JSON in the secure store.
+ * The plaintext PIN never persists anywhere.
+ */
+export type PinRecord = {
+  v: 1;
+  algorithm: 'pbkdf2-sha256';
+  salt: string;
+  hash: string;
+  iterations: number;
+  keylen: number;
+};
+
+const PIN_ITERATIONS = 210_000;
+const PIN_KEYLEN = 32;
+
+/**
+ * Hash a PIN into a storable record. `salt`/`iterations` are injectable so the
+ * test suite stays fast and deterministic; production uses a fresh random salt.
+ */
+export function createPinRecord(
+  pin: string,
+  opts: { salt?: string; iterations?: number } = {},
+): PinRecord {
+  const salt = opts.salt ?? randomBytes(16).toString('hex');
+  const iterations = opts.iterations ?? PIN_ITERATIONS;
+  const hash = pbkdf2Sync(pin, salt, iterations, PIN_KEYLEN, 'sha256').toString('hex');
+  return { v: 1, algorithm: 'pbkdf2-sha256', salt, hash, iterations, keylen: PIN_KEYLEN };
+}
+
+/** Parse a persisted PIN record; returns null for anything malformed. */
+export function parsePinRecord(raw: string | null | undefined): PinRecord | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<PinRecord>;
+    if (
+      value?.v !== 1 ||
+      value.algorithm !== 'pbkdf2-sha256' ||
+      typeof value.salt !== 'string' ||
+      typeof value.hash !== 'string' ||
+      typeof value.iterations !== 'number' ||
+      typeof value.keylen !== 'number'
+    ) {
+      return null;
+    }
+    return value as PinRecord;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Verify a PIN against a record with a constant-time comparison. A missing or
+ * malformed record never verifies (fails closed).
+ */
+export function verifyPin(pin: string, record: PinRecord | null): boolean {
+  if (!record || typeof pin !== 'string') return false;
+  let candidate: Buffer;
+  try {
+    candidate = pbkdf2Sync(pin, record.salt, record.iterations, record.keylen, 'sha256');
+  } catch {
+    return false;
+  }
+  let expected: Buffer;
+  try {
+    expected = Buffer.from(record.hash, 'hex');
+  } catch {
+    return false;
+  }
+  if (candidate.length !== expected.length) return false;
+  return timingSafeEqual(candidate, expected);
+}
 
 export type AppLockManagerOptions = {
   secureStore: SecureStore;
@@ -54,6 +124,8 @@ export type AppLockManager = {
   unlock(pin: string): Promise<boolean>;
   /** Force the UI into the locked state (e.g. explicit "lock now"). */
   lock(): Promise<void>;
+  /** Synchronous locked flag, for the notification gate (no await in the hot path). */
+  isLockedNow(): boolean;
   /** Forget the in-memory locked flag (e.g. after a sign-out teardown). */
   resetLocked(): void;
 };
@@ -156,6 +228,10 @@ export function createAppLockManager(options: AppLockManagerOptions): AppLockMan
 
     resetLocked(): void {
       locked = false;
+    },
+
+    isLockedNow(): boolean {
+      return locked;
     },
   };
 }

@@ -98,6 +98,84 @@ export function certificateFingerprint(cert: X509Certificate): string {
   return createHash('sha256').update(cert.raw).digest('hex').toUpperCase();
 }
 
+/**
+ * Read one end of a certificate's validity window as epoch ms, resilient to the
+ * runtime it happens to run on.
+ *
+ * Node exposes BOTH `validFrom`/`validTo` (RFC-style strings, all versions) and
+ * `validFromDate`/`validToDate` (`Date`s). The latter were only added in Node
+ * 22.10 — **Electron 33 bundles Node 20**, where they are `undefined`, so
+ * dotting straight into `validFromDate.getTime()` throws `TypeError: Cannot
+ * read properties of undefined (reading 'getTime')` inside the certificate
+ * verify proc (an unhandled main-process exception). Prefer the `Date` when the
+ * runtime provides it, otherwise parse the string; return `NaN` when neither is
+ * usable so callers can decide how to fail.
+ */
+function certificateBoundMs(cert: X509Certificate | null | undefined, which: 'from' | 'to'): number {
+  if (!cert) return Number.NaN;
+  const direct = which === 'from' ? cert.validFromDate : cert.validToDate;
+  if (direct instanceof Date) {
+    const ms = direct.getTime();
+    if (Number.isFinite(ms)) return ms;
+  }
+  const text = which === 'from' ? cert.validFrom : cert.validTo;
+  if (typeof text === 'string' && text.trim()) {
+    const ms = Date.parse(text);
+    if (Number.isFinite(ms)) return ms;
+  }
+  return Number.NaN;
+}
+
+/**
+ * Validity window of a certificate as epoch ms (`NaN` for an unusable bound).
+ * Portable across Node versions — see {@link certificateBoundMs}.
+ */
+export function certificateValidity(cert: X509Certificate | null | undefined): {
+  from: number;
+  to: number;
+} {
+  return { from: certificateBoundMs(cert, 'from'), to: certificateBoundMs(cert, 'to') };
+}
+
+/** Human-readable certificate facts for a trust prompt (never throws). */
+export type CertificateDetails = {
+  /** Distinguished name of the subject, newline-joined. */
+  subject: string;
+  /** Distinguished name of the issuer, newline-joined. */
+  issuer: string;
+  /** ISO validity bounds, or null when the runtime cannot expose them. */
+  validFrom: string | null;
+  validTo: string | null;
+  /** SHA-256 fingerprint, uppercase hex. */
+  fingerprint: string;
+  serialNumber: string;
+};
+
+/**
+ * Describe a certificate from PEM for display in a trust prompt. Returns null
+ * when the PEM is missing or not a parseable X.509 certificate — callers must
+ * treat that as "nothing to show", never as trust.
+ */
+export function describeCertificate(pem: string | null | undefined): CertificateDetails | null {
+  if (!pem || typeof pem !== 'string' || !pem.trim()) return null;
+  let cert: X509Certificate;
+  try {
+    cert = new X509Certificate(pem);
+  } catch {
+    return null;
+  }
+  const { from, to } = certificateValidity(cert);
+  const iso = (ms: number): string | null => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
+  return {
+    subject: String(cert.subject ?? ''),
+    issuer: String(cert.issuer ?? ''),
+    validFrom: iso(from),
+    validTo: iso(to),
+    fingerprint: certificateFingerprint(cert),
+    serialNumber: String(cert.serialNumber ?? ''),
+  };
+}
+
 /** Why a presented leaf was not accepted against a custom CA bundle. */
 export type LeafVerificationReason =
   | 'no-ca'
@@ -142,31 +220,38 @@ export function isIpLiteral(value: string): boolean {
  *
  * Never a blanket accept: an unconfigured CA, a different issuer, an expired
  * cert, or a host mismatch all fail closed.
+ *
+ * Purity: this function **never throws** for a malformed CA bundle or a leaf
+ * whose runtime cannot expose a validity window. `caPem` is parsed with
+ * `parseCertificates` (which skips malformed blocks) and each presented
+ * timestamp is read through {@link certificateValidity}, so a runtime without
+ * the Node-22 `validFromDate`/`validToDate` accessors (Electron 33 ships Node 20)
+ * degrades to a string parse instead of throwing `getTime` on `undefined`.
  */
 export function verifyLeafIssuedByCa(input: {
   leaf: X509Certificate;
   caPem: string | null | undefined;
   /** Hostname or IP the connection targeted (`request.hostname`). */
   hostname?: string | null;
-  /** Injectable clock for tests. */
+  /** Injectable clock for tests; defaults to the live clock at call time. */
   now?: Date;
 }): LeafVerification {
   const { leaf } = input;
   const cas = parseCertificates(input.caPem);
   if (cas.length === 0) return { ok: false, reason: 'no-ca' };
 
-  const now = input.now ?? new Date();
-  const nowMs = now.getTime();
+  // Resolve the clock *now* (not at build time) unless a test injects one, so a
+  // cached verifier stays correct long after it was constructed.
+  const nowMs = (input.now ?? new Date()).getTime();
 
-  const leafFrom = leaf.validFromDate.getTime();
-  const leafTo = leaf.validToDate.getTime();
+  const leafFrom = certificateValidity(leaf).from;
+  const leafTo = certificateValidity(leaf).to;
   if (Number.isFinite(leafFrom) && nowMs < leafFrom) return { ok: false, reason: 'not-yet-valid' };
   if (Number.isFinite(leafTo) && nowMs > leafTo) return { ok: false, reason: 'expired' };
 
   let matchedIssuer: X509Certificate | null = null;
   for (const ca of cas) {
-    const caFrom = ca.validFromDate.getTime();
-    const caTo = ca.validToDate.getTime();
+    const { from: caFrom, to: caTo } = certificateValidity(ca);
     if (Number.isFinite(caFrom) && nowMs < caFrom) continue;
     if (Number.isFinite(caTo) && nowMs > caTo) continue;
     // A CA that is not marked `CA:TRUE` can still be the leaf itself (a

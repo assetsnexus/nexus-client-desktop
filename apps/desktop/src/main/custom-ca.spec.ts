@@ -9,9 +9,9 @@
  * using real certificates.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { certificateFingerprints } from '@nexus/node-core';
-import { ACCEPT, createCustomCaVerifier, type VerifyRequest } from './custom-ca.js';
+import { ACCEPT, createCustomCaVerifier, createCertificateVerifyProc, type VerifyRequest } from './custom-ca.js';
 
 // CA + leaf signed by it (openssl). Kept in sync with
 // `packages/node-core/src/tls.spec.ts`.
@@ -136,5 +136,82 @@ describe('createCustomCaVerifier', () => {
 
   it('never accepts a malformed certificate blob', () => {
     expect(verifier()({ hostname: 'alexlab-ws-i9', certificate: { data: 'not a cert' }, errorCode: -202 })).toBe(-202);
+  });
+
+  it('does not throw on an unparseable CA bundle and fails closed', () => {
+    const decide = createCustomCaVerifier('-----BEGIN CERTIFICATE-----\nnot-base64\n-----END CERTIFICATE-----', new Set(['DEADBEEF']));
+    expect(() => decide(request(LEAF, 'alexlab-ws-i9'))).not.toThrow();
+    expect(decide(request(LEAF, 'alexlab-ws-i9'))).toBe(-202);
+  });
+
+  it('does not throw when the presented certificate is not an X509 object', () => {
+    const decide = verifier();
+    expect(() =>
+      decide({ hostname: 'alexlab-ws-i9', certificate: { data: 'garbage' }, errorCode: -202 }),
+    ).not.toThrow();
+    expect(decide({ hostname: 'alexlab-ws-i9', certificate: { data: 'garbage' }, errorCode: -202 })).toBe(-202);
+  });
+
+  it('survives a runtime without validFromDate/validToDate (Electron Node 20)', () => {
+    // Regression for the main-process `getTime` crash: Node 20 (Electron 33)
+    // lacks `X509Certificate.validFromDate`, so verification must read the string
+    // bounds instead of dotting into undefined. The verdict is asserted in the
+    // node-core suite; here we only pin the no-throw contract at the proc layer.
+    const decide = verifier();
+    expect(() => decide(request(LEAF, 'alexlab-ws-i9'))).not.toThrow();
+    expect(decide(request(LEAF, 'alexlab-ws-i9'))).toBe(ACCEPT);
+  });
+});
+
+describe('createCertificateVerifyProc — configured CA, pins, prompt', () => {
+  const request = (leafPem: string, hostname: string, extra: Partial<VerifyRequest> = {}): VerifyRequest => ({
+    hostname,
+    verificationResult: 'CERT_AUTHORITY_INVALID',
+    errorCode: -202,
+    certificate: { data: leafPem },
+    ...extra,
+  });
+
+  it('accepts a leaf issued by the configured CA', () => {
+    const proc = createCertificateVerifyProc({ caPem: CA, trustedFingerprints: certificateFingerprints(CA) });
+    expect(proc(request(LEAF, 'alexlab-ws-i9'))).toBe(ACCEPT);
+  });
+
+  it('denies a leaf NOT issued by the CA and raises the prompt', () => {
+    const requestTrust = vi.fn();
+    const proc = createCertificateVerifyProc({
+      caPem: CA,
+      trustedFingerprints: certificateFingerprints(CA),
+      trustStore: { isTrusted: () => false },
+      requestTrust,
+    });
+    expect(proc(request(FOREIGN_LEAF, 'alexlab-ws-i9'))).toBe(-202);
+    expect(requestTrust).toHaveBeenCalledTimes(1);
+    expect(requestTrust.mock.calls[0][0].host).toBe('alexlab-ws-i9');
+    expect(requestTrust.mock.calls[0][0].fingerprint).toMatch(/^[0-9A-F]{64}$/);
+  });
+
+  it('accepts a previously pinned fingerprint for that host (no prompt)', () => {
+    const requestTrust = vi.fn();
+    const proc = createCertificateVerifyProc({
+      caPem: '',
+      trustedFingerprints: new Set(),
+      trustStore: { isTrusted: (host, fp) => host === 'alexlab-ws-i9' && fp.length === 64 },
+      requestTrust,
+    });
+    expect(proc(request(FOREIGN_LEAF, 'alexlab-ws-i9'))).toBe(ACCEPT);
+    expect(requestTrust).not.toHaveBeenCalled();
+  });
+
+  it('does not prompt when the certificate cannot be scoped (malformed)', () => {
+    const requestTrust = vi.fn();
+    const proc = createCertificateVerifyProc({ caPem: '', trustedFingerprints: new Set(), requestTrust });
+    expect(proc({ hostname: 'alexlab-ws-i9', verificationResult: 'CERT_AUTHORITY_INVALID', errorCode: -202 })).toBe(-202);
+    expect(requestTrust).not.toHaveBeenCalled();
+  });
+
+  it('passes through Chromium-accepted chains', () => {
+    const proc = createCertificateVerifyProc({ caPem: '', trustedFingerprints: new Set() });
+    expect(proc({ hostname: 'region.example', verificationResult: 'OK' })).toBe(ACCEPT);
   });
 });

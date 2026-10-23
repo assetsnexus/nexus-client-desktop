@@ -9,8 +9,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { app } from 'electron';
 import { resolveConnectionConfig, type DesktopConnectionConfig } from '@nexus/node-core';
-import { DEFAULT_NOTIFICATION_SETTINGS, type NotificationSettings } from '../shared/ipc.js';
+import { DEFAULT_NOTIFICATION_SETTINGS, normalizeCompanionDebugSettings, type NotificationSettings, type CompanionDebugSettings } from '../shared/ipc.js';
 import { DEFAULT_APP_LOCK_SETTINGS, normalizeAppLockSettings, type AppLockSettings } from '../shared/app-lock.js';
+import {
+  DEFAULT_TRAY_APP_SETTINGS,
+  normalizeTrayAppSettings,
+  type TrayAppSettings,
+} from '../shared/nexus-apps.js';
 
 /**
  * Desktop UI preferences that are not secrets. `locale` is a BCP-47-ish tag
@@ -26,6 +31,10 @@ export type UiSettings = {
   loginCountry: string | null;
   /** App PIN inactivity-lock preferences (the PIN itself lives in the secure store). */
   appLock: AppLockSettings;
+  /** Tray "Nexus apps" visibility (allow/deny + custom entries). */
+  trayApps: TrayAppSettings;
+  /** Companion 3D debug surfaces; re-validated on every read. */
+  companionDebug: CompanionDebugSettings;
 };
 
 export { DEFAULT_NOTIFICATION_SETTINGS };
@@ -67,6 +76,10 @@ export function createSettingsStore(filePath?: string): SettingsStore {
           ? ui.loginCountry.trim().toUpperCase()
           : null,
       appLock: normalizeAppLockSettings(ui.appLock ?? DEFAULT_APP_LOCK_SETTINGS),
+      // Re-validated on every read so a hand-edited file cannot inject a
+      // non-http(s) custom URL into the tray.
+      trayApps: normalizeTrayAppSettings(ui.trayApps ?? DEFAULT_TRAY_APP_SETTINGS),
+      companionDebug: normalizeCompanionDebugSettings(ui.companionDebug),
     };
   };
 

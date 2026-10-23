@@ -3,7 +3,9 @@ import { X509Certificate } from 'node:crypto';
 import {
   certificateFingerprint,
   certificateFingerprints,
+  certificateValidity,
   createHttpsAgent,
+  describeCertificate,
   isIpLiteral,
   looksLikePemCertificate,
   normalizeFingerprint,
@@ -311,6 +313,40 @@ describe('parseCertificates', () => {
   it('parses each certificate in a bundle and skips malformed blocks', () => {
     expect(parseCertificates(`${CA_A}\n${CERT_A}`)).toHaveLength(1);
     expect(parseCertificates(null)).toHaveLength(0);
+  });
+});
+
+describe('certificateValidity / describeCertificate — runtime-portable dates', () => {
+  it('reads the validity window without relying on Node-22 validFromDate', () => {
+    const cert = new X509Certificate(LEAF_A);
+    // Simulate Electron 33's Node 20 where these accessors are absent.
+    Object.defineProperty(cert, 'validFromDate', { value: undefined, configurable: true });
+    Object.defineProperty(cert, 'validToDate', { value: undefined, configurable: true });
+    const { from, to } = certificateValidity(cert);
+    expect(Number.isFinite(from)).toBe(true);
+    expect(Number.isFinite(to)).toBe(true);
+    expect(from).toBeLessThan(to);
+  });
+
+  it('verifyLeafIssuedByCa does not throw when validFromDate is missing', () => {
+    const cert = new X509Certificate(LEAF_A);
+    Object.defineProperty(cert, 'validFromDate', { value: undefined, configurable: true });
+    Object.defineProperty(cert, 'validToDate', { value: undefined, configurable: true });
+    expect(() =>
+      verifyLeafIssuedByCa({ leaf: cert, caPem: CA_A, hostname: 'alexlab-ws-i9', now: new Date('2026-10-22T12:00:00Z') }),
+    ).not.toThrow();
+    expect(
+      verifyLeafIssuedByCa({ leaf: cert, caPem: CA_A, hostname: 'alexlab-ws-i9', now: new Date('2026-10-22T12:00:00Z') }).ok,
+    ).toBe(true);
+  });
+
+  it('describeCertificate returns display facts and null for junk', () => {
+    const details = describeCertificate(LEAF_A);
+    expect(details?.fingerprint).toMatch(/^[0-9A-F]{64}$/);
+    expect(details?.subject).toContain('CN=');
+    expect(details?.validTo).toMatch(/^\d{4}-/);
+    expect(describeCertificate('not a cert')).toBeNull();
+    expect(describeCertificate(null)).toBeNull();
   });
 });
 

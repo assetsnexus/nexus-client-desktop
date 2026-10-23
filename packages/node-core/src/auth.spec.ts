@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   RegionAuthError,
+  RegionTransportError,
+  isIdempotentRegionCommand,
+  isRetryableTransportError,
   listCountries,
   listRegions,
   login,
@@ -52,13 +55,135 @@ describe('sendCommand', () => {
     expect(envelope.identity).toEqual({ userId: 'u1', token: 'tok' });
   });
 
-  it('throws a RegionAuthError on transport failure', async () => {
+  it('reports a transport failure as a transport error, not an auth error', async () => {
     const fetchFn = vi.fn(async () => {
-      throw new Error('ECONNREFUSED');
+      throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    });
+    // `anx.x` has an unknown verb, so it is never auto-retried; the point here is
+    // only the classification: a refused socket is a transport failure.
+    await expect(
+      sendCommand({ ...base, fetchFn: fetchFn as unknown as typeof fetch }, 'anx.x'),
+    ).rejects.toBeInstanceOf(RegionTransportError);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not wrap a failed two-factor verification by the code path alone', () => {
+    // Guards the auth-error class itself: it stays a plain named error so callers
+    // can tell a delivered refusal from a dropped socket.
+    const err = new RegionAuthError('invalid code', 400);
+    expect(err.name).toBe('RegionAuthError');
+    expect(err.responseCode).toBe(400);
+  });
+});
+
+describe('transport error classification (socket reset is not an auth error)', () => {
+  it('reports a transport failure as RegionTransportError, never RegionAuthError', async () => {
+    const fetchFn = vi.fn(async () => {
+      const err = new Error('read ECONNRESET') as Error & { code?: string };
+      err.code = 'ECONNRESET';
+      throw err;
+    });
+    const promise = sendCommand(
+      { ...base, fetchFn: fetchFn as unknown as typeof fetch },
+      'anx.auth.login',
+    );
+    await expect(promise).rejects.toBeInstanceOf(RegionTransportError);
+    await expect(promise).rejects.not.toBeInstanceOf(RegionAuthError);
+  });
+
+  it('carries the syscall code and a human-readable, actionable message', async () => {
+    const fetchFn = vi.fn(async () => {
+      const err = new Error('read ECONNRESET') as Error & { code?: string };
+      err.code = 'ECONNRESET';
+      throw err;
     });
     await expect(
       sendCommand({ ...base, fetchFn: fetchFn as unknown as typeof fetch }, 'anx.x'),
-    ).rejects.toBeInstanceOf(RegionAuthError);
+    ).rejects.toMatchObject({
+      name: 'RegionTransportError',
+      transport: true,
+      code: 'ECONNRESET',
+      message: expect.stringMatching(/reset mid-request/i),
+    });
+  });
+
+  it('retries an idempotent read once on a fresh socket and returns the second response', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }))
+      .mockResolvedValueOnce(jsonResponse({ responseCode: 200, responseObject: { items: [] } }));
+    const res = await sendCommand(
+      { ...base, fetchFn: fetchFn as unknown as typeof fetch },
+      'anx.file.revision.list',
+      { fileId: 'f1' },
+    );
+    expect(res.responseCode).toBe(200);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT retry a non-idempotent command (a write is sent exactly once)', async () => {
+    const fetchFn = vi.fn(async () => {
+      throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+    });
+    await expect(
+      sendCommand(
+        { ...base, fetchFn: fetchFn as unknown as typeof fetch },
+        'anx.file.upload-complete',
+        {},
+      ),
+    ).rejects.toBeInstanceOf(RegionTransportError);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry after the caller aborted the request', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchFn = vi.fn(async () => {
+      throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+    });
+    await expect(
+      sendCommand(
+        { ...base, fetchFn: fetchFn as unknown as typeof fetch },
+        'anx.file.revision.list',
+        {},
+        { signal: controller.signal },
+      ),
+    ).rejects.toBeInstanceOf(RegionTransportError);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('isIdempotentRegionCommand', () => {
+  it('accepts read verbs and rejects writes', () => {
+    expect(isIdempotentRegionCommand('anx.file.revision.list')).toBe(true);
+    expect(isIdempotentRegionCommand('anx.storage.bucket.list-files')).toBe(true);
+    expect(isIdempotentRegionCommand('anx.storage.workspace.folder.list')).toBe(true);
+    expect(isIdempotentRegionCommand('anx.file.revision.read')).toBe(true);
+    expect(isIdempotentRegionCommand('anx.region.node.info')).toBe(true);
+    expect(isIdempotentRegionCommand('anx.storage.backend.capabilities')).toBe(true);
+    expect(isIdempotentRegionCommand('anx.file.upload-complete')).toBe(false);
+    expect(isIdempotentRegionCommand('anx.file.revision.revert')).toBe(false);
+    expect(isIdempotentRegionCommand('anx.storage.bucket.trash-file')).toBe(false);
+    expect(isIdempotentRegionCommand('anx.auth.login')).toBe(false);
+    expect(isIdempotentRegionCommand('anx.device.register')).toBe(false);
+  });
+
+  it('treats an unknown verb as non-idempotent (conservative default)', () => {
+    expect(isIdempotentRegionCommand('anx.future.mutate')).toBe(false);
+    expect(isIdempotentRegionCommand('anx.storage.bucket.definitely-new-verb')).toBe(false);
+  });
+});
+
+describe('isRetryableTransportError', () => {
+  it('recognises connection-level codes and hang-up messages', () => {
+    expect(isRetryableTransportError(Object.assign(new Error('x'), { code: 'ECONNRESET' }))).toBe(true);
+    expect(isRetryableTransportError(new Error('socket hang up'))).toBe(true);
+    expect(isRetryableTransportError(new RegionTransportError('reset', { retryable: true }))).toBe(true);
+  });
+
+  it('does not treat an HTTP refusal (a delivered response) as retryable', () => {
+    expect(isRetryableTransportError(new RegionAuthError('unauthorized', 401))).toBe(false);
+    expect(isRetryableTransportError(new Error('bad credentials'))).toBe(false);
   });
 });
 

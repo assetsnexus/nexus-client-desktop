@@ -7,6 +7,13 @@ import {
   type StorageRevisionPage,
   type StorageWorkspaceRow,
 } from '../bridge.js';
+import { useStorageUploads } from '../storage/use-storage-uploads.js';
+import { useStorageDropZone } from '../storage/use-storage-drop-zone.js';
+import { useStorageDownloads } from '../storage/use-storage-downloads.js';
+import { useStoragePreview, useStorageThumbnails } from '../storage/use-storage-preview.js';
+import { canThumbnail, previewKindFor } from '../../shared/storage-preview.js';
+import { StoragePreview } from './StoragePreview.js';
+import { UploadProgressPanel } from '../storage/UploadProgressPanel.js';
 
 const panelStyle: CSSProperties = {
   height: '100%',
@@ -32,6 +39,27 @@ const btnStyle: CSSProperties = {
   color: '#e8eef4',
   cursor: 'pointer',
   fontSize: 13,
+};
+
+/** Fixed width of the right-hand detail/preview column. */
+const DETAIL_COLUMN_WIDTH = 340;
+/**
+ * Below this explorer width the right column would squeeze the file list, so
+ * the detail pane becomes an overlay that slides over the list instead of a
+ * sibling column. Derived from the layout budgets: workspaces sidebar (240) +
+ * a usable file list (420) + the detail column (340) ≈ 1000.
+ */
+const DETAIL_LAYOUT_BREAKPOINT = 1000;
+
+/** The right column: one coherent pane holding metadata, actions and preview. */
+const detailColumnStyle: CSSProperties = {
+  width: DETAIL_COLUMN_WIDTH,
+  flexShrink: 0,
+  borderLeft: '1px solid #2a333d',
+  background: '#12171c',
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: 0,
 };
 
 function formatBytes(n: number): string {
@@ -63,8 +91,37 @@ export function StorageExplorer() {
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<StorageFileRow | null>(null);
   const [revisions, setRevisions] = useState<StorageRevisionPage | null>(null);
+  const [revisionsUnsupported, setRevisionsUnsupported] = useState(false);
+  const [revisionsTransportError, setRevisionsTransportError] = useState<string | null>(null);
   const [revisionsBusy, setRevisionsBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
+  // Multi-selection for "save many" (bounded to file ids only).
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  // The explorer's own width decides whether the right detail column can be a
+  // sibling of the file list or must overlay it (see DETAIL_LAYOUT_BREAKPOINT).
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [compactLayout, setCompactLayout] = useState(false);
+  // Drag-and-drop transfer: bounded-concurrency queue with real byte progress,
+  // a recursive drop zone, and save/drag-out for getting files back out.
+  const uploads = useStorageUploads();
+  const downloads = useStorageDownloads();
+  // Inline image/PDF preview for the selected file, plus small row thumbnails.
+  const preview = useStoragePreview(selected);
+  const items = page?.items ?? [];
+  const thumbnails = useStorageThumbnails(items);
+
+  // Track the pane width so the layout choice follows the real container, not a
+  // guessed viewport (the explorer is one tab among many in the shell).
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const measure = () => setCompactLayout(el.clientWidth > 0 && el.clientWidth < DETAIL_LAYOUT_BREAKPOINT);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const loadWorkspaces = useCallback(async () => {
     setBusy(true);
@@ -117,39 +174,65 @@ export function StorageExplorer() {
     if (activeWorkspaceId) void loadFiles(activeWorkspaceId, mode, search);
   }, [activeWorkspaceId, mode, search, loadFiles]);
 
+  // A dropped path list (files and/or folders) starts a queued batch upload.
+  const onDroppedPaths = useCallback(
+    (paths: string[]) => {
+      if (!activeWorkspaceId) return;
+      void uploads.enqueuePaths(paths, { workspaceId: activeWorkspaceId, folderId: null });
+    },
+    [activeWorkspaceId, uploads],
+  );
+  const dropZone = useStorageDropZone(onDroppedPaths, { enabled: Boolean(activeWorkspaceId) && mode === 'active' });
+
+  // When a batch drains, refresh the listing so the new files appear.
+  const hadActiveUploads = useRef(false);
+  useEffect(() => {
+    if (uploads.snapshot.active) hadActiveUploads.current = true;
+    else if (hadActiveUploads.current) {
+      hadActiveUploads.current = false;
+      refresh();
+    }
+  }, [uploads.snapshot.active, refresh]);
+
   const onUpload = useCallback(
     async (file: File) => {
-      if (!file || !activeWorkspaceId) return;
-      setBusy(true);
-      setError(null);
+      if (!activeWorkspaceId) return;
+      // Resolve the dropped `File` to a real path (Electron 32+ API) and reuse
+      // the same queue, so a picker upload gets identical progress + retry.
+      let path = '';
       try {
-        const buffer = await file.arrayBuffer();
-        const base64Data = bytesToBase64(new Uint8Array(buffer));
-        await bridge.storageUpload({
-          workspaceId: activeWorkspaceId,
-          name: file.name,
-          contentType: file.type || 'application/octet-stream',
-          base64Data,
-        });
-        refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'upload failed');
-      } finally {
-        setBusy(false);
-        if (fileInput.current) fileInput.current.value = '';
+        path = bridge.getPathForFile(file);
+      } catch {
+        path = '';
       }
+      if (!path) {
+        setError('Could not resolve a filesystem path for the selected file.');
+        return;
+      }
+      setError(null);
+      await uploads.enqueuePaths([path], { workspaceId: activeWorkspaceId, folderId: null });
+      if (fileInput.current) fileInput.current.value = '';
     },
-    [activeWorkspaceId, refresh],
+    [activeWorkspaceId, uploads],
   );
 
-  const onDownload = useCallback(async (file: StorageFileRow) => {
-    try {
-      const { url } = await bridge.storageDownloadUrl(file.id);
-      await bridge.openExternal(url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'download failed');
-    }
-  }, []);
+  const onDownload = useCallback(
+    async (file: StorageFileRow) => {
+      const outcome = await downloads.saveOne({ id: file.id, name: file.name });
+      if (outcome.error) setError(outcome.error);
+    },
+    [downloads],
+  );
+
+  /** Save a multi-selection into one folder chosen with a native dialog. */
+  const onDownloadMany = useCallback(
+    async (files: StorageFileRow[]) => {
+      const outcome = await downloads.saveMany(files.map((f) => ({ id: f.id, name: f.name })));
+      if (outcome.error) setError(outcome.error);
+      else if (outcome.saved > 0) setError(null);
+    },
+    [downloads],
+  );
 
   const onTrash = useCallback(
     async (file: StorageFileRow) => {
@@ -191,13 +274,34 @@ export function StorageExplorer() {
     [refresh],
   );
 
-  const items = useMemo(() => page?.items ?? [], [page]);
+  const checkedFiles = useMemo(() => items.filter((f) => checkedIds.has(f.id)), [items, checkedIds]);
+  const toggleChecked = useCallback((id: string) => {
+    setCheckedIds((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const loadRevisions = useCallback(async (file: StorageFileRow) => {
     setRevisionsBusy(true);
     setError(null);
+    setRevisionsTransportError(null);
     try {
-      setRevisions(await bridge.storageListRevisions(file.id, 100));
+      const page = await bridge.storageListRevisions(file.id, 100);
+      setRevisions(page);
+      // A region without the revision surface answers COMMAND_NOT_FOUND; that is
+      // a deliberate unsupported state, never a raw error toast.
+      setRevisionsUnsupported(page.unsupported === true);
+      // A dropped/reset socket is transient: show a clear, retryable state
+      // rather than the raw `RegionAuthError: read ECONNRESET` the user cannot
+      // act on. The main process distinguishes this from a real command error.
+      if (page.transportFailed) {
+        setRevisionsTransportError(
+          page.transportMessage ?? 'Connection to the region was interrupted.',
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to load revisions');
       setRevisions(null);
@@ -224,6 +328,8 @@ export function StorageExplorer() {
   useEffect(() => {
     if (!selected) {
       setRevisions(null);
+      setRevisionsUnsupported(false);
+      setRevisionsTransportError(null);
       return;
     }
     void loadRevisions(selected);
@@ -231,8 +337,34 @@ export function StorageExplorer() {
   }, [selected?.id]);
 
   return (
-    <div style={panelStyle}>
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+    <div
+      ref={rootRef}
+      style={{ ...panelStyle, position: 'relative' }}
+      {...dropZone.handlers}
+      data-testid="storage-explorer"
+    >
+      {dropZone.dragOver ? (
+        <div
+          data-testid="storage-drop-overlay"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(15,20,25,0.82)',
+            border: '2px dashed #3f7fd6',
+            borderRadius: 8,
+            pointerEvents: 'none',
+          }}
+        >
+          <span style={{ color: '#cfe0f5', fontSize: 15, fontWeight: 600 }}>
+            Drop files or folders to upload
+          </span>
+        </div>
+      ) : null}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative' }}>
         <aside style={sidebarStyle}>
           <div style={{ color: '#6b7784', fontSize: 11, padding: '6px 6px', textTransform: 'uppercase' }}>
             Workspaces
@@ -319,6 +451,15 @@ export function StorageExplorer() {
             <button type="button" style={btnStyle} onClick={refresh} disabled={busy}>
               Refresh
             </button>
+            {mode === 'active' && checkedFiles.length > 0 ? (
+              <button
+                type="button"
+                style={btnStyle}
+                onClick={() => void onDownloadMany(checkedFiles)}
+              >
+                Save {checkedFiles.length}…
+              </button>
+            ) : null}
           </div>
 
           {caps ? (
@@ -337,10 +478,12 @@ export function StorageExplorer() {
               </p>
             ) : null}
             {items.map((f) => (
-              <button
+              <div
                 key={f.id}
-                type="button"
-                onClick={() => setSelected(f)}
+                draggable={mode === 'active'}
+                onMouseEnter={() => downloads.warmDrag({ id: f.id, name: f.name })}
+                onDragStart={(e) => downloads.onDragStart(e, { id: f.id, name: f.name })}
+                onDragEnd={() => downloads.onDragEnd({ id: f.id, name: f.name })}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -353,40 +496,145 @@ export function StorageExplorer() {
                   border: '1px solid transparent',
                   background: selected?.id === f.id ? '#1c2733' : 'transparent',
                   color: '#e8eef4',
-                  cursor: 'pointer',
+                  cursor: downloads.draggingId === f.id ? 'grabbing' : 'pointer',
                 }}
               >
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {f.name}
-                </span>
-                {f.encryptionTier && f.encryptionTier !== 'none' ? (
-                  <span style={{ fontSize: 10, color: '#8fbf7f' }}>🔒 {f.encryptionTier}</span>
+                {mode === 'active' ? (
+                  <input
+                    type="checkbox"
+                    checked={checkedIds.has(f.id)}
+                    onChange={() => toggleChecked(f.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    title="Select for multi-download"
+                  />
                 ) : null}
-                <span style={{ fontSize: 11, color: '#6b7784', width: 70, textAlign: 'right' }}>
-                  {formatBytes(f.sizeBytes)}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setSelected(f)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    flex: 1,
+                    minWidth: 0,
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#e8eef4',
+                    cursor: 'pointer',
+                    padding: 0,
+                    textAlign: 'left',
+                  }}
+                >
+                  {mode === 'active' &&
+                  thumbnails[f.id] &&
+                  canThumbnail(previewKindFor(f.name, f.mimeType), f.sizeBytes) ? (
+                    <img
+                      src={thumbnails[f.id]}
+                      alt=""
+                      data-testid={`storage-thumb-${f.id}`}
+                      style={{
+                        width: 28,
+                        height: 28,
+                        flexShrink: 0,
+                        objectFit: 'cover',
+                        borderRadius: 4,
+                        border: '1px solid #2a333d',
+                        background: '#0b1015',
+                      }}
+                    />
+                  ) : null}
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {f.name}
+                  </span>
+                  {f.encryptionTier && f.encryptionTier !== 'none' ? (
+                    <span style={{ fontSize: 10, color: '#8fbf7f' }}>🔒 {f.encryptionTier}</span>
+                  ) : null}
+                  <span style={{ fontSize: 11, color: '#6b7784', width: 70, textAlign: 'right' }}>
+                    {formatBytes(f.sizeBytes)}
+                  </span>
+                </button>
+              </div>
             ))}
           </div>
+        </section>
 
-          {selected ? (
+        {/*
+          Right-hand detail column: ONE coherent pane holding the selected
+          file's metadata, its actions (Save… / Drag out / Rename / Trash), the
+          inline image/PDF preview and the revision history. It sits *beside* the
+          file list, never below it, so the preview is visible without scrolling
+          past the list. Under `DETAIL_LAYOUT_BREAKPOINT` it overlays the list
+          instead of squashing it to an unusable width.
+        */}
+        {selected ? (
+          <aside
+            style={{
+              ...detailColumnStyle,
+              ...(compactLayout
+                ? { position: 'absolute', top: 0, right: 0, bottom: 0, zIndex: 15, boxShadow: '-12px 0 24px rgba(0,0,0,0.45)' }
+                : {}),
+            }}
+            data-testid="storage-detail-column"
+            data-compact={compactLayout ? 'true' : 'false'}
+          >
             <div
               style={{
-                borderTop: '1px solid #2a333d',
-                padding: 10,
                 display: 'flex',
-                alignItems: 'center',
+                alignItems: 'flex-start',
                 gap: 8,
-                flexWrap: 'wrap',
+                padding: 10,
+                borderBottom: '1px solid #2a333d',
               }}
             >
-              <span style={{ fontSize: 12, color: '#9aa7b5', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {selected.name} · rev {selected.revisionNo ?? '—'} · {selected.status}
-              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  data-testid="storage-detail-name"
+                  style={{ fontSize: 13, color: '#e8eef4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {selected.name}
+                </div>
+                <div style={{ fontSize: 11, color: '#6b7784', marginTop: 2, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <span>rev {selected.revisionNo ?? '—'}</span>
+                  <span>{selected.status}</span>
+                  <span>{formatBytes(selected.sizeBytes)}</span>
+                  {selected.mimeType ? <span>{selected.mimeType}</span> : null}
+                </div>
+              </div>
+              {compactLayout ? (
+                <button
+                  type="button"
+                  style={btnStyle}
+                  title="Close details"
+                  data-testid="storage-detail-close"
+                  onClick={() => setSelected(null)}
+                >
+                  ✕
+                </button>
+              ) : null}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: 10, borderBottom: '1px solid #2a333d' }}>
               {mode === 'active' ? (
                 <>
-                  <button type="button" style={btnStyle} onClick={() => void onDownload(selected)}>
-                    Download
+                  <button
+                    type="button"
+                    style={btnStyle}
+                    data-testid="storage-detail-save"
+                    onClick={() => void onDownload(selected)}
+                  >
+                    Save…
+                  </button>
+                  <button
+                    type="button"
+                    style={btnStyle}
+                    title="Drag this row to copy the file to another app (Finder / Explorer / Photos)"
+                    data-testid="storage-detail-drag"
+                    onMouseEnter={() => downloads.warmDrag({ id: selected.id, name: selected.name })}
+                    onDragStart={(e) => downloads.onDragStart(e, { id: selected.id, name: selected.name })}
+                    onDragEnd={() => downloads.onDragEnd({ id: selected.id, name: selected.name })}
+                    draggable
+                  >
+                    Drag out ⤴
                   </button>
                   <button type="button" style={btnStyle} onClick={() => void onRename(selected)}>
                     Rename
@@ -401,57 +649,94 @@ export function StorageExplorer() {
                 </button>
               )}
             </div>
-          ) : null}
 
-          {selected && mode === 'active' ? (
-            <div style={{ borderTop: '1px solid #2a333d', padding: 10, maxHeight: 220, overflow: 'auto' }}>
-              <div style={{ color: '#6b7784', fontSize: 11, textTransform: 'uppercase', marginBottom: 6 }}>
-                Revision history {revisionsBusy ? '· loading…' : ''}
+            {mode === 'active' ? (
+              <div style={{ padding: '0 10px 10px' }}>
+                <StoragePreview state={preview} onRetry={preview.reload} maxHeight={260} />
               </div>
-              {revisions && revisions.items.length === 0 ? (
-                <p style={{ color: '#6b7784', fontSize: 12 }}>No recorded revisions yet.</p>
-              ) : null}
-              {(revisions?.items ?? []).map((r) => (
-                <div
-                  key={r.revisionNo}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '4px 0',
-                    borderBottom: '1px solid #1e252d',
-                  }}
-                >
-                  <span style={{ fontSize: 12, color: '#c7d2de', width: 52 }}>rev {r.revisionNo}</span>
-                  <span style={{ fontSize: 11, color: '#8a97a5', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {r.command}
-                    {r.reason ? ` · ${r.reason}` : ''}
-                  </span>
-                  <span style={{ fontSize: 11, color: '#6b7784', whiteSpace: 'nowrap' }}>
-                    {r.sizeBytes} B
-                  </span>
-                  {r.revisionNo === revisions?.currentRevisionNo ? (
-                    <span style={{ fontSize: 11, color: '#8fd08f' }}>current</span>
-                  ) : (
-                    <button type="button" style={btnStyle} onClick={() => void onRevert(selected, r.revisionNo)}>
-                      Restore
-                    </button>
-                  )}
+            ) : null}
+
+            {mode === 'active' ? (
+              <div style={{ borderTop: '1px solid #2a333d', padding: 10, flex: 1, overflowY: 'auto' }}>
+                <div style={{ color: '#6b7784', fontSize: 11, textTransform: 'uppercase', marginBottom: 6 }}>
+                  Revision history {revisionsBusy ? '· loading…' : ''}
                 </div>
-              ))}
+                {revisionsUnsupported ? (
+                  <p style={{ color: '#8a97a5', fontSize: 12 }}>
+                    Revision history is not available on this region.
+                  </p>
+                ) : null}
+                {revisionsTransportError ? (
+                  <div data-testid="storage-revisions-transport-error">
+                    <p style={{ color: '#f2a1a1', fontSize: 12, margin: '0 0 6px' }}>
+                      {revisionsTransportError}
+                    </p>
+                    <button
+                      type="button"
+                      style={btnStyle}
+                      data-testid="storage-revisions-retry"
+                      onClick={() => void loadRevisions(selected)}
+                    >
+                      Try again
+                    </button>
+                  </div>
+                ) : null}
+                {!revisionsUnsupported && !revisionsTransportError && revisions && revisions.items.length === 0 ? (
+                  <p style={{ color: '#6b7784', fontSize: 12 }}>No recorded revisions yet.</p>
+                ) : null}
+                {(revisionsUnsupported || revisionsTransportError ? [] : revisions?.items ?? []).map((r) => (
+                  <div
+                    key={r.revisionNo}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '4px 0',
+                      borderBottom: '1px solid #1e252d',
+                    }}
+                  >
+                    <span style={{ fontSize: 12, color: '#c7d2de', width: 52 }}>rev {r.revisionNo}</span>
+                    <span style={{ fontSize: 11, color: '#8a97a5', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {r.command}
+                      {r.reason ? ` · ${r.reason}` : ''}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#6b7784', whiteSpace: 'nowrap' }}>{r.sizeBytes} B</span>
+                    {r.revisionNo === revisions?.currentRevisionNo ? (
+                      <span style={{ fontSize: 11, color: '#8fd08f' }}>current</span>
+                    ) : (
+                      <button type="button" style={btnStyle} onClick={() => void onRevert(selected, r.revisionNo)}>
+                        Restore
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </aside>
+        ) : (
+          <aside
+            style={{
+              ...detailColumnStyle,
+              ...(compactLayout ? { display: 'none' } : {}),
+            }}
+            data-testid="storage-detail-empty"
+          >
+            <div style={{ padding: 16, color: '#6b7784', fontSize: 12 }}>
+              <div style={{ fontSize: 13, color: '#8a97a5', marginBottom: 6 }}>No file selected</div>
+              Select a file to preview it and see its revision history.
             </div>
-          ) : null}
-        </section>
+          </aside>
+        )}
       </div>
+
+      <UploadProgressPanel
+        snapshot={uploads.snapshot}
+        onCancelAll={uploads.cancelAll}
+        onCancelOne={uploads.cancelOne}
+        onRetryOne={uploads.retryOne}
+        onRetryAllFailed={uploads.retryAllFailed}
+        onClearFinished={uploads.clearFinished}
+      />
     </div>
   );
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
 }

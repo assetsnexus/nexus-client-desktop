@@ -116,6 +116,60 @@ export function createIdentityManager(options: IdentityManagerOptions) {
       return activeIdentity(state)?.token ?? null;
     },
 
+    /**
+     * The active session record (userId/orgId/role/deviceId) — the identity the
+     * token belongs to. Consumed by the auth manager to rebuild its in-memory
+     * identity after a restart, where only the persisted store survives.
+     */
+    activeSession(): {
+      userId: string | null;
+      orgId: string | null;
+      role: string | null;
+      deviceId: string | null;
+    } | null {
+      const identity = activeIdentity(state);
+      if (!identity) return null;
+      return {
+        userId: identity.userId,
+        orgId: identity.orgId,
+        role: identity.role,
+        deviceId: identity.deviceId,
+      };
+    },
+
+    /** True when any stored session is active (a signed-in shell). */
+    hasActiveSession(): boolean {
+      return activeIdentity(state) !== null;
+    },
+
+    /**
+     * Every stored session (token-bearing), used by the tray app provider: the
+     * "installed apps" list is identity-scoped, so it queries once per session
+     * (personal + each org membership) and unions the results. Read-only — it
+     * never changes the active identity.
+     */
+    listSessions(): Array<{
+      key: string;
+      userId: string | null;
+      orgId: string | null;
+      label: string;
+      token: string;
+      deviceId: string | null;
+    }> {
+      return state.accounts.flatMap((account) =>
+        account.identities.map((identity) => ({
+          key: identity.key,
+          userId: identity.userId,
+          orgId: identity.orgId,
+          label: identity.label,
+          token: identity.token,
+          // Every authenticated region command is device-gated, so a caller that
+          // fans out across sessions must carry each session's own `deviceId`.
+          deviceId: identity.deviceId,
+        })),
+      );
+    },
+
     /** Record a successful auth-manager login as a private identity. */
     recordLogin(input: {
       userId: string;
@@ -223,24 +277,21 @@ export function createIdentityManager(options: IdentityManagerOptions) {
       return snapshot();
     },
 
-    /** Clear the whole store (dev helper / hard reset). */
+    /**
+     * End the active session but keep every stored account (the switch-user
+     * "keep local data" path). The account records (and their tokens) stay on
+     * disk for a later switch, but nothing is active, so `activeToken()` — the
+     * token authority the auth manager and every sender read — returns null and
+     * the app is genuinely signed out. Without this, a `switch_user` logout only
+     * cleared the auth manager's cache and the still-active identity silently
+     * re-signed the user back in.
+     */
+    endActiveSession(): IdentitySnapshot {
+      return persist({ ...state, activeUserId: null });
+    },
+
+    /** Clear the whole store (dev helper / hard reset / permanent logout). */
     reset(): IdentitySnapshot {
-      return persist(createIdentityStoreState({ accountSwitcherEnabled: state.accountSwitcherEnabled }));
-    },
-
-    /**
-     * The raw active token (or null). Used by the logout manager to end the
-     * session without a region round-trip.
-     */
-    currentToken(): string | null {
-      return activeIdentity(state)?.token ?? null;
-    },
-
-    /**
-     * Drop the whole local identity index (permanent logout): every account and
-     * token is forgotten. A `switch_user` logout keeps it.
-     */
-    clearAll(): IdentitySnapshot {
       return persist(createIdentityStoreState({ accountSwitcherEnabled: state.accountSwitcherEnabled }));
     },
   };

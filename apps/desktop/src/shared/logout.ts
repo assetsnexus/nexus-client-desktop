@@ -72,9 +72,24 @@ export function planLogout(choice: LogoutChoice): LogoutStep[] {
   return [...LOGOUT_STEP_ORDER];
 }
 
-/** Human-label keys for the report UI (resolved through i18n in the renderer). */
-export function stepLabelKey(step: LogoutStep): string {
-  return `logout.step.${step}`;
+/** Stable, human-readable label for a teardown step (shown in the report UI). */
+export function stepLabel(step: LogoutStep): string {
+  switch (step) {
+    case 'stop_sync':
+      return 'Stop background sync';
+    case 'unmount_all':
+      return 'Unmount local drives';
+    case 'clear_sync_bindings':
+      return 'Remove sync bindings';
+    case 'clear_wake_queue':
+      return 'Delete queued voice transcripts';
+    case 'clear_identity_store':
+      return 'Forget local accounts';
+    case 'clear_secure_store':
+      return 'Delete stored secrets';
+    case 'end_session':
+      return 'End the session';
+  }
 }
 
 export type LogoutStepResult = {

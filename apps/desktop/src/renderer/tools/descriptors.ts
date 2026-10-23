@@ -7,6 +7,7 @@
  */
 
 import { bridge, type ToolInvocation, type ToolInvocationResult } from '../bridge.js';
+import { getToolAuditContext } from './audit-context.js';
 
 export type ChatToolDescriptor = {
   name: string;
@@ -26,7 +27,11 @@ export type RegisteredTool = {
 };
 
 function forward(name: string, args: unknown): Promise<ToolInvocationResult> {
-  const payload: ToolInvocation = { name, ...(args as Record<string, unknown>) };
+  // Attach the agent + conversation correlation so the main process can record
+  // an audit entry that traces this call back to its conversation. Metadata
+  // only — the main process never trusts these for policy.
+  const { agentId, conversationId } = getToolAuditContext();
+  const payload: ToolInvocation = { name, ...(args as Record<string, unknown>), agentId, conversationId };
   return bridge.runTool(payload);
 }
 

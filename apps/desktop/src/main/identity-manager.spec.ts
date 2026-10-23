@@ -92,6 +92,24 @@ describe('identity manager', () => {
     expect(m.getSnapshot().accounts[0].identities.map((i) => i.kind)).toEqual(['private', 'business']);
   });
 
+  it('listSessions carries each session deviceId (device-gated fan-out)', async () => {
+    const sender = vi.fn(async () => ({
+      responseCode: 200,
+      responseObject: { token: { token: 'biz', orgId: 'o1', role: 'admin', userId: 'u1' } },
+    }));
+    const m = manager(sender);
+    m.recordLogin({ userId: 'u1', token: 't1', deviceId: 'dev-personal' });
+    await m.startMembership({ membershipId: 'm1', businessEmail: 'a@b.c' });
+    const sessions = m.listSessions();
+    expect(sessions.map((s) => s.token).sort()).toEqual(['biz', 't1']);
+    // The business identity inherits the active session's device, and the
+    // personal one carries the device recorded at login.
+    for (const session of sessions) {
+      expect(session).toHaveProperty('deviceId');
+      expect(session.deviceId).toBeTruthy();
+    }
+  });
+
   it('returns the 2FA challenge fields for a gated membership login', async () => {
     const sender = vi.fn(async () => ({
       responseCode: 200,
@@ -124,5 +142,26 @@ describe('identity manager', () => {
     m.recordLogin({ userId: 'u1', token: 't1' });
     const m2 = createIdentityManager({ getSender: async () => ({ send: vi.fn() }), filePath: file });
     expect(m2.activeToken()).toBe('t1');
+  });
+
+  it('endActiveSession signs out but keeps every stored account (switch user)', () => {
+    // Regression: a switch-user logout must actually end the session. The
+    // identity store is the token authority, so it has to stop exposing the
+    // active token while keeping the accounts for a later switch.
+    const file = tempFile();
+    const m = createIdentityManager({ getSender: async () => ({ send: vi.fn() }), filePath: file });
+    m.recordLogin({ userId: 'u1', token: 't1' });
+
+    const after = m.endActiveSession();
+    expect(m.activeToken()).toBeNull();
+    expect(after.activeUserId).toBeNull();
+    // The account survives on disk for the next sign-in.
+    expect(after.accounts).toHaveLength(1);
+
+    const reloaded = createIdentityManager({ getSender: async () => ({ send: vi.fn() }), filePath: file });
+    expect(reloaded.activeToken()).toBeNull();
+    // Switching back restores the token, proving it was kept, not dropped.
+    reloaded.switchAccount('u1');
+    expect(reloaded.activeToken()).toBe('t1');
   });
 });

@@ -15,6 +15,10 @@ const characterKitAssetCache = resolve(
   repoRoot,
   'anx-libs/nexus-collaboration-vr/packages/character-kit/src/asset-cache.ts',
 );
+const characterKitPresenceMoods = resolve(
+  repoRoot,
+  'anx-libs/nexus-collaboration-vr/packages/character-kit/src/presence-moods.ts',
+);
 const clusterSceneReact = resolve(
   repoRoot,
   'anx-libs/nexus-collaboration-vr/packages/cluster-scene-react/src/index.ts',
@@ -33,6 +37,7 @@ export default defineConfig({
     alias: {
       '@nexus/character-react': characterReact,
       '@nexus/character-kit/asset-cache': characterKitAssetCache,
+      '@nexus/character-kit/presence-moods': characterKitPresenceMoods,
       '@nexus/character-kit': characterKit,
       '@nexus/cluster-scene-react': clusterSceneReact,
       '@nexus/scene-client': sceneClient,

@@ -3,12 +3,14 @@ import {
   NexusChatApp,
   createNexusChat,
   createRegionCommandClient,
+  findChatContact,
   type NexusChat,
   type SdkToHostMessage,
 } from '@nexus/chat-react';
 import '@nexus/chat-react/style.css';
 import { bridge, type AuthState, type DesktopConnectionConfig, type ToolsConfig } from '../bridge.js';
 import { DEFAULT_DESKTOP_TOOLS, localCommandTools } from '../tools/descriptors.js';
+import { setToolAuditContext, resolveToolAuditContext } from '../tools/audit-context.js';
 import { createIncomingWatcher, resolveSenderName } from '../notifications/incoming.js';
 import { createWakeChatRouter } from '../wake/router.js';
 import type { SessionState } from '../wake/session.js';
@@ -54,6 +56,17 @@ export function ChatHost({
     avatarUrl: string | null;
     agentId: string | null;
   } | null>(null);
+  // The open agent conversation, so the header can offer "Open in companion
+  // mode" for any agent — not only while a call is live.
+  const [activeContact, setActiveContact] = useState<{
+    contactId: string;
+    title: string;
+    avatarUrl: string | null;
+    agentId: string | null;
+    virtualEmployeeId: string | null;
+    conversationId: string | null;
+    isAgent: boolean;
+  } | null>(null);
 
   useEffect(() => {
     void bridge.getToolsConfig().then(setTools);
@@ -76,6 +89,44 @@ export function ChatHost({
     [tools],
   );
 
+  // Keep the client-tool audit correlation fresh. Every tool call forwarded to
+  // main carries the agent + conversation of the active panel, so the audit UI
+  // can trace a call back to its conversation. Audit metadata only.
+  useEffect(() => {
+    if (!chat) return;
+    const sync = (state: ReturnType<NexusChat['getState']>) => {
+      setToolAuditContext(resolveToolAuditContext(state));
+    };
+    sync(chat.getState());
+    return chat.subscribe(sync);
+  }, [chat]);
+
+  // Track the open conversation so the header can offer "Open in companion mode"
+  // for the current agent at any time (not just during a live call).
+  useEffect(() => {
+    if (!chat) return;
+    const sync = (state: ReturnType<NexusChat['getState']>) => {
+      const panel = state.panels[state.activePanelIndex];
+      // `panel.contactId` can be a VE id / alias rather than the contact's own
+      // `id`, so resolve through the shared identity matcher (id, VE id, alias).
+      const contact = findChatContact(state.contacts, panel?.contactId ?? state.selectedAgentId);
+      if (!contact || (contact.type !== 'agent' && contact.type !== 'asset_agent')) {
+        setActiveContact(null);
+        return;
+      }
+      setActiveContact({
+        contactId: contact.id,
+        title: contact.name,
+        avatarUrl: contact.avatarUrl ?? null,
+        agentId: contact.agentId ?? null,
+        virtualEmployeeId: contact.virtualEmployeeId ?? null,
+        conversationId: panel?.conversationId ?? state.conversationId ?? null,
+        isAgent: true,
+      });
+    };
+    sync(chat.getState());
+    return chat.subscribe(sync);
+  }, [chat]);
   useEffect(() => {
     if (!apiBaseUrl) return;
     let cancelled = false;
@@ -106,7 +157,7 @@ export function ChatHost({
     const watcher = createIncomingWatcher();
     const report = (state: ReturnType<NexusChat['getState']>) => {
       const panel = state.panels[state.activePanelIndex];
-      const contact = state.contacts.find((c) => c.id === panel?.contactId) ?? null;
+      const contact = findChatContact(state.contacts, panel?.contactId ?? state.selectedAgentId);
       const incoming = watcher.observe({
         conversationId: panel?.conversationId ?? state.conversationId ?? null,
         messages: state.messages,
@@ -274,6 +325,75 @@ export function ChatHost({
     [chat, dismissQueued],
   );
 
+  // Open the current agent conversation (or the live voice call) in the small
+  // companion window. Declared before the loading/error early-returns so the
+  // hook order is stable across renders.
+  const openCompanion = useCallback(
+    (which: 'agent' | 'voice') => {
+      const target =
+        which === 'voice' && activeVoice?.contactId
+          ? {
+              contactId: activeVoice.contactId,
+              conversationId: chat?.getState().conversationId ?? null,
+              agentId: activeVoice.agentId,
+              title: activeVoice.title,
+              avatarUrl: activeVoice.avatarUrl,
+            }
+          : activeContact
+            ? {
+                contactId: activeContact.contactId,
+                conversationId: activeContact.conversationId,
+                agentId: activeContact.agentId,
+                virtualEmployeeId: activeContact.virtualEmployeeId,
+                title: activeContact.title,
+                avatarUrl: activeContact.avatarUrl,
+              }
+            : null;
+      if (!target) return;
+      void bridge.companionOpen(target);
+    },
+    [activeContact, activeVoice, chat],
+  );
+
+  // The header slot is a stable component identity (React would otherwise
+  // remount the header controls on every render). It reads the live state
+  // through refs so the button always opens the currently visible agent.
+  const companionStateRef = useRef({ activeContact, activeVoice, openCompanion });
+  companionStateRef.current = { activeContact, activeVoice, openCompanion };
+  const CompanionHeaderActions = useMemo(
+    () =>
+      function CompanionHeaderActions() {
+        const { activeContact: contact, activeVoice: voice, openCompanion: open } =
+          companionStateRef.current;
+        if (voice?.contactId) {
+          return (
+            <button
+              type="button"
+              className="nexus-chat__btn"
+              aria-label="Immersive view"
+              title="Open the live call in the immersive companion window"
+              onClick={() => open('voice')}
+            >
+              Immersive view
+            </button>
+          );
+        }
+        if (!contact) return null;
+        return (
+          <button
+            type="button"
+            className="nexus-chat__btn"
+            aria-label="Open in companion mode"
+            title="Open in companion mode — small avatar window with voice chat"
+            onClick={() => open('agent')}
+          >
+            Companion mode
+          </button>
+        );
+      },
+    [],
+  );
+
   if (error) {
     return <p style={{ padding: 24, color: '#f2a1a1' }}>{error}</p>;
   }
@@ -293,54 +413,18 @@ export function ChatHost({
           onDismiss={dismissQueued}
         />
       ) : null}
-      {activeVoice?.contactId ? (
-        <div
-          style={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            zIndex: 5,
-            display: 'flex',
-            gap: 8,
-            alignItems: 'center',
-            padding: '6px 10px',
-            borderRadius: 10,
-            background: 'rgba(15,20,25,0.9)',
-            border: '1px solid #2a333d',
-          }}
-        >
-          <span style={{ fontSize: 12, color: '#9aa7b5' }}>{activeVoice.title}</span>
-          <button
-            type="button"
-            style={{
-              padding: '4px 10px',
-              borderRadius: 8,
-              border: '1px solid #3f6cb0',
-              background: '#2f5c9e',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-            onClick={() =>
-              void bridge.companionOpen({
-                contactId: activeVoice.contactId!,
-                conversationId: chat?.getState().conversationId ?? null,
-                agentId: activeVoice.agentId,
-                title: activeVoice.title,
-                avatarUrl: activeVoice.avatarUrl,
-              })
-            }
-          >
-            Immersive view
-          </button>
-        </div>
-      ) : null}
       <NexusChatApp
         chat={chat}
         client={client ?? undefined}
         features={{ adminPanels: false }}
         tools={registeredTools}
+        slots={{
+          // Mirror the companion affordance into the chat header, immediately
+          // left of the built-in Config button, instead of floating it over the
+          // thread. The slot lives inside `NexusChatApp`, so it sits with the
+          // rest of the header controls at any window size.
+          headerActions: CompanionHeaderActions,
+        }}
         onPostToHost={(msg: SdkToHostMessage) => {
           // Renderer-side host messages (open external links, device register).
           const m = msg as unknown as {

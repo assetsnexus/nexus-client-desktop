@@ -32,6 +32,7 @@ import {
   type DeviceLinkStarted,
   type LoginCredentials,
   type PasswordlessChannel,
+  type RegionResponse,
   type RegionRow,
   type SecureStore,
 } from '@nexus/node-core';
@@ -50,6 +51,7 @@ import {
   type HydrationResult,
   type SessionProbe,
 } from './session-hydration.js';
+import { resolveAuthIdentity, type IdentityLike } from './device-identity.js';
 
 const TOKEN_KEY = scopedKey(SECURE_KEYS.token, null);
 
@@ -66,6 +68,12 @@ export type AuthManagerOptions = {
    * the currently-selected identity.
    */
   getActiveToken?: () => string | null;
+  /**
+   * Active identity-store session (the token's owner: userId/orgId/role/deviceId).
+   * Used to rebuild the identity after a restart, where only the store survives
+   * and the in-memory cache is empty.
+   */
+  getActiveIdentity?: () => IdentityLike;
   /** Called after a successful login / 2FA completion (Phase 9 identity record). */
   onAuthenticated?: (input: { token: string; identity: AuthIdentity }) => void;
   /**
@@ -145,13 +153,95 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
     }
   }
 
+  /**
+   * The stable id of *this machine*, generating the keypair on first use.
+   *
+   * Login carries it so the region binds the new session to this device: after
+   * 2FA it issues a five-minute device-enrolment grant for exactly this id,
+   * which lets the follow-up `anx.device.register` skip a *second* SCA. Without
+   * it the region logs `device=none`, no grant is issued, and registration
+   * stalls on 2FA — leaving the session with no `deviceId` and every command
+   * rejected with 401.
+   */
+  async function deviceIdForLogin(): Promise<string> {
+    const existing = await loadDeviceKeys();
+    if (existing?.deviceId) return existing.deviceId;
+    const keys = generateDeviceKeys();
+    await secureStore.set(SECURE_KEYS.deviceKeys, JSON.stringify(keys));
+    return keys.deviceId;
+  }
+
   async function persistIdentity(token: string, identity: AuthIdentity): Promise<AuthState> {
     cachedToken = token;
     cachedIdentity = identity;
     pendingChallenge = null;
     await secureStore.set(TOKEN_KEY, token);
-    options.onAuthenticated?.({ token, identity });
-    return { status: 'signed_in', token, identity };
+    // A fresh session has no device row yet: register this machine so every
+    // later command carries a `deviceId` the region can authorize. A failure
+    // must not fail the sign-in (the token is good); it is retried lazily by
+    // `currentState`/`createSender` before the next authenticated command.
+    await ensureDeviceRegistered(token, identity).catch(() => undefined);
+    options.onAuthenticated?.({ token, identity: cachedIdentity ?? identity });
+    return { status: 'signed_in', token, identity: cachedIdentity ?? identity };
+  }
+
+  /**
+   * Register (or re-affirm) this machine's device identity and fold the
+   * resulting `deviceId` into the cached identity. Idempotent: a device we
+   * already own resolves from the stored/returned id without a second 2FA.
+   */
+  async function ensureDeviceRegistered(
+    token: string,
+    identity: AuthIdentity | null,
+  ): Promise<string | null> {
+    let keys = await loadDeviceKeys();
+    if (!keys) {
+      keys = generateDeviceKeys();
+      await secureStore.set(SECURE_KEYS.deviceKeys, JSON.stringify(keys));
+    }
+    const store: DeviceKeyStore = {
+      load: () => keys,
+      save: (next) => {
+        keys = next;
+      },
+      clear: () => {
+        keys = null as never;
+      },
+    };
+    const result = await ensureDeviceIdentity(
+      options.clientOptions,
+      store,
+      {
+        deviceName: options.deviceName,
+        platform: options.platform,
+        appVersion: options.appVersion,
+        deviceType: 'desktop',
+      },
+      token,
+    );
+    await secureStore.set(SECURE_KEYS.deviceKeys, JSON.stringify(keys));
+    if (identity) cachedIdentity = { ...identity, deviceId: result.deviceId };
+    return result.deviceId;
+  }
+
+  /**
+   * The identity the sender must carry: the identity-store session (the token's
+   * owner), falling back to the in-memory cache, with `deviceId` repaired from
+   * the locally stored keypair when the session predates registration or the
+   * cache was emptied by a restart. Returns null when no identity is known.
+   */
+  async function resolveIdentity(): Promise<AuthIdentity | null> {
+    const stored = await loadDeviceKeys();
+    // Only assert a device id the region has acknowledged; an unregistered id
+    // would be rejected as a device-validation failure.
+    const acknowledged = stored?.registeredAt ? stored.deviceId : null;
+    const resolved = resolveAuthIdentity({
+      session: options.getActiveIdentity?.() ?? null,
+      cached: cachedIdentity,
+      deviceKeysDeviceId: acknowledged,
+    });
+    if (!resolved.userId && !cachedIdentity?.userId) return null;
+    return resolved;
   }
 
   async function currentState(): Promise<AuthState> {
@@ -163,15 +253,35 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
     const activeOverride = options.getActiveToken?.() ?? null;
     if (activeOverride) {
       cachedToken = activeOverride;
+      // Rebuild identity from the store + device keypair so a restarted process
+      // (or a session recorded before registration) still sends a `deviceId`.
+      const resolved = await resolveIdentity();
+      if (resolved) cachedIdentity = resolved as AuthIdentity;
       return { status: 'signed_in', token: activeOverride, identity: cachedIdentity ?? emptyIdentity() };
     }
     if (cachedToken && cachedIdentity) {
+      const resolved = await resolveIdentity();
+      if (resolved && !resolved.deviceId && cachedIdentity.deviceId == null) {
+        // No local keypair yet: register lazily so the next command authorizes.
+        await ensureDeviceRegistered(cachedToken, cachedIdentity).catch(() => undefined);
+      } else if (resolved) {
+        cachedIdentity = resolved as AuthIdentity;
+      }
       return { status: 'signed_in', token: cachedToken, identity: cachedIdentity };
     }
     const stored = await secureStore.get(TOKEN_KEY);
     if (stored) {
       cachedToken = stored;
-      cachedIdentity = { userId: null, orgId: null, role: null, deviceId: null };
+      const resolved = await resolveIdentity();
+      cachedIdentity = (resolved as AuthIdentity | null) ?? {
+        userId: null,
+        orgId: null,
+        role: null,
+        deviceId: null,
+      };
+      if (!cachedIdentity.deviceId) {
+        await ensureDeviceRegistered(cachedToken, cachedIdentity).catch(() => undefined);
+      }
       return { status: 'signed_in', token: stored, identity: cachedIdentity };
     }
     return { status: 'signed_out' };
@@ -201,7 +311,7 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
    * is classified through the same session-loss rules the senders use.
    */
   async function probeRegion(token: string): Promise<SessionProbe> {
-    let res: CommandResult;
+    let res: RegionResponse;
     try {
       const { sendCommand } = await import('@nexus/node-core');
       res = await sendCommand(options.clientOptions, 'anx.device.list', {}, { token });
@@ -263,7 +373,10 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
     getState: currentState,
 
     async login(creds) {
-      const result = await regionLogin(options.clientOptions, creds);
+      // Bind the session to this machine so the region can issue the device
+      // enrolment grant after 2FA and register without a second challenge.
+      const deviceId = await deviceIdForLogin();
+      const result = await regionLogin(options.clientOptions, { ...creds, deviceId });
       if (result.kind === 'authenticated') {
         return persistIdentity(result.token, result.identity);
       }
@@ -282,11 +395,15 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
       if (!pendingChallenge) {
         throw new Error('no sign-in challenge is in progress');
       }
+      // Echo this machine's id: the region binds the enrolment grant to the
+      // device id stored on the login token, and biometric challenges validate
+      // that the presenting device matches the challenged one.
+      const deviceId = await deviceIdForLogin();
       const out = await regionTwoFactorLogin(options.clientOptions, {
         loginToken: pendingChallenge.loginToken,
         method: req.method || pendingChallenge.methods[0] || 'email',
         code: req.code,
-        deviceId: null,
+        deviceId,
       });
       return persistIdentity(out.token, out.identity);
     },
@@ -316,10 +433,15 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
 
     async startPasswordless(input) {
       const region = await managedRegion();
+      // Same device binding as the password flow: the id rides on the challenge
+      // so the verified session can be trusted and registered without a second
+      // SCA.
+      const deviceId = await deviceIdForLogin();
       const started = await regionStartPasswordless(options.clientOptions, {
         channel: input.channel,
         identifier: input.identifier,
         region,
+        deviceId,
       });
       pendingChallenge = {
         loginToken: started.challengeToken,
@@ -335,9 +457,11 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
       if (!pendingChallenge || pendingChallenge.flow !== 'passwordless') {
         throw new Error('no sign-in code is in progress');
       }
+      const deviceId = await deviceIdForLogin();
       const out = await regionVerifyPasswordless(options.clientOptions, {
         challengeToken: pendingChallenge.loginToken,
         code: input.code,
+        deviceId,
       });
       if (out.kind === 'authenticated') {
         return persistIdentity(out.token, out.identity);
@@ -477,6 +601,20 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
         } catch {
           /* best-effort; the renderer still returns to sign-in */
         }
+      } else if (decision.view === 'signed_in') {
+        // Rebuild the identity from the identity store + device keypair, and
+        // register this machine when it has none yet. Without this a restarted
+        // process signs in carrying a token but no `deviceId`, and the region
+        // rejects every command with 401 'Device ID is required'.
+        try {
+          const resolved = await resolveIdentity();
+          if (resolved) cachedIdentity = resolved as AuthIdentity;
+          if (storedToken && !cachedIdentity?.deviceId) {
+            await ensureDeviceRegistered(storedToken, cachedIdentity);
+          }
+        } catch {
+          /* non-fatal: a later command retries the repair in createSender */
+        }
       }
       return toHydrationState(decision);
     },
@@ -486,9 +624,12 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
 
     async getDeviceStatus(): Promise<DeviceStatus> {
       const keys = await loadDeviceKeys();
+      // "Registered" means the *region* acknowledged the device, not merely that
+      // a local keypair exists (a keypair is generated before login).
+      const acknowledged = keys?.registeredAt ? keys.deviceId : null;
       return {
-        registered: Boolean(cachedIdentity?.deviceId) || Boolean(keys?.deviceId),
-        deviceId: cachedIdentity?.deviceId ?? keys?.deviceId ?? null,
+        registered: Boolean(cachedIdentity?.deviceId ?? acknowledged),
+        deviceId: cachedIdentity?.deviceId ?? acknowledged ?? keys?.deviceId ?? null,
         hasKeys: Boolean(keys),
       };
     },
@@ -496,48 +637,38 @@ export function createAuthManager(options: AuthManagerOptions): AuthManager {
     async registerDevice(): Promise<DeviceStatus> {
       const token = await this.getToken();
       if (!token) throw new Error('cannot register a device while signed out');
-      // Ensure a local keypair exists, then register with the region.
-      let keys = await loadDeviceKeys();
-      if (!keys) {
-        keys = generateDeviceKeys();
-        await secureStore.set(SECURE_KEYS.deviceKeys, JSON.stringify(keys));
-      }
-      const store: DeviceKeyStore = {
-        load: () => keys,
-        save: (next) => {
-          keys = next;
-        },
-        clear: () => {
-          keys = null as never;
-        },
-      };
-      const result = await ensureDeviceIdentity(
-        options.clientOptions,
-        store,
-        {
-          deviceName: options.deviceName,
-          platform: options.platform,
-          appVersion: options.appVersion,
-          deviceType: 'desktop',
-        },
-        token,
-      );
-      await secureStore.set(SECURE_KEYS.deviceKeys, JSON.stringify(keys));
-      if (cachedIdentity) cachedIdentity = { ...cachedIdentity, deviceId: result.deviceId };
-      return { registered: true, deviceId: result.deviceId, hasKeys: true };
+      // Same idempotent path the login/hydration flows use, so registration
+      // cannot diverge from what the identity carries.
+      const deviceId = await ensureDeviceRegistered(token, cachedIdentity);
+      return { registered: true, deviceId, hasKeys: true };
     },
 
     async createSender(): Promise<CommandSender> {
       const token = await this.getToken();
-      const identity = {
-        userId: cachedIdentity?.userId ?? undefined,
-        orgId: cachedIdentity?.orgId ?? undefined,
-        role: cachedIdentity?.role ?? undefined,
-        deviceId: cachedIdentity?.deviceId ?? undefined,
-      };
+      /** At most one lazy repair per sender so a refusal cannot loop every call. */
+      let repairAttempted = false;
       return {
         async send(command, payload): Promise<CommandResult> {
           const { sendCommand, classifySessionFailure } = await import('@nexus/node-core');
+          // Resolve per call: the device identity may have been repaired (or the
+          // active identity switched) since this sender was created, and the
+          // region authorizes every command against the identity it receives.
+          let resolved = await resolveIdentity();
+          // Lazy self-heal: a session can exist without a *region-acknowledged*
+          // device (registration was refused with a 202 at login, or the process
+          // restarted before it landed). The region answers every such command
+          // with a device-validation 401, so repair once before giving up.
+          if (token && resolved && !resolved.deviceId && !repairAttempted) {
+            repairAttempted = true;
+            await ensureDeviceRegistered(token, cachedIdentity ?? resolved).catch(() => undefined);
+            resolved = await resolveIdentity();
+          }
+          const identity = {
+            userId: resolved?.userId ?? undefined,
+            orgId: resolved?.orgId ?? undefined,
+            role: resolved?.role ?? undefined,
+            deviceId: resolved?.deviceId ?? undefined,
+          };
           const res = await sendCommand(
             options.clientOptions,
             command,

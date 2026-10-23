@@ -18,6 +18,7 @@ import {
   shouldShowSandboxBadge,
 } from '../../shared/sandbox-environment.js';
 import { useRegionEnvironment } from '../sandbox/use-region-environment.js';
+import { sandboxBadgeStyle } from '../sandbox/badge-style.js';
 import { useI18n, type MessageKey } from '../i18n/index.js';
 import { linkBrands } from '../i18n/brand-links.js';
 import { LanguageSelector } from './LanguageSelector.js';
@@ -246,25 +247,6 @@ const notice = (tone: 'warn' | 'info'): CSSProperties => ({
   color: tone === 'warn' ? '#e6c98a' : '#9fc9dd',
   fontSize: 12,
 });
-
-/**
- * Sandbox pill badge. Matches the portal's `SandboxHeaderBadge.vue` tokens
- * (`#efb15a` border, `#ffe0b2` background, `#6d3b00` foreground, 999px pill).
- */
-const sandboxBadge: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  padding: '2px 9px',
-  borderRadius: 999,
-  border: '1px solid #efb15a',
-  background: '#ffe0b2',
-  color: '#6d3b00',
-  fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: '0.04em',
-  lineHeight: 1.3,
-  whiteSpace: 'nowrap',
-};
 
 /** Login-time sandbox disclaimer card (amber, above the sign-in card). */
 const sandboxNotice: CSSProperties = {
@@ -523,6 +505,8 @@ export function LoginForm({
       if (twoFactor) {
         // A step-up 2FA challenge (password login, or passwordless step-up).
         await bridge.submitTwoFactor({ code, method: auth.methods[0] });
+        // Drop the one-time code from renderer state as soon as it is proven.
+        setCode('');
       } else if (mode === 'password') {
         if (regionBlocked) {
           setError(t('login.region.required'));
@@ -534,17 +518,22 @@ export function LoginForm({
           password,
           region: selectedRegion?.slug ?? null,
         });
+        // The password has been handed to main; do not keep it in renderer
+        // state once the step succeeded (a failed attempt is kept for retry).
+        setPassword('');
       } else if (mode === 'email_code') {
         if (codePhase === 'identifier') {
           await bridge.authStartPasswordless({ channel: 'email', identifier: email });
         } else {
           await bridge.authVerifyPasswordless({ code });
+          setCode('');
         }
       } else if (mode === 'phone_code') {
         if (codePhase === 'identifier') {
           await bridge.authStartPasswordless({ channel: 'sms', identifier: phone });
         } else {
           await bridge.authVerifyPasswordless({ code });
+          setCode('');
         }
       }
       // After a passwordless start the state becomes two_factor_required; the
@@ -956,7 +945,11 @@ export function LoginForm({
       >
         <div>
           {isSandbox ? (
-            <span style={sandboxBadge} title={SANDBOX_BADGE_DESCRIPTION} aria-label={SANDBOX_BADGE_LABEL}>
+            <span
+              style={sandboxBadgeStyle}
+              title={SANDBOX_BADGE_DESCRIPTION}
+              aria-label={SANDBOX_BADGE_LABEL}
+            >
               {SANDBOX_BADGE_LABEL}
             </span>
           ) : null}
