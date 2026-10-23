@@ -82,15 +82,35 @@ describe('createGlobalCursorTracker', () => {
     };
   }
 
-  it('sends a normalized sample to each live companion window', () => {
+  it('sends a sample normalized to the display work area, not the window', () => {
+    const a = makeWindow();
+    const tracker = createGlobalCursorTracker({
+      listWindows: () => [{ contactId: 'contact-a', window: a.window }],
+      // Cursor at the screen center while the window is small and top-left.
+      getCursorPoint: () => ({ x: 1000, y: 500 }),
+      getDisplayWorkArea: () => ({ x: 0, y: 0, width: 2000, height: 1000 }),
+    });
+    tracker.sampleOnce();
+    expect(a.sent).toHaveLength(1);
+    // Screen-relative center is (0.5, 0.5) — NOT ~1.25 (off the 400px window).
+    expect(a.sent[0]).toMatchObject({
+      contactId: 'contact-a',
+      x: 0.5,
+      y: 0.5,
+      outside: false,
+      display: { x: 0, y: 0, width: 2000, height: 1000 },
+    });
+  });
+
+  it('falls back to the window box when the display lookup returns null', () => {
     const a = makeWindow();
     const tracker = createGlobalCursorTracker({
       listWindows: () => [{ contactId: 'contact-a', window: a.window }],
       getCursorPoint: () => ({ x: 200, y: 150 }),
+      getDisplayWorkArea: () => null,
     });
     tracker.sampleOnce();
-    expect(a.sent).toHaveLength(1);
-    expect(a.sent[0]).toMatchObject({ contactId: 'contact-a', x: 0.5, y: 0.5, outside: false });
+    expect(a.sent[0]).toMatchObject({ x: 0.5, y: 0.5, outside: false });
   });
 
   it('skips destroyed windows', () => {
@@ -98,6 +118,7 @@ describe('createGlobalCursorTracker', () => {
     const tracker = createGlobalCursorTracker({
       listWindows: () => [{ contactId: 'dead', window: dead.window }],
       getCursorPoint: () => ({ x: 0, y: 0 }),
+      getDisplayWorkArea: () => null,
     });
     tracker.sampleOnce();
     expect(dead.sent).toHaveLength(0);
@@ -111,6 +132,7 @@ describe('createGlobalCursorTracker', () => {
         probed += 1;
         return { x: 0, y: 0 };
       },
+      getDisplayWorkArea: () => null,
     });
     tracker.sampleOnce();
     expect(probed).toBe(0);
@@ -121,6 +143,7 @@ describe('createGlobalCursorTracker', () => {
     let cleared = 0;
     const tracker = createGlobalCursorTracker({
       listWindows: () => [],
+      getDisplayWorkArea: () => null,
       setIntervalImpl: () => {
         started += 1;
         return 1 as unknown as ReturnType<typeof setInterval>;

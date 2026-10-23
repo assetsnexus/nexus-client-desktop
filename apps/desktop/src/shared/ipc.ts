@@ -131,10 +131,16 @@ export const DEFAULT_COMPANION_DEBUG_SETTINGS: CompanionDebugSettings = {
 /**
  * A normalized OS-global cursor sample for a companion window.
  *
- * `x`/`y` are relative to the companion's own bounds: `0` at the left/top edge,
- * `1` at the right/bottom; outside `[0,1]` is off-window to that side. `bounds`
- * is carried so the renderer can reason about the window box without another IPC
- * round-trip, and `outside` is a convenience flag (`true` when off-window).
+ * `x`/`y` are relative to the **display work area the companion sits on** —
+ * `0` at the left/top edge of the screen, `1` at the right/bottom, `0.5` at
+ * screen center. This is the frame the avatar reasons in: the companion window
+ * itself is a small box on a large screen, so window-relative coords would
+ * saturate the gaze the moment the cursor left the window. Screen-relative
+ * coords instead sweep the gaze across its full range as the pointer crosses the
+ * display, and `outside` flags a cursor on a different monitor / off the screen.
+ *
+ * `bounds` (window) and `display` (work area) are carried so the renderer can
+ * reason about both boxes without another IPC round-trip.
  */
 export type CompanionCursorCoords = {
   contactId: string;
@@ -144,6 +150,7 @@ export type CompanionCursorCoords = {
   screenX: number;
   screenY: number;
   bounds: { x: number; y: number; width: number; height: number };
+  display: { x: number; y: number; width: number; height: number };
 };
 
 /** Coerce a persisted/patched companion-debug block field-by-field. */

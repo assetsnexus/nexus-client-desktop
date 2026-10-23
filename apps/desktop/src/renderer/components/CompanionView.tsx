@@ -36,7 +36,7 @@ import {
   registerCharacterTools,
   type CompanionStageHost,
 } from '../companion/character-tools.js';
-import { companionCursorToNdc, softenOffWindowNdc } from '../companion/companion-cursor.js';
+import { companionCursorToGazeNdc } from '../companion/companion-cursor.js';
 import {
   bridge,
   type AuthState,
@@ -252,7 +252,7 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     host.setExternalPointerEnabled?.(true);
     const unsubscribe = bridge.onCompanionGlobalCursor((coords) => {
       if (coords.contactId !== launch.contactId) return;
-      const ndc = softenOffWindowNdc(companionCursorToNdc(coords));
+      const ndc = companionCursorToGazeNdc(coords);
       host.setPointerNdc?.(ndc.x, ndc.y);
     });
     return () => {

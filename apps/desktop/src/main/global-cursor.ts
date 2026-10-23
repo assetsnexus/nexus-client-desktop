@@ -5,11 +5,13 @@
  * while the pointer is inside the small companion window. Electron's
  * `screen.getCursorScreenPoint()` reports display-space coordinates regardless of
  * focus, so we sample it (throttled) while any companion is open and push a
- * per-window normalized sample to each companion renderer.
+ * per-window sample to each companion renderer.
  *
- * Normalization is relative to each window's own bounds: the renderer maps
- * `x/y` in `[0,1]` onto its gaze NDC cone, and out-of-range values (cursor off
- * that side) let it clamp at the cone edge instead of losing tracking.
+ * Normalization is relative to the **display work area** the companion lives on
+ * (not the window). The companion is a small box on a large screen, so
+ * window-relative coords would pin the gaze at the cone edge as soon as the
+ * cursor left the window; screen-relative coords let the gaze sweep its full
+ * range as the pointer crosses the whole display.
  *
  * Deliberately dependency-light and timer-driven (not `setInterval` per window):
  * one shared sampler keeps cost flat as companions are added/removed, and
@@ -38,13 +40,22 @@ export type GlobalCursorTrackerOptions = {
   listWindows: () => CompanionCursorWindow[];
   /** Injectable for tests; defaults to electron `screen.getCursorScreenPoint`. */
   getCursorPoint?: () => { x: number; y: number };
+  /**
+   * Work area of the display a window sits on, in the same display space as the
+   * cursor point. Injectable for tests; defaults to
+   * `screen.getDisplayMatching(bounds).workArea`. Returning `null` falls back to
+   * the window bounds so a headless/degenerate display still normalizes.
+   */
+  getDisplayWorkArea?: (
+    bounds: { x: number; y: number; width: number; height: number },
+  ) => { x: number; y: number; width: number; height: number } | null;
   /** Injectable for tests; defaults to `setInterval`. */
   setIntervalImpl?: (fn: () => void, ms: number) => ReturnType<typeof setInterval>;
   /** Injectable for tests; defaults to `clearInterval`. */
   clearIntervalImpl?: (handle: ReturnType<typeof setInterval>) => void;
 };
 
-/** Pure normalization: display point → window-relative coords. */
+/** Pure normalization: display point → box-relative coords. */
 export function normalizeCursorToBounds(
   point: { x: number; y: number },
   bounds: { x: number; y: number; width: number; height: number },
@@ -78,6 +89,15 @@ export function shouldEmitCursorSample(
 
 export function createGlobalCursorTracker(options: GlobalCursorTrackerOptions) {
   const getPoint = options.getCursorPoint ?? (() => screen.getCursorScreenPoint());
+  const getWorkArea =
+    options.getDisplayWorkArea ??
+    ((bounds) => {
+      try {
+        return screen.getDisplayMatching(bounds).workArea;
+      } catch {
+        return null;
+      }
+    });
   const startTimer = options.setIntervalImpl ?? ((fn, ms) => setInterval(fn, ms));
   const stopTimer = options.clearIntervalImpl ?? ((h) => clearInterval(h));
   /** Last pushed sample per contact, for jitter suppression. */
@@ -95,9 +115,13 @@ export function createGlobalCursorTracker(options: GlobalCursorTrackerOptions) {
     for (const { contactId, window } of targets) {
       if (window.isDestroyed?.()) continue;
       const bounds = window.getBounds();
-      const normalized = normalizeCursorToBounds(point, bounds);
+      // Normalize to the display work area, not the window: the avatar must keep
+      // sweeping its gaze cone as the cursor crosses the whole screen. Fall back
+      // to the window box only if the display lookup fails.
+      const area = getWorkArea(bounds) ?? bounds;
+      const normalized = normalizeCursorToBounds(point, area);
       const previous = lastByContact.get(contactId) ?? null;
-      if (!shouldEmitCursorSample(previous, normalized, MIN_MOVE_PX, bounds.width, bounds.height)) {
+      if (!shouldEmitCursorSample(previous, normalized, MIN_MOVE_PX, area.width, area.height)) {
         continue;
       }
       lastByContact.set(contactId, normalized);
@@ -109,6 +133,7 @@ export function createGlobalCursorTracker(options: GlobalCursorTrackerOptions) {
         screenX: point.x,
         screenY: point.y,
         bounds: { ...bounds },
+        display: { ...area },
       };
       if (typeof window.isDestroyed === 'function' && window.isDestroyed()) continue;
       window.webContents.send(IPC.companionGlobalCursor, payload);
