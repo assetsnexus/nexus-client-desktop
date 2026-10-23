@@ -44,21 +44,38 @@ describe('createSettingsStore — ui settings', () => {
     expect(next.loginCountry).toBe('DE');
   });
 
-  it('defaults companion avatar click-nod ON with the `nod` gesture', () => {
+  it('defaults companion avatar click-nod ON with the `nod` gesture and a widened gaze cone', () => {
     const ui = createSettingsStore(tempFile()).getUiSettings();
-    expect(ui.companionAvatar).toEqual({ clickNod: true, clickNodGesture: 'nod' });
+    expect(ui.companionAvatar).toEqual({
+      clickNod: true,
+      clickNodGesture: 'nod',
+      gazeYawMaxDeg: 30,
+      gazePitchMaxDeg: 22,
+    });
   });
 
-  it('persists a disabled companion click-nod and a custom gesture', () => {
+  it('persists a disabled companion click-nod, a custom gesture and gaze cone', () => {
     const path = tempFile();
     const store = createSettingsStore(path);
     const next = store.setUiSettings({
-      companionAvatar: { clickNod: false, clickNodGesture: 'agree' },
+      companionAvatar: {
+        clickNod: false,
+        clickNodGesture: 'agree',
+        gazeYawMaxDeg: 45,
+        gazePitchMaxDeg: 22,
+      },
     });
-    expect(next.companionAvatar).toEqual({ clickNod: false, clickNodGesture: 'agree' });
+    expect(next.companionAvatar).toEqual({
+      clickNod: false,
+      clickNodGesture: 'agree',
+      gazeYawMaxDeg: 45,
+      gazePitchMaxDeg: 22,
+    });
     expect(createSettingsStore(path).getUiSettings().companionAvatar).toEqual({
       clickNod: false,
       clickNodGesture: 'agree',
+      gazeYawMaxDeg: 45,
+      gazePitchMaxDeg: 22,
     });
   });
 
@@ -66,12 +83,31 @@ describe('createSettingsStore — ui settings', () => {
     const path = tempFile();
     writeFileSync(
       path,
-      JSON.stringify({ ui: { companionAvatar: { clickNod: 'yes', clickNodGesture: '  ' } } }),
+      JSON.stringify({
+        ui: { companionAvatar: { clickNod: 'yes', clickNodGesture: '  ', gazeYawMaxDeg: 'wide' } },
+      }),
       'utf8',
     );
     expect(createSettingsStore(path).getUiSettings().companionAvatar).toEqual({
       clickNod: true,
       clickNodGesture: 'nod',
+      gazeYawMaxDeg: 30,
+      gazePitchMaxDeg: 22,
     });
+  });
+
+  it('clamps out-of-range companion gaze cone degrees into the library bounds', () => {
+    const path = tempFile();
+    const store = createSettingsStore(path);
+    const next = store.setUiSettings({
+      companionAvatar: {
+        clickNod: true,
+        clickNodGesture: 'nod',
+        gazeYawMaxDeg: 999,
+        gazePitchMaxDeg: -5,
+      },
+    });
+    expect(next.companionAvatar.gazeYawMaxDeg).toBe(60);
+    expect(next.companionAvatar.gazePitchMaxDeg).toBe(8);
   });
 });

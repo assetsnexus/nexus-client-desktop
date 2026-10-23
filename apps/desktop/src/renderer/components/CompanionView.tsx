@@ -267,6 +267,18 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     };
   }, [avatarHost, launch.contactId]);
 
+  // Wider, configurable gaze cone: the companion tracks the cursor across the
+  // whole screen, so the tight library default (head ~8° of actual turn) reads as
+  // "barely moves". Bound to the live host so a scene/flat swap re-applies it.
+  useEffect(() => {
+    const host = avatarHost;
+    if (!host?.setGazeLimits) return;
+    host.setGazeLimits({
+      headYawMaxDeg: avatarSettings?.gazeYawMaxDeg,
+      headPitchMaxDeg: avatarSettings?.gazePitchMaxDeg,
+    });
+  }, [avatarHost, avatarSettings?.gazeYawMaxDeg, avatarSettings?.gazePitchMaxDeg]);
+
   // Click nod: the avatar nods (configurable gesture) when the user clicks the
   // companion. Bound to the live host so a scene/flat swap re-applies it.
   useEffect(() => {

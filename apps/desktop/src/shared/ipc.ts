@@ -116,12 +116,30 @@ export type CompanionAvatarSettings = {
   clickNod: boolean;
   /** Gesture clip id played on click; defaults to the bundled `nod`. */
   clickNodGesture: string;
+  /**
+   * How far the companion's head/neck can turn toward the cursor, in degrees
+   * (default 30). The backbone of head-follow liveliness: the head bone gets
+   * roughly half of this, so the tight library default (20) reads as "barely
+   * moves" on a companion that must track the cursor across a whole screen.
+   */
+  gazeYawMaxDeg: number;
+  /** Head/neck pitch cone toward the cursor, in degrees (default 22). */
+  gazePitchMaxDeg: number;
 };
 
 export const DEFAULT_COMPANION_AVATAR_SETTINGS: CompanionAvatarSettings = {
   clickNod: true,
   clickNodGesture: 'nod',
+  gazeYawMaxDeg: 30,
+  gazePitchMaxDeg: 22,
 };
+
+/** Clamp helper for the finite-degree settings below. */
+function clampDegree(value: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
 
 /** Coerce a persisted/patched companion-avatar block field-by-field. */
 export function normalizeCompanionAvatarSettings(raw: unknown): CompanionAvatarSettings {
@@ -135,6 +153,14 @@ export function normalizeCompanionAvatarSettings(raw: unknown): CompanionAvatarS
     // Default ON: a nod on click is the expected lively default; explicit false disables.
     clickNod: rec.clickNod !== false,
     clickNodGesture: gesture,
+    // Match `clampGazeLimits` bounds in character-kit so persisted values are valid there.
+    gazeYawMaxDeg: clampDegree(rec.gazeYawMaxDeg, DEFAULT_COMPANION_AVATAR_SETTINGS.gazeYawMaxDeg, 10, 60),
+    gazePitchMaxDeg: clampDegree(
+      rec.gazePitchMaxDeg,
+      DEFAULT_COMPANION_AVATAR_SETTINGS.gazePitchMaxDeg,
+      8,
+      40,
+    ),
   };
 };
 

@@ -610,6 +610,45 @@ export function SettingsPanel({
                 Clip id from the agent's gesture pack (e.g. <code>nod</code>, <code>agree</code>).
               </span>
             </label>
+            <label style={field}>
+              <span style={{ color: '#e8eef4' }}>
+                Head turn range — {companionAvatar.gazeYawMaxDeg}°
+              </span>
+              <input
+                type="range"
+                min={10}
+                max={60}
+                step={1}
+                value={companionAvatar.gazeYawMaxDeg}
+                disabled={companionAvatarBusy}
+                onChange={(e) =>
+                  void patchCompanionAvatar({ gazeYawMaxDeg: Number(e.target.value) })
+                }
+              />
+              <span style={{ color: '#6b7784', fontSize: 11 }}>
+                How far the head/neck turn toward the cursor (10–60°). Raise it if tracking feels
+                stiff as your cursor crosses the screen.
+              </span>
+            </label>
+            <label style={field}>
+              <span style={{ color: '#e8eef4' }}>
+                Head tilt range — {companionAvatar.gazePitchMaxDeg}°
+              </span>
+              <input
+                type="range"
+                min={8}
+                max={40}
+                step={1}
+                value={companionAvatar.gazePitchMaxDeg}
+                disabled={companionAvatarBusy}
+                onChange={(e) =>
+                  void patchCompanionAvatar({ gazePitchMaxDeg: Number(e.target.value) })
+                }
+              />
+              <span style={{ color: '#6b7784', fontSize: 11 }}>
+                How far the head nods up/down toward the cursor (8–40°).
+              </span>
+            </label>
           </>
         ) : (
           <p style={{ color: '#6b7784', fontSize: 12 }}>Loading…</p>

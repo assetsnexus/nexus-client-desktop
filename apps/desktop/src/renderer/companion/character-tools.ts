@@ -55,6 +55,16 @@ export type CompanionStageHost = CharacterToolHostLike & {
    */
   setPointerNdc?: (x: number, y: number) => void;
   setExternalPointerEnabled?: (on: boolean) => void;
+  /**
+   * Gaze cone (head/neck turn) in degrees. Widen for a companion that tracks the
+   * cursor across a whole screen; the tight library default reads as barely moving.
+   */
+  setGazeLimits?: (limits: {
+    headYawMaxDeg?: number;
+    headPitchMaxDeg?: number;
+    eyeYawMaxDeg?: number;
+    eyePitchMaxDeg?: number;
+  }) => unknown;
   /** Click nod (configurable gesture) enable / pick. */
   setClickAck?: (opts: { enabled?: boolean; gesture?: string }) => unknown;
 };
