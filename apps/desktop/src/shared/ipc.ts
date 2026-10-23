@@ -128,6 +128,24 @@ export const DEFAULT_COMPANION_DEBUG_SETTINGS: CompanionDebugSettings = {
   sceneMode: false,
 };
 
+/**
+ * A normalized OS-global cursor sample for a companion window.
+ *
+ * `x`/`y` are relative to the companion's own bounds: `0` at the left/top edge,
+ * `1` at the right/bottom; outside `[0,1]` is off-window to that side. `bounds`
+ * is carried so the renderer can reason about the window box without another IPC
+ * round-trip, and `outside` is a convenience flag (`true` when off-window).
+ */
+export type CompanionCursorCoords = {
+  contactId: string;
+  x: number;
+  y: number;
+  outside: boolean;
+  screenX: number;
+  screenY: number;
+  bounds: { x: number; y: number; width: number; height: number };
+};
+
 /** Coerce a persisted/patched companion-debug block field-by-field. */
 export function normalizeCompanionDebugSettings(raw: unknown): CompanionDebugSettings {
   if (!raw || typeof raw !== 'object') return { ...DEFAULT_COMPANION_DEBUG_SETTINGS };
@@ -1436,6 +1454,21 @@ export type NexusBridge = {
   companionSetAlwaysOnTop(contactId: string, onTop: boolean): Promise<boolean | null>;
   /** Whether a contact's companion is currently pinned (`null` when not open). */
   companionIsAlwaysOnTop(contactId: string): Promise<boolean | null>;
+  /**
+   * Subscribe to OS-global cursor coordinates for the companion window.
+   *
+   * The main process samples `screen.getCursorScreenPoint()` while any companion
+   * is open and pushes normalized coordinates relative to *that* companion's
+   * bounds, so the avatar's head/eye gaze follows the pointer anywhere on the
+   * display — not only while it is inside the window. Returns an unsubscribe fn.
+   *
+   * Normalized space: `x = 0` at the window's left edge, `1` at the right;
+   * `y = 0` at the top, `1` at the bottom. Values outside `[0,1]` mean the
+   * cursor is off to that side (the renderer widens the gaze cone accordingly).
+   */
+  onCompanionGlobalCursor(
+    listener: (coords: CompanionCursorCoords) => void,
+  ): () => void;
   // Desktop calendar (Phase 7b).
   calendarListEvents(input?: CalendarListInput): Promise<CalendarEventRow[]>;
   calendarUpcoming(): Promise<CalendarEventRow[]>;
@@ -1586,6 +1619,8 @@ export const IPC = {
   companionList: 'nexus:companion:list',
   companionSetAlwaysOnTop: 'nexus:companion:set-always-on-top',
   companionIsAlwaysOnTop: 'nexus:companion:is-always-on-top',
+  /** Push OS-global cursor samples to a companion window (main → renderer). */
+  companionGlobalCursor: 'nexus:companion:global-cursor',
   calendarListEvents: 'nexus:calendar:list-events',
   calendarUpcoming: 'nexus:calendar:upcoming',
   calendarCreateEvent: 'nexus:calendar:create-event',

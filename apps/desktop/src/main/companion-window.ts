@@ -135,6 +135,16 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     openContactIds(): string[] {
       return [...windows.keys()];
     },
+
+    /**
+     * Live companion windows with their `BrowserWindow` handles, for the
+     * OS-global cursor sampler (which reads per-window bounds each tick).
+     */
+    listWindows(): Array<{ contactId: string; window: BrowserWindow }> {
+      return [...windows.entries()]
+        .filter(([, win]) => !win.isDestroyed())
+        .map(([contactId, window]) => ({ contactId, window }));
+    },
   };
 }
 

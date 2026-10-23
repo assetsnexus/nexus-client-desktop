@@ -58,6 +58,7 @@ import { createNexusAppsProvider } from './nexus-apps.js';
 import { buildTrayMenu } from './tray-menu.js';
 import { createBonjourBackend } from './mdns-bonjour.js';
 import { createCompanionWindowManager, defaultCompanionPreloadPath } from './companion-window.js';
+import { createGlobalCursorTracker } from './global-cursor.js';
 import { createCalendarManager } from './calendar-manager.js';
 import { createMeetingsManager } from './meetings-manager.js';
 import { createLocalVoiceManager } from './local-voice-manager.js';
@@ -363,6 +364,20 @@ const companionWindows = createCompanionWindowManager({
       trustedUrls: trustedRendererUrls,
       openExternal: (url) => void openExternalUrl(url),
     }),
+  // A closed window (X button, or `companionClose`) must not leave the sampler
+  // running; stop it once the last companion is gone.
+  onClosed: () => {
+    if (companionWindows.listWindows().length === 0) companionCursor.stop();
+  },
+});
+
+/**
+ * OS-global cursor feed for companion avatars. Started when the first companion
+ * opens and stopped when the last one closes, so the ~30 Hz sampler never runs
+ * while nothing is on screen.
+ */
+const companionCursor = createGlobalCursorTracker({
+  listWindows: () => companionWindows.listWindows(),
 });
 
 // Phase 7b: desktop calendar. Region-node owns the calendar; this only calls it.
@@ -1366,10 +1381,17 @@ function registerIpc(): void {
   });
 
   // Immersive companion window (Phase 7a).
-  ipcMain.handle(IPC.companionOpen, (_e, launch: CompanionLaunch) =>
-    companionWindows.open(launch),
-  );
-  ipcMain.handle(IPC.companionClose, (_e, contactId: string) => companionWindows.close(contactId));
+  ipcMain.handle(IPC.companionOpen, (_e, launch: CompanionLaunch) => {
+    const result = companionWindows.open(launch);
+    // Start the OS-global cursor sampler as soon as a companion exists.
+    if (companionWindows.openContactIds().length > 0) companionCursor.start();
+    return result;
+  });
+  ipcMain.handle(IPC.companionClose, (_e, contactId: string) => {
+    const closed = companionWindows.close(contactId);
+    if (companionWindows.openContactIds().length === 0) companionCursor.stop();
+    return closed;
+  });
   ipcMain.handle(IPC.companionList, () => companionWindows.openContactIds());
   ipcMain.handle(IPC.companionSetAlwaysOnTop, (_e, contactId: string, onTop: boolean) =>
     companionWindows.setAlwaysOnTop(contactId, onTop === true),
@@ -1435,6 +1457,13 @@ function registerIpc(): void {
   });
 }
 
+// Dev-only: expose the Chrome DevTools Protocol on a local port so automated
+// checks can inspect the live renderer DOM/state. Gated on both `isDev` and an
+// explicit env value so it can never open in a packaged app.
+if (isDev && process.env.NEXUS_REMOTE_DEBUG) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.NEXUS_REMOTE_DEBUG);
+}
+
 app.whenReady().then(async () => {
   // Windows groups taskbar buttons by AppUserModelID and picks the taskbar icon
   // from the matching shortcut. Without this the window icon set below is
@@ -1476,6 +1505,7 @@ app.on('before-quit', () => {
   tray?.destroy();
   tray = null;
   companionWindows.closeAll();
+  companionCursor.stop();
   syncManager.stop();
   mountDaemon.dispose();
   void localVoiceManager.dispose();

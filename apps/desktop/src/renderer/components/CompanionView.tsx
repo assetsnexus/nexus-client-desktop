@@ -36,6 +36,7 @@ import {
   registerCharacterTools,
   type CompanionStageHost,
 } from '../companion/character-tools.js';
+import { companionCursorToNdc, softenOffWindowNdc } from '../companion/companion-cursor.js';
 import {
   bridge,
   type AuthState,
@@ -239,6 +240,26 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       registeredToolsRef.current = new Set(names);
     };
   }, [chat]);
+
+  // OS-global cursor feed: the main process samples `screen.getCursorScreenPoint`
+  // and pushes window-relative coords, so the avatar's head/eyes keep following
+  // the pointer even when it leaves this window and moves across the whole OS
+  // screen. Bound to the live 3D host; re-runs on host swap so a scene/flat swap
+  // re-enables the external pointer on the new controller.
+  useEffect(() => {
+    const host = avatarHost;
+    if (!host) return;
+    host.setExternalPointerEnabled?.(true);
+    const unsubscribe = bridge.onCompanionGlobalCursor((coords) => {
+      if (coords.contactId !== launch.contactId) return;
+      const ndc = softenOffWindowNdc(companionCursorToNdc(coords));
+      host.setPointerNdc?.(ndc.x, ndc.y);
+    });
+    return () => {
+      unsubscribe();
+      host.setExternalPointerEnabled?.(false);
+    };
+  }, [avatarHost, launch.contactId]);
 
   // Cycle status gestures while the agent is working (only when the editor is on).
   useAgentStatusMotions({
@@ -557,7 +578,19 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
           flexDirection: chatOpen ? 'row' : 'column',
         }}
       >
-        <div style={{ flex: chatOpen ? '0 0 60%' : 1, minWidth: 0, minHeight: 0 }}>
+        <div
+          style={{
+            flex: chatOpen ? '0 0 60%' : 1,
+            minWidth: 0,
+            minHeight: 0,
+            // Flex column so the voice surface's `flex: 1` chain (voice →
+            // pane → avatar pane → canvas) gets a definite height. As a plain
+            // block this wrapper let the 3D pane collapse to content height.
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+          }}
+        >
           {error ? (
             <p style={{ padding: 24, color: '#f2a1a1' }}>{error}</p>
           ) : !identity ? (

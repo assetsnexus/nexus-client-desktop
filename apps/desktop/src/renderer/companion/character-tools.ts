@@ -49,6 +49,12 @@ export type CompanionStageHost = CharacterToolHostLike & {
   }>;
   listGestures?: () => string[];
   onAction?: (listener: (ev: unknown) => void) => () => void;
+  /**
+   * OS-global cursor feed: push a gaze NDC and route gaze through the external
+   * feed so the avatar follows the pointer outside the window.
+   */
+  setPointerNdc?: (x: number, y: number) => void;
+  setExternalPointerEnabled?: (on: boolean) => void;
 };
 
 export type ToolResultLike = {

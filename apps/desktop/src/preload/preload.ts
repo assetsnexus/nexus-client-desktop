@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import { IPC, type CertificatePromptInfo, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
+import { IPC, type CertificatePromptInfo, type CompanionCursorCoords, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
 
 const bridge: NexusBridge = {
   getVersion: () => ipcRenderer.invoke(IPC.version),
@@ -164,6 +164,16 @@ const bridge: NexusBridge = {
     ipcRenderer.invoke(IPC.companionSetAlwaysOnTop, contactId, onTop),
   companionIsAlwaysOnTop: (contactId) =>
     ipcRenderer.invoke(IPC.companionIsAlwaysOnTop, contactId),
+  /**
+   * Main samples the OS-global cursor while a companion is open and pushes a
+   * normalized sample per frame-ish tick. Renderer-only subscription; the
+   * unsubscribe removes the IPC listener and asks main to stop the sampler.
+   */
+  onCompanionGlobalCursor: (listener) => {
+    const handler = (_e: unknown, coords: CompanionCursorCoords) => listener(coords);
+    ipcRenderer.on(IPC.companionGlobalCursor, handler);
+    return () => ipcRenderer.removeListener(IPC.companionGlobalCursor, handler);
+  },
   calendarListEvents: (input) => ipcRenderer.invoke(IPC.calendarListEvents, input),
   calendarUpcoming: () => ipcRenderer.invoke(IPC.calendarUpcoming),
   calendarCreateEvent: (input) => ipcRenderer.invoke(IPC.calendarCreateEvent, input),
