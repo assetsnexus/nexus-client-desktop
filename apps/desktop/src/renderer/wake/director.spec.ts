@@ -240,4 +240,28 @@ describe('createWakeDirector', () => {
     expect(director.getState().listening).toBe(false);
     expect(director.getState().activePhrases).toEqual([]);
   });
+
+  it('streams the latest on-device transcript into live state', async () => {
+    const { director } = makeDirector({
+      settings: settings({ enabled: true, bindings: [binding('a')] }),
+    });
+    await director.start();
+    expect(director.getState().transcript).toBeNull();
+    director.noteTranscript('  hey jarvis open the door  ');
+    expect(director.getState().transcript).toBe('hey jarvis open the door');
+    // Blank updates are ignored so the caption is not wiped by noise.
+    director.noteTranscript('   ');
+    expect(director.getState().transcript).toBe('hey jarvis open the door');
+  });
+
+  it('clears the transcript when listening stops', async () => {
+    const { director } = makeDirector({
+      settings: settings({ enabled: true, bindings: [binding('a')] }),
+    });
+    await director.start();
+    director.noteTranscript('hello there');
+    expect(director.getState().transcript).toBe('hello there');
+    director.stop();
+    expect(director.getState().transcript).toBeNull();
+  });
 });

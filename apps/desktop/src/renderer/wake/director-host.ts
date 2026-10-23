@@ -50,6 +50,8 @@ function getSttHub(sampleRate: number): SttPhraseHub {
     sttHub = createSttPhraseHub({
       sampleRate,
       transcribe: (pcm, rate) => bridge.wakeTranscribeLocal({ pcm, sampleRate: rate }),
+      // Stream what was actually heard into the bottom bar (UI-only).
+      onTranscript: (text) => singleton?.noteTranscript(text),
     });
   }
   return sttHub;

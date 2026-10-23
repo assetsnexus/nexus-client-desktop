@@ -333,6 +333,12 @@ export type WakeListenState = {
   activePhrases: string[];
   /** Smoothed input level 0..1, for the waveform. */
   level: number;
+  /**
+   * The most recent on-device speech recognition result (the words the wake
+   * engine actually transcribed), so the bottom bar can stream what was heard
+   * and highlight the wake word inside it. Null before the first segment.
+   */
+  transcript: string | null;
   /** Last detection, so the UI can flash. */
   lastDetection: { phrase: string; agentId: string | null; at: number } | null;
   /** Non-fatal reason when listening is desired but not possible. */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  annotateTranscriptTokens,
   firstMatchingPhraseIndex,
   normalizePhraseText,
   transcriptAddressesPhrase,
@@ -49,5 +50,39 @@ describe('firstMatchingPhraseIndex', () => {
 
   it('returns -1 when nothing matches', () => {
     expect(firstMatchingPhraseIndex('hello world', ['bob', 'alice'])).toBe(-1);
+  });
+});
+
+describe('annotateTranscriptTokens', () => {
+  it('preserves original casing/punctuation and flags matched words', () => {
+    expect(annotateTranscriptTokens('Hey Bob, do this', ['hey bob'])).toEqual([
+      { text: 'Hey', wake: true },
+      { text: 'Bob,', wake: true },
+      { text: 'do', wake: false },
+      { text: 'this', wake: false },
+    ]);
+  });
+
+  it('highlights every word of a multi-word phrase', () => {
+    const tokens = annotateTranscriptTokens('please hey jarvis now', ['hey jarvis']);
+    expect(tokens.filter((t) => t.wake).map((t) => t.text)).toEqual(['hey', 'jarvis']);
+  });
+
+  it('highlights a substring word only when it is a whole word', () => {
+    expect(annotateTranscriptTokens('a bobcat appeared', ['bob']).some((t) => t.wake)).toBe(false);
+  });
+
+  it('drops punctuation-only words from the visible caption', () => {
+    const tokens = annotateTranscriptTokens('hello -- world', ['bob']);
+    expect(tokens.map((t) => t.text)).toEqual(['hello', 'world']);
+  });
+
+  it('flags nothing when no phrase matches', () => {
+    const tokens = annotateTranscriptTokens('good morning', ['hey jarvis']);
+    expect(tokens.every((t) => !t.wake)).toBe(true);
+  });
+
+  it('returns [] for empty input', () => {
+    expect(annotateTranscriptTokens('   ', ['bob'])).toEqual([]);
   });
 });

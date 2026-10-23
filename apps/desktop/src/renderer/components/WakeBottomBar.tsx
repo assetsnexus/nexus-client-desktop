@@ -14,6 +14,7 @@
 import type { CSSProperties } from 'react';
 import { useWakeState } from '../wake/director-host.js';
 import { MicToggleBar } from './MicToggleBar.js';
+import { LiveTranscript } from './LiveTranscript.js';
 
 const bar: CSSProperties = {
   display: 'flex',
@@ -79,6 +80,10 @@ export function WakeBottomBar() {
       <span style={{ color: '#e8eef4', fontWeight: 600 }}>
         {live ? 'Listening for wake words' : 'Wake words idle'}
       </span>
+
+      {/* Live on-device STT caption, immediately right of the status: streams the
+          words the wake engine heard and highlights any armed wake word. */}
+      <LiveTranscript />
 
       <div style={meterTrack} aria-hidden title="Microphone level">
         <div style={meterFill(state.level)} />

@@ -103,6 +103,7 @@ const DEFAULT_STATE: WakeListenState = {
   listening: false,
   activePhrases: [],
   level: 0,
+  transcript: null,
   lastDetection: null,
   message: null,
 };
@@ -128,6 +129,12 @@ export type WakeDirector = {
   reconcileNow(): Promise<void>;
   /** Persist new settings (used by the settings UI) and reload. */
   saveSettings(next: WakeSettings): Promise<WakeSettings>;
+  /**
+   * Record the latest on-device speech-recognition result so the bottom bar can
+   * stream the words it heard and highlight the wake word. Called by the STT
+   * hub; local-only (drives the UI, never the IPC state report).
+   */
+  noteTranscript(text: string): void;
   getState(): WakeListenState;
 };
 
@@ -144,6 +151,8 @@ export function createWakeDirector(options: WakeDirectorOptions) {
   let groups: MicGroup[] = [];
   let state: WakeListenState = { ...DEFAULT_STATE };
   let level = 0;
+  /** Latest on-device transcript, for the live caption. UI-only. */
+  let transcript: string | null = null;
   let running = false;
   /** Bindings whose detector fired this activation, so one phrase fires once. */
   const firedThisActivation = new Set<string>();
@@ -194,6 +203,7 @@ export function createWakeDirector(options: WakeDirectorOptions) {
       listening: running && anyMicActive && allArmed.length > 0,
       activePhrases,
       level,
+      transcript,
       ...(message !== undefined ? { message } : {}),
     });
   }
@@ -283,6 +293,8 @@ export function createWakeDirector(options: WakeDirectorOptions) {
     groups = [];
     for (const mic of extraMics.values()) mic.stop();
     running = false;
+    // A caption from the previous configuration would be stale: clear it now.
+    transcript = null;
 
     effectiveBindings = await computeEffectiveBindings(settings);
 
@@ -350,6 +362,7 @@ export function createWakeDirector(options: WakeDirectorOptions) {
       running = false;
       firedThisActivation.clear();
       level = 0;
+      transcript = null;
       refreshDerived(null);
     },
     async reload() {
@@ -358,6 +371,12 @@ export function createWakeDirector(options: WakeDirectorOptions) {
     },
     async reconcileNow() {
       await reconcile();
+    },
+    noteTranscript(text: string) {
+      const trimmed = (text ?? '').trim();
+      if (!trimmed) return;
+      // Local-only UI update: no IPC chatter for every recognized segment.
+      emitLocal({ transcript: trimmed });
     },
     async saveSettings(next) {
       settings = await options.bridge.wakeSetSettings(next);

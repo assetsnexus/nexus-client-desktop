@@ -78,3 +78,54 @@ export function firstMatchingPhraseIndex(
   }
   return best;
 }
+
+/** One display token of a live transcript; `wake` is true inside a matched phrase. */
+export type TranscriptToken = { text: string; wake: boolean };
+
+/**
+ * Split a transcript into display words and flag those that fall inside any
+ * matched phrase, so the UI can highlight the wake word in the live caption.
+ *
+ * The original word is preserved for display (casing/punctuation kept); matching
+ * runs on normalized tokens so "Bob," still matches the phrase "bob" and a
+ * multi-word phrase highlights every word it spans. Words that normalize to
+ * nothing (pure punctuation) are dropped from the visible caption.
+ */
+export function annotateTranscriptTokens(
+  transcript: string,
+  phrases: readonly string[],
+): TranscriptToken[] {
+  const raws = (transcript ?? '').split(/\s+/).filter(Boolean);
+  // Flatten each raw word into its normalized tokens, remembering which raw word
+  // each normalized token came from so a match maps back to a display word.
+  const normTokens: string[] = [];
+  const normToRaw: number[] = [];
+  raws.forEach((raw, index) => {
+    for (const token of normalizePhraseText(raw).tokens) {
+      normTokens.push(token);
+      normToRaw.push(index);
+    }
+  });
+  const wake = new Array<boolean>(raws.length).fill(false);
+  for (const phrase of phrases) {
+    const p = normalizePhraseText(phrase).tokens;
+    if (!p.length) continue;
+    for (let i = 0; i + p.length <= normTokens.length; i++) {
+      let hit = true;
+      for (let j = 0; j < p.length; j++) {
+        if (normTokens[i + j] !== p[j]) {
+          hit = false;
+          break;
+        }
+      }
+      if (!hit) continue;
+      for (let j = 0; j < p.length; j++) wake[normToRaw[i + j]!] = true;
+    }
+  }
+  const out: TranscriptToken[] = [];
+  raws.forEach((raw, index) => {
+    if (!normalizePhraseText(raw).tokens.length) return; // drop punctuation-only
+    out.push({ text: raw, wake: wake[index]! });
+  });
+  return out;
+}

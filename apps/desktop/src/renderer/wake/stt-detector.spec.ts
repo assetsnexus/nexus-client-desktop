@@ -38,6 +38,29 @@ describe('createSttPhraseHub', () => {
     expect(result.fired).toBe(true);
   });
 
+  it('reports every accepted transcript via onTranscript (live caption)', async () => {
+    const onTranscript = vi.fn();
+    const transcribe = vi.fn(async () => 'Hey Jarvis open the door');
+    const hub = createSttPhraseHub({ transcribe, sampleRate: 16_000, onTranscript });
+    const det = createSttPhraseDetector({ phrase: 'hey jarvis', hub });
+
+    feed((f, at) => det.push({ frame: f, at }), { frames: 30, amplitude: 0.2 });
+    feed((f, at) => det.push({ frame: f, at }), { frames: 30, amplitude: 0, startAt: 1000 });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onTranscript).toHaveBeenCalledWith('Hey Jarvis open the door');
+  });
+
+  it('does not report a transcript for silence-only audio', async () => {
+    const onTranscript = vi.fn();
+    const hub = createSttPhraseHub({ transcribe: async () => 'x', sampleRate: 16_000, onTranscript });
+    const det = createSttPhraseDetector({ phrase: 'bob', hub });
+    feed((f, at) => det.push({ frame: f, at }), { frames: 200, amplitude: 0 });
+    await Promise.resolve();
+    expect(onTranscript).not.toHaveBeenCalled();
+  });
+
   it('does not fire for an unrelated transcript', async () => {
     const transcribe = vi.fn(async () => 'totally unrelated speech');
     const hub = createSttPhraseHub({ transcribe, sampleRate: 16_000 });
