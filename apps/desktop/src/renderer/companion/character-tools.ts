@@ -55,6 +55,8 @@ export type CompanionStageHost = CharacterToolHostLike & {
    */
   setPointerNdc?: (x: number, y: number) => void;
   setExternalPointerEnabled?: (on: boolean) => void;
+  /** Click nod (configurable gesture) enable / pick. */
+  setClickAck?: (opts: { enabled?: boolean; gesture?: string }) => unknown;
 };
 
 export type ToolResultLike = {

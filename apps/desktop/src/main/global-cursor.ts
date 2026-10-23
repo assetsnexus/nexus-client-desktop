@@ -74,14 +74,20 @@ export function normalizeCursorToBounds(
  * even if it was a tiny hop across the edge).
  */
 export function shouldEmitCursorSample(
-  previous: { x: number; y: number; outside: boolean } | null,
-  next: { x: number; y: number; outside: boolean },
+  previous:
+    | { x: number; y: number; outside: boolean; withinWindow?: boolean; focused?: boolean }
+    | null,
+  next: { x: number; y: number; outside: boolean; withinWindow?: boolean; focused?: boolean },
   minMovePx = MIN_MOVE_PX,
   windowWidth = 1,
   windowHeight = 1,
 ): boolean {
   if (!previous) return true;
   if (previous.outside !== next.outside) return true;
+  // The gaze frame flips on the in-window / focus edges; the renderer needs both
+  // transitions even when the cursor barely moved across the boundary.
+  if (previous.withinWindow !== next.withinWindow) return true;
+  if (previous.focused !== next.focused) return true;
   const dx = Math.abs(next.x - previous.x) * windowWidth;
   const dy = Math.abs(next.y - previous.y) * windowHeight;
   return dx >= minMovePx || dy >= minMovePx;
@@ -101,7 +107,10 @@ export function createGlobalCursorTracker(options: GlobalCursorTrackerOptions) {
   const startTimer = options.setIntervalImpl ?? ((fn, ms) => setInterval(fn, ms));
   const stopTimer = options.clearIntervalImpl ?? ((h) => clearInterval(h));
   /** Last pushed sample per contact, for jitter suppression. */
-  const lastByContact = new Map<string, { x: number; y: number; outside: boolean }>();
+  const lastByContact = new Map<
+    string,
+    { x: number; y: number; outside: boolean; withinWindow: boolean; focused: boolean }
+  >();
   let handle: ReturnType<typeof setInterval> | null = null;
 
   function emit(): void {
@@ -115,21 +124,30 @@ export function createGlobalCursorTracker(options: GlobalCursorTrackerOptions) {
     for (const { contactId, window } of targets) {
       if (window.isDestroyed?.()) continue;
       const bounds = window.getBounds();
-      // Normalize to the display work area, not the window: the avatar must keep
-      // sweeping its gaze cone as the cursor crosses the whole screen. Fall back
-      // to the window box only if the display lookup fails.
+      // Normalize to the display work area, not the window: the renderer picks
+      // the final gaze frame (window vs screen) from `withinWindow` / `focused`.
+      // Fall back to the window box only if the display lookup fails.
       const area = getWorkArea(bounds) ?? bounds;
       const normalized = normalizeCursorToBounds(point, area);
+      const withinWindow =
+        point.x >= bounds.x &&
+        point.x <= bounds.x + bounds.width &&
+        point.y >= bounds.y &&
+        point.y <= bounds.y + bounds.height;
+      const focused = typeof window.isFocused === 'function' ? window.isFocused() : true;
+      const sample = { ...normalized, withinWindow, focused };
       const previous = lastByContact.get(contactId) ?? null;
-      if (!shouldEmitCursorSample(previous, normalized, MIN_MOVE_PX, area.width, area.height)) {
+      if (!shouldEmitCursorSample(previous, sample, MIN_MOVE_PX, area.width, area.height)) {
         continue;
       }
-      lastByContact.set(contactId, normalized);
+      lastByContact.set(contactId, sample);
       const payload: CompanionCursorCoords = {
         contactId,
         x: normalized.x,
         y: normalized.y,
         outside: normalized.outside,
+        withinWindow,
+        focused,
         screenX: point.x,
         screenY: point.y,
         bounds: { ...bounds },

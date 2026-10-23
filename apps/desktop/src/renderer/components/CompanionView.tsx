@@ -40,6 +40,7 @@ import { companionCursorToGazeNdc } from '../companion/companion-cursor.js';
 import {
   bridge,
   type AuthState,
+  type CompanionAvatarSettings,
   type CompanionDebugSettings,
   type CompanionLaunch,
   type DesktopConnectionConfig,
@@ -196,6 +197,8 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   const [avatarHost, setAvatarHost] = useState<CompanionStageHost | null>(null);
   // Debug surfaces: from Settings, force-enabled by `?companionDebug=1`.
   const [debug, setDebug] = useState<CompanionDebugSettings | null>(null);
+  // User-facing avatar behaviour (click nod). Defaults ON when settings are absent.
+  const [avatarSettings, setAvatarSettings] = useState<CompanionAvatarSettings | null>(null);
   const forcedDebug = useMemo(() => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('companionDebug') === '1', []);
   const [motionFeedOpen, setMotionFeedOpen] = useState(false);
   const [gestureTestOpen, setGestureTestOpen] = useState(false);
@@ -206,7 +209,10 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   useEffect(() => {
     void bridge.getConnectionConfig().then(setConnection);
     void bridge.getAuthState().then(setAuth);
-    void bridge.getUiSettings().then((ui) => setDebug(ui.companionDebug));
+    void bridge.getUiSettings().then((ui) => {
+      setDebug(ui.companionDebug);
+      setAvatarSettings(ui.companionAvatar);
+    });
   }, []);
 
   // Debug surfaces effectively on when the Settings toggle says so, or a
@@ -242,7 +248,7 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   }, [chat]);
 
   // OS-global cursor feed: the main process samples `screen.getCursorScreenPoint`
-  // and pushes window-relative coords, so the avatar's head/eyes keep following
+  // and pushes display-normalized coords, so the avatar's head/eyes keep following
   // the pointer even when it leaves this window and moves across the whole OS
   // screen. Bound to the live 3D host; re-runs on host swap so a scene/flat swap
   // re-enables the external pointer on the new controller.
@@ -260,6 +266,17 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       host.setExternalPointerEnabled?.(false);
     };
   }, [avatarHost, launch.contactId]);
+
+  // Click nod: the avatar nods (configurable gesture) when the user clicks the
+  // companion. Bound to the live host so a scene/flat swap re-applies it.
+  useEffect(() => {
+    const host = avatarHost;
+    if (!host?.setClickAck) return;
+    host.setClickAck({
+      enabled: avatarSettings?.clickNod !== false,
+      gesture: avatarSettings?.clickNodGesture,
+    });
+  }, [avatarHost, avatarSettings?.clickNod, avatarSettings?.clickNodGesture]);
 
   // Cycle status gestures while the agent is working (only when the editor is on).
   useAgentStatusMotions({

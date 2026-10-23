@@ -104,6 +104,38 @@ export type UiSettings = {
    * `?companionDebug=1` in the companion window URL.
    */
   companionDebug: CompanionDebugSettings;
+  /** Companion avatar behaviour (non-debug): click nod, etc. */
+  companionAvatar: CompanionAvatarSettings;
+};
+
+/**
+ * Companion avatar behaviour settings (user-facing).
+ */
+export type CompanionAvatarSettings = {
+  /** Nod (configurable gesture) when the user clicks anywhere in the companion. */
+  clickNod: boolean;
+  /** Gesture clip id played on click; defaults to the bundled `nod`. */
+  clickNodGesture: string;
+};
+
+export const DEFAULT_COMPANION_AVATAR_SETTINGS: CompanionAvatarSettings = {
+  clickNod: true,
+  clickNodGesture: 'nod',
+};
+
+/** Coerce a persisted/patched companion-avatar block field-by-field. */
+export function normalizeCompanionAvatarSettings(raw: unknown): CompanionAvatarSettings {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_COMPANION_AVATAR_SETTINGS };
+  const rec = raw as Record<string, unknown>;
+  const gesture =
+    typeof rec.clickNodGesture === 'string' && rec.clickNodGesture.trim()
+      ? rec.clickNodGesture.trim()
+      : DEFAULT_COMPANION_AVATAR_SETTINGS.clickNodGesture;
+  return {
+    // Default ON: a nod on click is the expected lively default; explicit false disables.
+    clickNod: rec.clickNod !== false,
+    clickNodGesture: gesture,
+  };
 };
 
 /**
@@ -132,21 +164,27 @@ export const DEFAULT_COMPANION_DEBUG_SETTINGS: CompanionDebugSettings = {
  * A normalized OS-global cursor sample for a companion window.
  *
  * `x`/`y` are relative to the **display work area the companion sits on** —
- * `0` at the left/top edge of the screen, `1` at the right/bottom, `0.5` at
- * screen center. This is the frame the avatar reasons in: the companion window
- * itself is a small box on a large screen, so window-relative coords would
- * saturate the gaze the moment the cursor left the window. Screen-relative
- * coords instead sweep the gaze across its full range as the pointer crosses the
- * display, and `outside` flags a cursor on a different monitor / off the screen.
+ * `0` at the left/top edge of the screen, `1` at the right/bottom. This is a
+ * stable, monitor-relative frame; the renderer re-normalizes into whichever gaze
+ * frame is active (window box while the cursor is inside, whole screen once it
+ * leaves — see `companionCursorToGazeNdc`).
  *
  * `bounds` (window) and `display` (work area) are carried so the renderer can
- * reason about both boxes without another IPC round-trip.
+ * build both frames without another IPC round-trip. `focused` and `withinWindow`
+ * let it choose between them: inside the webview the gaze maps across the window
+ * box, so head motion stays lively; once the cursor leaves (or the window is
+ * unfocused) it maps across the whole screen.
  */
 export type CompanionCursorCoords = {
   contactId: string;
   x: number;
   y: number;
+  /** Cursor lies outside the display work area. */
   outside: boolean;
+  /** Cursor lies inside the companion window bounds. */
+  withinWindow: boolean;
+  /** Companion window currently has OS focus. */
+  focused: boolean;
   screenX: number;
   screenY: number;
   bounds: { x: number; y: number; width: number; height: number };

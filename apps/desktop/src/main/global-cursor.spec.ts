@@ -62,9 +62,12 @@ describe('shouldEmitCursorSample', () => {
     expect(shouldEmitCursorSample(inside, next, 1, 400, 300)).toBe(true);
   });
 
-  it('always emits on an inside/outside transition even if nearly stationary', () => {
-    const justOutside = { x: -0.0001, y: 0.5, outside: true };
-    expect(shouldEmitCursorSample(inside, justOutside, 5, 400, 300)).toBe(true);
+  it('emits when focus or the in-window edge flips, even without movement', () => {
+    const inside = { x: 0.5, y: 0.5, outside: false, withinWindow: true, focused: true };
+    expect(shouldEmitCursorSample(inside, { ...inside, focused: false }, 5, 400, 300)).toBe(true);
+    expect(shouldEmitCursorSample(inside, { ...inside, withinWindow: false }, 5, 400, 300)).toBe(
+      true,
+    );
   });
 });
 

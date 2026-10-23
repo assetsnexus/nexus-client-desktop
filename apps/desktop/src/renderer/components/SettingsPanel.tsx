@@ -15,6 +15,7 @@ import {
   type AppLockSettings,
   type AppLockState,
   type AssetAgentDiscoverySnapshot,
+  type CompanionAvatarSettings,
   type CompanionDebugSettings,
   type DesktopConnectionConfig,
   type LocalCommandSkill,
@@ -160,11 +161,14 @@ export function SettingsPanel({
 
   const [companionDebug, setCompanionDebug] = useState<CompanionDebugSettings | null>(null);
   const [companionDebugBusy, setCompanionDebugBusy] = useState(false);
+  const [companionAvatar, setCompanionAvatar] = useState<CompanionAvatarSettings | null>(null);
+  const [companionAvatarBusy, setCompanionAvatarBusy] = useState(false);
 
   useEffect(() => {
     void bridge.getUiSettings().then((ui) => {
       setNotifications(ui.notifications);
       setCompanionDebug(ui.companionDebug);
+      setCompanionAvatar(ui.companionAvatar);
     });
     void bridge.appLockGetState().then(setAppLock).catch(() => setAppLock(null));
   }, []);
@@ -230,6 +234,22 @@ export function SettingsPanel({
       }
     },
     [companionDebug],
+  );
+
+  const patchCompanionAvatar = useCallback(
+    async (patch: Partial<CompanionAvatarSettings>) => {
+      if (!companionAvatar) return;
+      setCompanionAvatarBusy(true);
+      try {
+        const ui = await bridge.setUiSettings({
+          companionAvatar: { ...companionAvatar, ...patch },
+        });
+        setCompanionAvatar(ui.companionAvatar);
+      } finally {
+        setCompanionAvatarBusy(false);
+      }
+    },
+    [companionAvatar],
   );
 
   const sendTestNotification = useCallback(async () => {
@@ -541,6 +561,55 @@ export function SettingsPanel({
                 </button>
               ) : null}
             </div>
+          </>
+        ) : (
+          <p style={{ color: '#6b7784', fontSize: 12 }}>Loading…</p>
+        )}
+      </section>
+
+      <section style={section}>
+        <h2 style={{ margin: 0, fontSize: 16 }}>Companion avatar</h2>
+        <p style={{ margin: 0, color: '#6b7784', fontSize: 12 }}>
+          How the 3D agent companion behaves. The avatar follows your cursor while it stays in the
+          companion window, and keeps tracking across the whole screen once the pointer leaves it.
+        </p>
+        {companionAvatar ? (
+          <>
+            <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={companionAvatar.clickNod}
+                disabled={companionAvatarBusy}
+                onChange={(e) => void patchCompanionAvatar({ clickNod: e.target.checked })}
+              />
+              <span style={{ color: '#e8eef4' }}>
+                Nod when clicked
+                <span style={{ color: '#6b7784' }}>
+                  {' '}
+                  — play a nod gesture when you click the companion.
+                </span>
+              </span>
+            </label>
+            <label style={field}>
+              <span style={{ color: '#e8eef4' }}>Click nod gesture</span>
+              <input
+                type="text"
+                value={companionAvatar.clickNodGesture}
+                disabled={companionAvatarBusy || !companionAvatar.clickNod}
+                onChange={(e) => void patchCompanionAvatar({ clickNodGesture: e.target.value })}
+                placeholder="nod"
+                style={{
+                  background: '#0d1218',
+                  color: '#e8eef4',
+                  border: '1px solid #2a3542',
+                  borderRadius: 6,
+                  padding: '6px 8px',
+                }}
+              />
+              <span style={{ color: '#6b7784', fontSize: 11 }}>
+                Clip id from the agent's gesture pack (e.g. <code>nod</code>, <code>agree</code>).
+              </span>
+            </label>
           </>
         ) : (
           <p style={{ color: '#6b7784', fontSize: 12 }}>Loading…</p>

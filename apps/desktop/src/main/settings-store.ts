@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { app } from 'electron';
 import { resolveConnectionConfig, type DesktopConnectionConfig } from '@nexus/node-core';
-import { DEFAULT_NOTIFICATION_SETTINGS, normalizeCompanionDebugSettings, type NotificationSettings, type CompanionDebugSettings } from '../shared/ipc.js';
+import { DEFAULT_NOTIFICATION_SETTINGS, normalizeCompanionDebugSettings, normalizeCompanionAvatarSettings, DEFAULT_COMPANION_AVATAR_SETTINGS, type NotificationSettings, type CompanionDebugSettings, type CompanionAvatarSettings } from '../shared/ipc.js';
 import { DEFAULT_APP_LOCK_SETTINGS, normalizeAppLockSettings, type AppLockSettings } from '../shared/app-lock.js';
 import {
   DEFAULT_TRAY_APP_SETTINGS,
@@ -35,6 +35,8 @@ export type UiSettings = {
   trayApps: TrayAppSettings;
   /** Companion 3D debug surfaces; re-validated on every read. */
   companionDebug: CompanionDebugSettings;
+  /** Companion avatar behaviour (click nod); re-validated on every read. */
+  companionAvatar: CompanionAvatarSettings;
 };
 
 export { DEFAULT_NOTIFICATION_SETTINGS };
@@ -80,6 +82,9 @@ export function createSettingsStore(filePath?: string): SettingsStore {
       // non-http(s) custom URL into the tray.
       trayApps: normalizeTrayAppSettings(ui.trayApps ?? DEFAULT_TRAY_APP_SETTINGS),
       companionDebug: normalizeCompanionDebugSettings(ui.companionDebug),
+      companionAvatar: normalizeCompanionAvatarSettings(
+        ui.companionAvatar ?? DEFAULT_COMPANION_AVATAR_SETTINGS,
+      ),
     };
   };
 

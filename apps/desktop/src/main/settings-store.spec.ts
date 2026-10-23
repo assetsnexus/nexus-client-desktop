@@ -43,4 +43,35 @@ describe('createSettingsStore — ui settings', () => {
     expect(next.locale).toBe('de');
     expect(next.loginCountry).toBe('DE');
   });
+
+  it('defaults companion avatar click-nod ON with the `nod` gesture', () => {
+    const ui = createSettingsStore(tempFile()).getUiSettings();
+    expect(ui.companionAvatar).toEqual({ clickNod: true, clickNodGesture: 'nod' });
+  });
+
+  it('persists a disabled companion click-nod and a custom gesture', () => {
+    const path = tempFile();
+    const store = createSettingsStore(path);
+    const next = store.setUiSettings({
+      companionAvatar: { clickNod: false, clickNodGesture: 'agree' },
+    });
+    expect(next.companionAvatar).toEqual({ clickNod: false, clickNodGesture: 'agree' });
+    expect(createSettingsStore(path).getUiSettings().companionAvatar).toEqual({
+      clickNod: false,
+      clickNodGesture: 'agree',
+    });
+  });
+
+  it('repairs a hand-edited companion avatar block (blank gesture, bad types)', () => {
+    const path = tempFile();
+    writeFileSync(
+      path,
+      JSON.stringify({ ui: { companionAvatar: { clickNod: 'yes', clickNodGesture: '  ' } } }),
+      'utf8',
+    );
+    expect(createSettingsStore(path).getUiSettings().companionAvatar).toEqual({
+      clickNod: true,
+      clickNodGesture: 'nod',
+    });
+  });
 });
