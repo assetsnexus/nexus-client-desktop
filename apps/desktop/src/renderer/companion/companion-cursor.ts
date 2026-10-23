@@ -7,19 +7,24 @@
  * (cursor is inside the companion box) and `focused` (the companion has OS
  * focus).
  *
- * Two gaze scales, chosen per sample:
+ * Two gaze scales, chosen per sample by focus:
  *
- * - **inside** (cursor within the window **and** the window focused): map across
- *   the *window box*, re-centred on the window centre. This is the lively,
- *   sensitive scale — the head follows small in-window moves.
- * - **outside** (cursor left the window, or the window is unfocused): map across
- *   the *whole display*, re-centred on the window centre and scaled per-direction
- *   so the screen edges reach exactly `±1`. Because the gaze controller clamps
- *   NDC to `[-1, 1]`, mapping the edges to `±1` is what lets the head/eyes sweep
- *   their full range as the pointer crosses the screen.
+ * - **focused** (the companion has OS focus): a *window-anchored* frame. The
+ *   cursor maps across the window box, so small in-window moves are lively, and
+ *   it keeps growing smoothly past the window edge until the far screen edge
+ *   reaches `±1`. The head therefore keeps turning as the cursor roams the rest
+ *   of the display instead of snapping/pinning at the window boundary.
+ * - **unfocused**: a *whole-display* frame, re-centred on the window, scaled per
+ *   direction so the screen edges reach exactly `±1`. Gentler, for when the
+ *   companion is not the active surface.
  *
- * Both frames re-centre on the window so a cursor over the avatar reads as
- * "looking at the camera" (neutral). Pure + dependency-free for unit testing.
+ * The key invariant: each frame is **continuous** across the window boundary.
+ * The previous two-frame switch (window box while inside, screen box the moment
+ * the cursor crossed the edge) jumped from `±1` to `±0.15`, which snapped the
+ * head. Here the window edge maps to {@link FOCUSED_WINDOW_GAIN} of full range
+ * and the outside portion continues from there to `±1` at the screen edge.
+ *
+ * Pure + dependency-free for unit testing.
  */
 
 import type { CompanionCursorCoords } from '../../shared/ipc.js';
@@ -28,33 +33,54 @@ export type CompanionCursorNdc = { x: number; y: number };
 
 const clamp = (n: number, min: number, max: number): number => Math.min(max, Math.max(min, n));
 
+/**
+ * Fraction of the gaze cone reached at the window edge while focused. Leaves
+ * head-room (`1 - FOCUSED_WINDOW_GAIN`) so the head keeps turning smoothly as
+ * the cursor crosses the rest of the display rather than pinning at the window
+ * boundary. 0.5 keeps the in-window motion lively while giving the whole-screen
+ * roam real travel.
+ */
+const FOCUSED_WINDOW_GAIN = 0.5;
+
 function centerFraction(origin: number, extent: number, size: number): number {
   if (!size) return 0.5;
   return (origin + extent / 2) / size;
 }
 
 /**
- * Rescale a signed offset from the window center so the nearer screen edge on
- * that side reaches ±1 (and anything past it clamps). `reach` is the
- * center-to-edge distance in the same normalized units; a zero/degenerate reach
- * collapses to a full turn so tracking still works on odd geometry.
+ * One axis of the focused frame. Inside the window box: linear to
+ * `±FOCUSED_WINDOW_GAIN` at the edge (lively). Outside: continue smoothly from
+ * `±FOCUSED_WINDOW_GAIN` at the window edge to `±1` at the screen edge.
+ * Continuous + monotonic across the boundary. `reach` is the center→screen-edge
+ * distance on the cursor's side, in the same normalized units as `offset`.
  */
-function rescale(offset: number, reach: number): number {
-  if (!(reach > 1e-4)) return offset === 0 ? 0 : Math.sign(offset);
-  return clamp(offset / reach, -1, 1);
+function focusedAxis(offset: number, half: number, reach: number): number {
+  const a = Math.abs(offset);
+  const sign = offset < 0 ? -1 : 1;
+  if (half > 1e-4 && a <= half) {
+    return clamp((offset / half) * FOCUSED_WINDOW_GAIN, -1, 1);
+  }
+  const span = Math.max(reach - half, 1e-4);
+  const t = Math.min(Math.max(a - half, 0) / span, 1);
+  const mag = FOCUSED_WINDOW_GAIN + (1 - FOCUSED_WINDOW_GAIN) * t;
+  return sign * clamp(mag, 0, 1);
 }
 
-/** Window-box frame: cursor position relative to the window, inverted to NDC. */
-function windowFrame(coords: CompanionCursorCoords): CompanionCursorNdc {
-  const left = coords.bounds.x / (coords.display.width || 1);
-  const top = coords.bounds.y / (coords.display.height || 1);
-  const w = coords.bounds.width / (coords.display.width || 1);
-  const h = coords.bounds.height / (coords.display.height || 1);
-  const cx = left + w / 2;
-  const cy = top + h / 2;
+/** Window-anchored, continuous frame used while the companion is focused. */
+function focusedFrame(coords: CompanionCursorCoords): CompanionCursorNdc {
+  const width = coords.display.width || 1;
+  const height = coords.display.height || 1;
+  const cx = centerFraction(coords.bounds.x - coords.display.x, coords.bounds.width, width);
+  const cy = centerFraction(coords.bounds.y - coords.display.y, coords.bounds.height, height);
+  const halfX = coords.bounds.width / 2 / width;
+  const halfY = coords.bounds.height / 2 / height;
+  const offsetX = coords.x - cx;
+  // Screen Y grows downward; flip so up is positive NDC.
+  const offsetY = -(coords.y - cy);
   return {
-    x: rescale(coords.x - cx, w / 2),
-    y: rescale(-(coords.y - cy), h / 2),
+    // Center→edge distances: left/right for X, down/up for the flipped Y.
+    x: focusedAxis(offsetX, halfX, offsetX < 0 ? Math.max(cx, 1e-4) : Math.max(1 - cx, 1e-4)),
+    y: focusedAxis(offsetY, halfY, offsetY < 0 ? Math.max(1 - cy, 1e-4) : Math.max(cy, 1e-4)),
   };
 }
 
@@ -68,18 +94,17 @@ function screenFrame(coords: CompanionCursorCoords): CompanionCursorNdc {
   // Screen Y grows downward; flip so up is positive NDC.
   const offsetY = -(coords.y - cy);
   return {
-    x: rescale(offsetX, offsetX < 0 ? cx : 1 - cx),
-    y: rescale(offsetY, offsetY < 0 ? 1 - cy : cy),
+    x: clamp(offsetX / (offsetX < 0 ? Math.max(cx, 1e-4) : Math.max(1 - cx, 1e-4)), -1, 1),
+    y: clamp(offsetY / (offsetY < 0 ? Math.max(1 - cy, 1e-4) : Math.max(cy, 1e-4)), -1, 1),
   };
 }
 
 /**
- * Coords → gaze NDC. Picks the window-box scale while the cursor is inside a
- * focused companion, otherwise the whole-display scale.
+ * Coords → gaze NDC. Uses the continuous window-anchored frame while the
+ * companion is focused, otherwise the whole-display frame.
  */
 export function companionCursorToNdc(coords: CompanionCursorCoords): CompanionCursorNdc {
-  const inside = coords.withinWindow !== false && coords.focused !== false;
-  return inside ? windowFrame(coords) : screenFrame(coords);
+  return coords.focused === false ? screenFrame(coords) : focusedFrame(coords);
 }
 
 /** Raw coords → gaze NDC in one step (already clamped to `[-1, 1]`). */
