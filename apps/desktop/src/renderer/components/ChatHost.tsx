@@ -9,7 +9,7 @@ import {
 } from '@nexus/chat-react';
 import '@nexus/chat-react/style.css';
 import { bridge, type AuthState, type DesktopConnectionConfig, type ToolsConfig } from '../bridge.js';
-import { DEFAULT_DESKTOP_TOOLS, localCommandTools } from '../tools/descriptors.js';
+import { DEFAULT_DESKTOP_TOOLS, AUDIO_TOOLS, localCommandTools } from '../tools/descriptors.js';
 import { setToolAuditContext, resolveToolAuditContext } from '../tools/audit-context.js';
 import { createIncomingWatcher, resolveSenderName } from '../notifications/incoming.js';
 import { createWakeChatRouter } from '../wake/router.js';
@@ -85,7 +85,7 @@ export function ChatHost({
   );
 
   const registeredTools = useMemo(
-    () => [...DEFAULT_DESKTOP_TOOLS, ...localCommandTools(tools?.localCommands ?? [])],
+    () => [...DEFAULT_DESKTOP_TOOLS, ...AUDIO_TOOLS, ...localCommandTools(tools?.localCommands ?? [])],
     [tools],
   );
 

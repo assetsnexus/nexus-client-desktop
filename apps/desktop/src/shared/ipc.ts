@@ -24,6 +24,7 @@ import type {
   WakeEngineKind,
 } from './wake.js';
 import type { AppLockSettings, AppLockState } from './app-lock.js';
+import type { AudioSettings } from './audio.js';
 import type { LogoutChoice, LogoutReport, LogoutStep } from './logout.js';
 import type {
   InstalledNexusApp,
@@ -106,6 +107,8 @@ export type UiSettings = {
   companionDebug: CompanionDebugSettings;
   /** Companion avatar behaviour (non-debug): click nod, etc. */
   companionAvatar: CompanionAvatarSettings;
+  /** Audio device preferences: primary/allowed speakers + primary/wake microphones. */
+  audio: AudioSettings;
 };
 
 /**

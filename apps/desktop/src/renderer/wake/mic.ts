@@ -44,6 +44,12 @@ export type WakeMicOptions = {
   frameSamples?: number;
   /** Preferred capture rate; the browser resamples the mic to this (default 16000). */
   preferredSampleRate?: number;
+  /**
+   * Specific input device to capture from (a `MediaDeviceInfo.deviceId`). Omitted
+   * or `null` uses the OS default microphone. Used to listen for wake words on
+   * 0..n extra microphones in addition to the primary dictation mic.
+   */
+  deviceId?: string | null;
 };
 
 const DEFAULT_SAMPLE_RATE = 16_000;
@@ -135,7 +141,10 @@ export function createWakeMic(opts: WakeMicOptions = {}): WakeMicSource {
     },
     async start(handler) {
       const g = globalThis as unknown as AudioGlobals;
-      const getUserMedia = g.navigator?.mediaDevices?.getUserMedia;
+      const mediaDevices = g.navigator?.mediaDevices;
+      // Bind to `mediaDevices`: extracting the method first loses its `this`, and
+      // Chromium throws "Illegal invocation" for a detached `getUserMedia` call.
+      const getUserMedia = mediaDevices?.getUserMedia?.bind(mediaDevices);
       const Ctor = g.AudioContext || g.webkitAudioContext;
       if (!getUserMedia) {
         message = 'Microphone capture is unavailable on this device.';
@@ -149,7 +158,13 @@ export function createWakeMic(opts: WakeMicOptions = {}): WakeMicSource {
       }
       try {
         stream = await getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            // A specific wake-listening microphone, or the OS default when unset.
+            ...(opts.deviceId ? { deviceId: { exact: opts.deviceId } } : {}),
+          },
         });
         context = makeContext(Ctor);
         const source = context.createMediaStreamSource(stream);

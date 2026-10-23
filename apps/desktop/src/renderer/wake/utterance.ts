@@ -44,7 +44,10 @@ export function createUtteranceSource(): UtteranceSource {
   return {
     async start(onLevel): Promise<DictationCapture> {
       const g = globalThis as unknown as AudioGlobals;
-      const getUserMedia = g.navigator?.mediaDevices?.getUserMedia;
+      const mediaDevices = g.navigator?.mediaDevices;
+      // Bind to `mediaDevices`: a detached `getUserMedia` throws "Illegal
+      // invocation" in Chromium because its `this` binding is lost.
+      const getUserMedia = mediaDevices?.getUserMedia?.bind(mediaDevices);
       if (!getUserMedia || typeof MediaRecorder === 'undefined') {
         throw new Error('This device cannot record audio.');
       }

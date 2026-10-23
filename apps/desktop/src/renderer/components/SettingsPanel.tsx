@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { LocalModelsPanel } from './LocalModelsPanel.js';
 import { LocalVoicePanel } from './LocalVoicePanel.js';
 import { WakeSettingsPanel } from './WakeSettingsPanel.js';
+import { AudioSettingsPanel } from './AudioSettingsPanel.js';
 import { AuditPanel } from './AuditPanel.js';
 import { NexusAppsPanel } from './NexusAppsPanel.js';
 import { CertTrustPanel } from './CertTrustPanel.js';
@@ -766,6 +767,10 @@ export function SettingsPanel({
 
       <ErrorBoundary label="Wake words">
         <WakeSettingsPanel />
+      </ErrorBoundary>
+
+      <ErrorBoundary label="Audio devices">
+        <AudioSettingsPanel />
       </ErrorBoundary>
 
       <ErrorBoundary label="Client-tool audit trail">

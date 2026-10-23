@@ -8,6 +8,8 @@
 
 import { bridge, type ToolInvocation, type ToolInvocationResult } from '../bridge.js';
 import { getToolAuditContext } from './audit-context.js';
+import { buildAudioToolDescriptors, executeAudioTool } from '../audio/audio-tools.js';
+import { audioStore } from '../audio/use-audio-store.js';
 
 export type ChatToolDescriptor = {
   name: string;
@@ -132,6 +134,38 @@ export const DEFAULT_DESKTOP_TOOLS: RegisteredTool[] = [
   FS_WRITE_TOOL,
   FS_EDIT_TOOL,
 ];
+
+/**
+ * Audio routing tools. Unlike the filesystem tools these stay in the renderer:
+ * output routing uses `HTMLMediaElement.setSinkId`, which only exists there, and
+ * the allow-list is enforced by {@link executeAudioTool} against the persisted
+ * audio settings (a device the user did not permit is refused).
+ *
+ * `read` for the listing, `write` for changing the routing.
+ */
+export const AUDIO_TOOLS: RegisteredTool[] = buildAudioToolDescriptors().map((descriptor) => ({
+  descriptor: {
+    name: descriptor.name,
+    description: descriptor.description,
+    parameters: descriptor.parameters as ChatToolDescriptor['parameters'],
+    access: descriptor.name === 'audio_list_outputs' ? 'read' : 'write',
+  },
+  handler: async (args) => {
+    const store = audioStore();
+    const snapshot = store.getSnapshot();
+    const result = executeAudioTool(
+      {
+        getSettings: () => snapshot.settings,
+        listOutputs: () => snapshot.outputs,
+        getTarget: () => snapshot.outputTarget,
+        setTarget: (target) => store.setOutputTarget(target),
+      },
+      descriptor.name,
+      args,
+    );
+    return result as unknown as ToolInvocationResult;
+  },
+}));
 
 /**
  * Descriptors for the user's local-command skills, so the agent can invoke a

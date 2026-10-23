@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   normalizeCursorToBounds,
   shouldEmitCursorSample,
@@ -139,6 +139,37 @@ describe('createGlobalCursorTracker', () => {
     });
     tracker.sampleOnce();
     expect(probed).toBe(0);
+  });
+
+  it('reads the focus-independent pointer source in preference to the probe', () => {
+    // Both are supplied by main.ts; the Electron probe freezes when no app
+    // window is focused, so the native source must win.
+    const a = makeWindow();
+    let probed = 0;
+    const tracker = createGlobalCursorTracker({
+      listWindows: () => [{ contactId: 'contact-a', window: a.window }],
+      getCursorPoint: () => {
+        probed += 1;
+        return { x: 0, y: 0 };
+      },
+      pointerSource: { current: () => ({ x: 1500, y: 750 }), start: vi.fn(), stop: vi.fn() },
+      getDisplayWorkArea: () => ({ x: 0, y: 0, width: 2000, height: 1000 }),
+    });
+    tracker.sampleOnce();
+    expect(probed).toBe(0);
+    expect(a.sent[0]).toMatchObject({ x: 0.75, y: 0.75 });
+  });
+
+  it('falls back to the probe only while the source has no reading', () => {
+    const a = makeWindow();
+    const tracker = createGlobalCursorTracker({
+      listWindows: () => [{ contactId: 'contact-a', window: a.window }],
+      getCursorPoint: () => ({ x: 1000, y: 500 }),
+      pointerSource: { current: () => null, start: vi.fn(), stop: vi.fn() },
+      getDisplayWorkArea: () => ({ x: 0, y: 0, width: 2000, height: 1000 }),
+    });
+    tracker.sampleOnce();
+    expect(a.sent[0]).toMatchObject({ x: 0.5, y: 0.5 });
   });
 
   it('starts and stops the shared timer exactly once', () => {

@@ -9,7 +9,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostname } from 'node:os';
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, Notification, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, Notification, screen, session, shell, Tray } from 'electron';
 import {
   DESKTOP_APP_ID,
   certificateFingerprints,
@@ -59,6 +59,7 @@ import { buildTrayMenu } from './tray-menu.js';
 import { createBonjourBackend } from './mdns-bonjour.js';
 import { createCompanionWindowManager, defaultCompanionPreloadPath } from './companion-window.js';
 import { createGlobalCursorTracker } from './global-cursor.js';
+import { createGlobalPointerSource } from './global-pointer.js';
 import { createCalendarManager } from './calendar-manager.js';
 import { createMeetingsManager } from './meetings-manager.js';
 import { createLocalVoiceManager } from './local-voice-manager.js';
@@ -378,6 +379,11 @@ const companionWindows = createCompanionWindowManager({
  */
 const companionCursor = createGlobalCursorTracker({
   listWindows: () => companionWindows.listWindows(),
+  // Electron's cursor probe freezes when no app window is focused on X11; the
+  // native X11 pointer stream keeps reporting the true position everywhere.
+  pointerSource: createGlobalPointerSource({
+    getCursorPoint: () => screen.getCursorScreenPoint(),
+  }),
 });
 
 // Phase 7b: desktop calendar. Region-node owns the calendar; this only calls it.

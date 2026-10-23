@@ -51,8 +51,28 @@ export type WakeDirectorOptions = {
    * is live so segment timing matches the real capture rate.
    */
   onSampleRate?: (sampleRate: number) => void;
-  /** The microphone source; injectable for tests. */
+  /**
+   * The microphone source for the primary input; injectable for tests. When
+   * `wakeInputIds` is non-empty the source is looked up per device via
+   * `createMicForDevice` instead, so 0..n extra mics can listen in parallel.
+   */
   createMic: () => WakeMicSource;
+  /**
+   * Build an extra wake-listening microphone for a device id (the secondary
+   * microphones configured in audio settings). Optional: without it, only the
+   * primary mic is used, preserving single-mic behaviour.
+   */
+  createMicForDevice?: (deviceId: string) => WakeMicSource;
+  /**
+   * The 0..n extra microphones that should also listen for wake words. Read from
+   * audio settings; the director arms a mic (and a detector set) per device.
+   */
+  getWakeInputIds?: () => string[];
+  /**
+   * Initial microphone mute state (the bottom-bar toggle persists it). While
+   * muted the director keeps its settings but opens no microphone.
+   */
+  isInputMuted?: () => boolean;
   /** Called when a phrase fires, after main has been told to raise the window. */
   onActivate?: WakeActivationHandler;
   /** Notified on every state change (drives the bottom bar). */
@@ -65,6 +85,17 @@ export type WakeDirectorOptions = {
 type ArmedBinding = {
   binding: WakeWordBinding;
   detector: WakeDetector;
+};
+
+/**
+ * One microphone stream and the detectors watching *its* frames. Detectors carry
+ * per-stream state (audio buffers), so each microphone gets its own detector set;
+ * `firedThisActivation` still de-dupes so a phrase heard on two mics fires once.
+ */
+type MicGroup = {
+  key: string;
+  mic: WakeMicSource;
+  entries: ArmedBinding[];
 };
 
 const DEFAULT_STATE: WakeListenState = {
@@ -93,6 +124,8 @@ export type WakeDirector = {
   stop(): void;
   /** Re-read settings and reconcile the armed detectors. */
   reload(): Promise<void>;
+  /** Reconcile using the already-loaded settings (e.g. after a device/mute change). */
+  reconcileNow(): Promise<void>;
   /** Persist new settings (used by the settings UI) and reload. */
   saveSettings(next: WakeSettings): Promise<WakeSettings>;
   getState(): WakeListenState;
@@ -100,12 +133,15 @@ export type WakeDirector = {
 
 export function createWakeDirector(options: WakeDirectorOptions) {
   const smoothing = options.levelSmoothing ?? 0.25;
-  const mic = options.createMic();
+  const primaryMic = options.createMic();
+  /** devicId → mic, for the extra wake-listening microphones (Wave-2). */
+  const extraMics = new Map<string, WakeMicSource>();
 
   let settings: WakeSettings = { ...DEFAULT_WAKE_SETTINGS };
   /** The effective bindings to arm: manual ones plus any auto-mapped agents. */
   let effectiveBindings: WakeWordBinding[] = [];
-  let armed: ArmedBinding[] = [];
+  /** Live microphone groups: the primary input first, then the extra wake mics. */
+  let groups: MicGroup[] = [];
   let state: WakeListenState = { ...DEFAULT_STATE };
   let level = 0;
   let running = false;
@@ -150,21 +186,28 @@ export function createWakeDirector(options: WakeDirectorOptions) {
 
   /** Recompute the derived fields (phrases, listening) and push them. */
   function refreshDerived(message?: string | null): void {
-    const activePhrases = armed.map((a) => a.binding.phrase);
+    const allArmed = groups.flatMap((g) => g.entries);
+    const activePhrases = allArmed.map((a) => a.binding.phrase);
+    const anyMicActive = groups.some((g) => g.mic.active);
     emit({
       enabled: settings.enabled,
-      listening: running && mic.active && armed.length > 0,
+      listening: running && anyMicActive && allArmed.length > 0,
       activePhrases,
       level,
       ...(message !== undefined ? { message } : {}),
     });
   }
 
-  function handleFrame(frame: Float32Array): void {
+  /**
+   * Handle one frame from *one* microphone: update the shared meter and push the
+   * frame through that group's detectors. A binding that already fired this
+   * activation is skipped so a phrase heard on two mics still fires once.
+   */
+  function handleGroupFrame(group: MicGroup, frame: Float32Array): void {
     // Update the meter regardless of detections so the bottom bar stays alive.
     level = smoothLevel(level, frameRms(frame) * 3, smoothing);
     const at = Date.now();
-    for (const entry of armed) {
+    for (const entry of group.entries) {
       if (firedThisActivation.has(entry.binding.id)) continue;
       let result: { fired: boolean; confidence: number | null };
       try {
@@ -192,9 +235,15 @@ export function createWakeDirector(options: WakeDirectorOptions) {
     options.onActivate?.({ binding, confidence });
   }
 
-  /** Build detectors for every enabled binding; skip the ones that cannot arm. */
-  async function armAll(): Promise<{ armed: ArmedBinding[]; reason: string | null }> {
-    const next: ArmedBinding[] = [];
+  /**
+   * Resolve every enabled binding once, so each microphone can build its own
+   * detector set from the same resolutions. Skips bindings that cannot arm.
+   */
+  async function resolveBindings(): Promise<{
+    resolved: Array<{ binding: WakeWordBinding; resolution: WakeBindingResolution }>;
+    reason: string | null;
+  }> {
+    const resolved: Array<{ binding: WakeWordBinding; resolution: WakeBindingResolution }> = [];
     let firstReason: string | null = null;
     for (const binding of effectiveBindings) {
       if (!binding.enabled) continue;
@@ -207,21 +256,32 @@ export function createWakeDirector(options: WakeDirectorOptions) {
         firstReason ??= resolution.unavailableReason ?? 'A wake word is not ready.';
         continue;
       }
-      const detector = await options.buildDetector(resolution).catch(() => null);
-      if (!detector || !detector.detecting) {
-        firstReason ??= 'Wake detection is unavailable for a configured word.';
-        continue;
-      }
-      next.push({ binding, detector });
+      resolved.push({ binding, resolution });
     }
-    return { armed: next, reason: next.length === 0 ? firstReason : null };
+    return { resolved, reason: resolved.length === 0 ? firstReason : null };
+  }
+
+  /** Build one detector set (one detector per resolved binding) for a mic group. */
+  async function buildGroupEntries(
+    resolved: Array<{ binding: WakeWordBinding; resolution: WakeBindingResolution }>,
+  ): Promise<ArmedBinding[]> {
+    const entries: ArmedBinding[] = [];
+    for (const { binding, resolution } of resolved) {
+      const detector = await options.buildDetector(resolution).catch(() => null);
+      if (!detector || !detector.detecting) continue;
+      entries.push({ binding, detector });
+    }
+    return entries;
   }
 
   async function reconcile(): Promise<void> {
     firedThisActivation.clear();
-    for (const entry of armed) entry.detector.dispose?.();
-    armed = [];
-    mic.stop();
+    for (const group of groups) {
+      for (const entry of group.entries) entry.detector.dispose?.();
+      group.mic.stop();
+    }
+    groups = [];
+    for (const mic of extraMics.values()) mic.stop();
     running = false;
 
     effectiveBindings = await computeEffectiveBindings(settings);
@@ -232,18 +292,47 @@ export function createWakeDirector(options: WakeDirectorOptions) {
       return;
     }
 
-    const { armed: nextArmed, reason } = await armAll();
-    armed = nextArmed;
-    if (armed.length === 0) {
+    // Muted: keep the configuration but open no microphone at all.
+    if (options.isInputMuted?.()) {
+      level = 0;
+      refreshDerived('Microphone is muted.');
+      return;
+    }
+
+    const { resolved, reason } = await resolveBindings();
+    if (resolved.length === 0) {
       level = 0;
       refreshDerived(reason);
       return;
     }
 
-    const started = await mic.start(handleFrame);
-    running = started;
-    if (started) options.onSampleRate?.(mic.sampleRate);
-    refreshDerived(started ? null : (mic.message ?? 'Microphone capture failed.'));
+    // The primary input is always used; the configured extra wake mics join it.
+    const wakeInputIds = options.getWakeInputIds?.() ?? [];
+    const primaryEntries = await buildGroupEntries(resolved);
+    const candidates: Array<{ key: string; mic: WakeMicSource; entries: ArmedBinding[] }> = [
+      { key: 'primary', mic: primaryMic, entries: primaryEntries },
+    ];
+    if (options.createMicForDevice) {
+      for (const deviceId of wakeInputIds) {
+        if (!extraMics.has(deviceId)) extraMics.set(deviceId, options.createMicForDevice(deviceId));
+        const mic = extraMics.get(deviceId)!;
+        candidates.push({ key: `device:${deviceId}`, mic, entries: await buildGroupEntries(resolved) });
+      }
+    }
+
+    // Start every mic; keep the ones that came up. Any live mic contributes frames.
+    let anyStarted = false;
+    for (const candidate of candidates) {
+      const group: MicGroup = { key: candidate.key, mic: candidate.mic, entries: candidate.entries };
+      const started = await candidate.mic.start((frame) => handleGroupFrame(group, frame));
+      if (started) {
+        groups.push(group);
+        anyStarted = true;
+      }
+    }
+    running = anyStarted;
+    if (anyStarted) options.onSampleRate?.(primaryMic.sampleRate);
+    refreshDerived(anyStarted ? null : (primaryMic.message ?? 'Microphone capture failed.'));
   }
 
   return {
@@ -252,9 +341,12 @@ export function createWakeDirector(options: WakeDirectorOptions) {
       await reconcile();
     },
     stop() {
-      mic.stop();
-      for (const entry of armed) entry.detector.dispose?.();
-      armed = [];
+      for (const group of groups) {
+        group.mic.stop();
+        for (const entry of group.entries) entry.detector.dispose?.();
+      }
+      groups = [];
+      for (const mic of extraMics.values()) mic.stop();
       running = false;
       firedThisActivation.clear();
       level = 0;
@@ -262,6 +354,9 @@ export function createWakeDirector(options: WakeDirectorOptions) {
     },
     async reload() {
       settings = await options.bridge.wakeGetSettings().catch(() => settings);
+      await reconcile();
+    },
+    async reconcileNow() {
       await reconcile();
     },
     async saveSettings(next) {

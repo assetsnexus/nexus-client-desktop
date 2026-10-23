@@ -13,6 +13,7 @@
 
 import type { CSSProperties } from 'react';
 import { useWakeState } from '../wake/director-host.js';
+import { MicToggleBar } from './MicToggleBar.js';
 
 const bar: CSSProperties = {
   display: 'flex',
@@ -72,6 +73,8 @@ export function WakeBottomBar() {
   return (
     <div style={bar} data-nexus-surface="wake-bar" data-wake-live={live ? 'true' : 'false'}>
       <style>{KEYFRAMES}</style>
+      {/* Microphone mute toggle + live soundwave, immediately left of the status. */}
+      <MicToggleBar />
       <span style={dot(live)} aria-hidden />
       <span style={{ color: '#e8eef4', fontWeight: 600 }}>
         {live ? 'Listening for wake words' : 'Wake words idle'}

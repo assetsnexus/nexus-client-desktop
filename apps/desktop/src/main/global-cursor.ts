@@ -41,6 +41,16 @@ export type GlobalCursorTrackerOptions = {
   /** Injectable for tests; defaults to electron `screen.getCursorScreenPoint`. */
   getCursorPoint?: () => { x: number; y: number };
   /**
+   * Focus-independent OS pointer source (see `global-pointer.ts`). When given,
+   * its `start`/`stop` are driven alongside the sampler and it is preferred over
+   * the Electron probe so gaze keeps tracking while another app has focus.
+   */
+  pointerSource?: {
+    current: () => { x: number; y: number } | null;
+    start?: () => void;
+    stop?: () => void;
+  };
+  /**
    * Work area of the display a window sits on, in the same display space as the
    * cursor point. Injectable for tests; defaults to
    * `screen.getDisplayMatching(bounds).workArea`. Returning `null` falls back to
@@ -94,7 +104,17 @@ export function shouldEmitCursorSample(
 }
 
 export function createGlobalCursorTracker(options: GlobalCursorTrackerOptions) {
-  const getPoint = options.getCursorPoint ?? (() => screen.getCursorScreenPoint());
+  // Electron's `getCursorScreenPoint()` freezes once no app window is focused on
+  // X11, so prefer a focus-independent source when one is provided (see
+  // `global-pointer.ts`) and fall back to the Electron probe only when the
+  // native source has no reading yet / is unavailable. The source must win over
+  // the probe: `main.ts` supplies both, and the probe would otherwise silently
+  // shadow the live stream.
+  const probe = options.getCursorPoint ?? (() => screen.getCursorScreenPoint());
+  const getPoint = (): { x: number; y: number } => {
+    const fromSource = options.pointerSource?.current?.();
+    return fromSource ?? probe();
+  };
   const getWorkArea =
     options.getDisplayWorkArea ??
     ((bounds) => {
@@ -160,6 +180,7 @@ export function createGlobalCursorTracker(options: GlobalCursorTrackerOptions) {
 
   function start(): void {
     if (handle) return;
+    options.pointerSource?.start?.();
     handle = startTimer(emit, SAMPLE_INTERVAL_MS);
     // Never let the sampler hold the process open on its own.
     if (handle && typeof (handle as { unref?: () => void }).unref === 'function') {
@@ -171,6 +192,7 @@ export function createGlobalCursorTracker(options: GlobalCursorTrackerOptions) {
     if (!handle) return;
     stopTimer(handle);
     handle = null;
+    options.pointerSource?.stop?.();
     lastByContact.clear();
   }
 

@@ -18,6 +18,7 @@ import { bridge, type WakeListenState, type WakeSettings, type WakeWordBinding }
 import { buildDetectorWithStt } from './engine.js';
 import { createSttPhraseHub, type SttPhraseHub } from './stt-detector.js';
 import { createWakeMic } from './mic.js';
+import { audioWakeInputIds, isInputMuted } from '../audio/use-audio-store.js';
 import { createWakeDirector, type WakeDirector } from './director.js';
 
 /** React subscribers fed by the director's `onStateChange`. */
@@ -68,10 +69,19 @@ export function wakeDirector(): WakeDirector {
       buildDetector,
       onSampleRate: (rate) => sttHub?.setSampleRate(rate),
       createMic: () => createWakeMic(),
+      // Extra wake-listening microphones (audio settings): each gets its own stream.
+      createMicForDevice: (deviceId) => createWakeMic({ deviceId }),
+      getWakeInputIds: () => audioWakeInputIds(),
+      isInputMuted: () => isInputMuted(),
       onStateChange: () => listeners.forEach((l) => l()),
     });
   }
   return singleton;
+}
+
+/** Reopen (or close) capture after the mute toggle or device choice changes. */
+export async function reconcileWakeDirector(): Promise<void> {
+  await wakeDirector().reconcileNow();
 }
 
 /**

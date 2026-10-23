@@ -12,6 +12,11 @@ import { resolveConnectionConfig, type DesktopConnectionConfig } from '@nexus/no
 import { DEFAULT_NOTIFICATION_SETTINGS, normalizeCompanionDebugSettings, normalizeCompanionAvatarSettings, DEFAULT_COMPANION_AVATAR_SETTINGS, type NotificationSettings, type CompanionDebugSettings, type CompanionAvatarSettings } from '../shared/ipc.js';
 import { DEFAULT_APP_LOCK_SETTINGS, normalizeAppLockSettings, type AppLockSettings } from '../shared/app-lock.js';
 import {
+  DEFAULT_AUDIO_SETTINGS,
+  normalizeAudioSettings,
+  type AudioSettings,
+} from '../shared/audio.js';
+import {
   DEFAULT_TRAY_APP_SETTINGS,
   normalizeTrayAppSettings,
   type TrayAppSettings,
@@ -37,6 +42,8 @@ export type UiSettings = {
   companionDebug: CompanionDebugSettings;
   /** Companion avatar behaviour (click nod); re-validated on every read. */
   companionAvatar: CompanionAvatarSettings;
+  /** Audio device preferences; re-validated on every read. */
+  audio: AudioSettings;
 };
 
 export { DEFAULT_NOTIFICATION_SETTINGS };
@@ -85,6 +92,7 @@ export function createSettingsStore(filePath?: string): SettingsStore {
       companionAvatar: normalizeCompanionAvatarSettings(
         ui.companionAvatar ?? DEFAULT_COMPANION_AVATAR_SETTINGS,
       ),
+      audio: normalizeAudioSettings(ui.audio ?? DEFAULT_AUDIO_SETTINGS),
     };
   };
 
