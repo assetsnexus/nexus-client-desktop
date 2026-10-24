@@ -146,6 +146,7 @@ const bridge: NexusBridge = {
   runnerStop: () => ipcRenderer.invoke(IPC.runnerStop),
   runnerRegister: () => ipcRenderer.invoke(IPC.runnerRegister),
   identitySnapshot: () => ipcRenderer.invoke(IPC.identitySnapshot),
+  identityChatSessions: () => ipcRenderer.invoke(IPC.identityChatSessions),
   identityListMemberships: () => ipcRenderer.invoke(IPC.identityListMemberships),
   identitySwitch: (key) => ipcRenderer.invoke(IPC.identitySwitch, key),
   identitySwitchAccount: (userId) => ipcRenderer.invoke(IPC.identitySwitchAccount, userId),

@@ -143,6 +143,47 @@ export function createIdentityManager(options: IdentityManagerOptions) {
     },
 
     /**
+     * Chat identity sessions for the active account, in the shape
+     * `@nexus/chat-react` consumes (`ChatIdentitySession[]`).
+     *
+     * The chat sidebar fans `anx.communicate.conversations.list` out over every
+     * identity, so one window lists the private context plus each org
+     * membership — the portal's identity-chip behaviour. Only the **active
+     * account** is exposed: identities of another signed-in user share no
+     * conversation visibility and would leak that account's threads into the
+     * current window. Rows without a token (never signed in) are dropped.
+     */
+    chatIdentitySessions(): Array<{
+      key: string;
+      label: string;
+      userId: string;
+      orgId: string | null;
+      role: string | null;
+      deviceId: string | null;
+      token: string;
+      avatarUrl: string | null;
+      orgLogo: string | null;
+    }> {
+      const account = state.accounts.find((a) => a.userId === state.activeUserId);
+      if (!account) return [];
+      return account.identities
+        .filter((identity) => Boolean(identity.token) && Boolean(identity.userId))
+        .map((identity) => ({
+          key: identity.key,
+          // Labels never fall back to a raw org/user id; the chat chrome shows
+          // the friendly name or a neutral "Organization" / "Private".
+          label: identity.label || (identity.orgId ? 'Organization' : 'Private'),
+          userId: identity.userId as string,
+          orgId: identity.orgId,
+          role: identity.role,
+          deviceId: identity.deviceId,
+          token: identity.token,
+          avatarUrl: null,
+          orgLogo: null,
+        }));
+    },
+
+    /**
      * Every stored session (token-bearing), used by the tray app provider: the
      * "installed apps" list is identity-scoped, so it queries once per session
      * (personal + each org membership) and unions the results. Read-only — it

@@ -1410,6 +1410,7 @@ function registerIpc(): void {
 
   // Identity / account switching (Phase 9).
   ipcMain.handle(IPC.identitySnapshot, () => identityManager.getSnapshot());
+  ipcMain.handle(IPC.identityChatSessions, () => identityManager.chatIdentitySessions());
   ipcMain.handle(IPC.identityListMemberships, () => identityManager.listMemberships());
   ipcMain.handle(IPC.identitySwitch, (_e, key: string) => {
     const next = identityManager.switchIdentity(key);

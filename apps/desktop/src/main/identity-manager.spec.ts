@@ -110,6 +110,40 @@ describe('identity manager', () => {
     }
   });
 
+  it('chatIdentitySessions presents every identity of the active account', async () => {
+    const sender = vi.fn(async () => ({
+      responseCode: 200,
+      responseObject: { token: { token: 'biz', orgId: 'o1', role: 'admin', userId: 'u1' } },
+    }));
+    const m = manager(sender);
+    m.recordLogin({ userId: 'u1', token: 't1', deviceId: 'dev-personal' });
+    await m.startMembership({ membershipId: 'm1', businessEmail: 'a@b.c' });
+    const rows = m.chatIdentitySessions();
+    expect(rows.map((r) => r.token).sort()).toEqual(['biz', 't1']);
+    expect(rows.find((r) => !r.orgId)).toMatchObject({
+      label: 'Personal',
+      userId: 'u1',
+      orgId: null,
+      deviceId: 'dev-personal',
+    });
+    // A business label is the business email, never the raw org id.
+    expect(rows.find((r) => r.orgId === 'o1')?.label).toBe('a@b.c');
+  });
+
+  it('chatIdentitySessions never leaks another signed-in account', () => {
+    const m = manager();
+    m.recordLogin({ userId: 'u1', token: 't1' });
+    m.recordLogin({ userId: 'u2', token: 't2' });
+    const rows = m.chatIdentitySessions();
+    expect(rows.map((r) => r.token)).toEqual(['t2']);
+  });
+
+  it('chatIdentitySessions drops identities with no token', () => {
+    const m = manager();
+    m.recordLogin({ userId: 'u1', token: '' });
+    expect(m.chatIdentitySessions()).toEqual([]);
+  });
+
   it('returns the 2FA challenge fields for a gated membership login', async () => {
     const sender = vi.fn(async () => ({
       responseCode: 200,

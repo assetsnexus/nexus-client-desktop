@@ -5,6 +5,7 @@ import {
   createRegionCommandClient,
   findChatContact,
   blobToInlineAudio,
+  type ChatIdentitySession,
   type NexusChat,
   type SdkToHostMessage,
 } from '@nexus/chat-react';
@@ -22,6 +23,7 @@ import {
   type ToolsConfig,
 } from '../bridge.js';
 import { DEFAULT_DESKTOP_TOOLS, AUDIO_TOOLS, localCommandTools } from '../tools/descriptors.js';
+import { resolveOrgLogoUrl } from '../../shared/org-logo.js';
 import { setToolAuditContext, resolveToolAuditContext } from '../tools/audit-context.js';
 import { createIncomingWatcher, resolveSenderName } from '../notifications/incoming.js';
 import { createWakeChatRouter } from '../wake/router.js';
@@ -64,6 +66,13 @@ export function ChatHost({
   const [client, setClient] = useState<ReturnType<typeof createRegionCommandClient> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tools, setTools] = useState<ToolsConfig | null>(null);
+  /**
+   * Every stored identity for the active account, so the chat sidebar can fan
+   * the conversation list out over the private context and each org membership
+   * (portal identity chips). Empty until the main process answers; the sidebar
+   * then renders the single-identity list, which is the same component.
+   */
+  const [identities, setIdentities] = useState<ChatIdentitySession[]>([]);
   const [activeVoice, setActiveVoice] = useState<{
     contactId: string | null;
     title: string;
@@ -91,6 +100,53 @@ export function ChatHost({
   useEffect(() => {
     void bridge.getToolsConfig().then(setTools);
   }, []);
+
+  /**
+   * Identity list for the chat sidebar. Re-read whenever the auth object changes
+   * (org/account switch replaces `auth`), so the chips and the per-identity list
+   * fan-out follow the switch without a window reload.
+   *
+   * `identityChatSessions` carries tokens but no org branding, so the membership
+   * list supplies each org's display name + logo (the portal resolves the same
+   * pair). A membership failure degrades to initials rather than empty chips.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      bridge.identityChatSessions(),
+      bridge.identityListMemberships().catch(() => []),
+    ])
+      .then(([rows, memberships]) => {
+        if (cancelled) return;
+        const orgById = new Map(
+          memberships.filter((m) => m.orgId).map((m) => [m.orgId as string, m]),
+        );
+        const base = connection?.gatewayUrl ?? connection?.regionUrl ?? null;
+        setIdentities(
+          rows.map((row) => {
+            const org = row.orgId ? orgById.get(row.orgId) : undefined;
+            return {
+              key: row.key,
+              // Prefer the membership's human org name over a business email.
+              label: org?.orgName || row.label,
+              userId: row.userId,
+              orgId: row.orgId,
+              role: row.role,
+              deviceId: row.deviceId,
+              token: row.token,
+              avatarUrl: row.avatarUrl,
+              orgLogo: resolveOrgLogoUrl(org?.orgLogo, base),
+            };
+          }),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setIdentities([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [auth, connection?.gatewayUrl, connection?.regionUrl]);
 
   const apiBaseUrl = connection?.regionUrl ?? '';
   const identity = useMemo<ChatIdentity>(
@@ -744,6 +800,7 @@ export function ChatHost({
       <NexusChatApp
         chat={chat}
         client={client ?? undefined}
+        identities={identities}
         features={{ adminPanels: false }}
         tools={registeredTools}
         slots={{

@@ -513,6 +513,27 @@ export type MembershipRow = {
   orgLogo: string | null;
 };
 
+/**
+ * One chat identity session (`@nexus/chat-react` `ChatIdentitySession`).
+ *
+ * The chat sidebar fans `anx.communicate.conversations.list` out over every
+ * stored identity so one window lists the private context and each org
+ * membership, exactly like the portal. Tokens live in the main process; the
+ * renderer already holds the active one, so the full set is handed over for the
+ * same reason — the chat client must send each row under its own identity.
+ */
+export type ChatIdentityRow = {
+  key: string;
+  label: string;
+  userId: string;
+  orgId: string | null;
+  role: string | null;
+  deviceId: string | null;
+  token: string;
+  avatarUrl: string | null;
+  orgLogo: string | null;
+};
+
 export type MembershipLoginStart = {
   kind: 'authenticated' | 'two_factor_required';
   orgId: string | null;
@@ -1574,6 +1595,13 @@ export type NexusBridge = {
   runnerRegister(): Promise<LocalRunnerState>;
   // Identity / account switching (Phase 9).
   identitySnapshot(): Promise<IdentitySnapshot>;
+  /**
+   * Every stored token-bearing identity for the active account, presented the
+   * way `@nexus/chat-react` expects (`ChatIdentitySession[]`). Used to fan the
+   * chat conversation list out over private + each org membership, matching the
+   * portal sidebar's identity chips.
+   */
+  identityChatSessions(): Promise<ChatIdentityRow[]>;
   identityListMemberships(): Promise<MembershipRow[]>;
   identitySwitch(key: string): Promise<IdentitySnapshot>;
   identitySwitchAccount(userId: string): Promise<IdentitySnapshot>;
@@ -1810,6 +1838,7 @@ export const IPC = {
   runnerStop: 'nexus:runner:stop',
   runnerRegister: 'nexus:runner:register',
   identitySnapshot: 'nexus:identity:snapshot',
+  identityChatSessions: 'nexus:identity:chat-sessions',
   identityListMemberships: 'nexus:identity:list-memberships',
   identitySwitch: 'nexus:identity:switch',
   identitySwitchAccount: 'nexus:identity:switch-account',
