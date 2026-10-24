@@ -12,9 +12,18 @@ declare global {
   }
 }
 
-/** The bridge, guaranteed present in the Electron renderer. */
+/**
+ * The bridge, guaranteed present in the Electron renderer.
+ *
+ * NOTE: a method on this contract is only actually present when the *running*
+ * preload was built from the same revision. Always reach post-release methods
+ * through the `bridge-compat` helpers (`hasBridgeMethod` / `onBridge` /
+ * `callBridge`) so a renderer that is newer than the preload degrades instead of
+ * throwing and taking the whole tree down.
+ */
 export const bridge: NexusBridge = window.nexus;
 
+export * from './bridge-compat.js';
 export * from '../shared/ipc.js';
 export { stepLabel } from '../shared/logout.js';
 export type { LogoutChoice, LogoutReport, LogoutStep } from '../shared/logout.js';

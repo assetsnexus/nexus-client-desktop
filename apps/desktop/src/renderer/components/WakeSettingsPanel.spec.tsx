@@ -167,7 +167,8 @@ describe('WakeSettingsPanel', () => {
     expect(capture).toBeTruthy();
     expect(capture.value).toBe('both');
 
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set;
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!
+      .set as (this: HTMLSelectElement, value: string) => void;
     await act(async () => {
       setter.call(capture, 'batch');
       capture.dispatchEvent(new Event('change', { bubbles: true }));

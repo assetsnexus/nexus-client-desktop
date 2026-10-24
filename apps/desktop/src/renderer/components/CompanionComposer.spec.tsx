@@ -18,18 +18,24 @@ import type { CompanionSessionView } from '../../shared/companion.js';
 const sessionListeners: Array<(view: CompanionSessionView) => void> = [];
 const companionAction = vi.fn(async () => true);
 
-vi.mock('../bridge.js', () => ({
-  bridge: {
-    onCompanionSession: (listener: (view: CompanionSessionView) => void) => {
-      sessionListeners.push(listener);
-      return () => {
-        const i = sessionListeners.indexOf(listener);
-        if (i >= 0) sessionListeners.splice(i, 1);
-      };
+vi.mock('../bridge.js', async () => {
+  // Keep the real bridge-compat helpers (the component reaches the bridge
+  // through `onBridge` / `callBridge`), and stub only the bridge itself.
+  const compat = await vi.importActual<typeof import('../bridge-compat.js')>('../bridge-compat.js');
+  return {
+    ...compat,
+    bridge: {
+      onCompanionSession: (listener: (view: CompanionSessionView) => void) => {
+        sessionListeners.push(listener);
+        return () => {
+          const i = sessionListeners.indexOf(listener);
+          if (i >= 0) sessionListeners.splice(i, 1);
+        };
+      },
+      companionAction: (...args: unknown[]) => companionAction(...(args as [])),
     },
-    companionAction: (...args: unknown[]) => companionAction(...(args as [])),
-  },
-}));
+  };
+});
 
 import { CompanionComposer } from './CompanionComposer.js';
 

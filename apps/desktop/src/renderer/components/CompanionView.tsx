@@ -39,6 +39,7 @@ import {
 import { companionCursorToGazeNdc } from '../companion/companion-cursor.js';
 import {
   bridge,
+  onBridge,
   type AuthState,
   type CompanionAvatarSettings,
   type CompanionDebugSettings,
@@ -406,7 +407,9 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   // `dictate` presentation makes this the STT surface; a voice presentation
   // leaves the realtime call (already running) untouched.
   useEffect(() => {
-    const off = bridge.onCompanionPresent((payload) => {
+    // `onBridge` yields a no-op unsubscribe on a preload that predates the
+    // channel, so an older main process cannot blank this window.
+    const off = onBridge<CompanionPresent>(bridge, 'onCompanionPresent', (payload) => {
       if (payload.contactId !== launch.contactId) return;
       setPresent(payload);
       setDictate(payload.dictate);

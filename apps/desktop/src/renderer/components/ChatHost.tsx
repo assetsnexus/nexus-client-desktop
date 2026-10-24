@@ -12,7 +12,11 @@ import '@nexus/chat-react/style.css';
 import { runDictation, encodeWavBlob, type Transcriber } from '@nexus/voice-capture';
 import {
   bridge,
+  callBridge,
+  hasBridgeMethod,
+  onBridge,
   type AuthState,
+  type CompanionAction,
   type CompanionSessionView,
   type DesktopConnectionConfig,
   type ToolsConfig,
@@ -335,6 +339,15 @@ export function ChatHost({
     const router = createWakeChatRouter({
       getSettings: () => bridge.wakeGetSettings(),
       present: async (mode, target) => {
+        // Companion-first needs the live `companionPresent` channel to hand a
+        // wake to an open companion window. On a preload that predates it the
+        // companion can still be opened (a fresh window reload), but it cannot
+        // mirror the live dictation session — so fall back to the visible widget
+        // (which owns the capture) rather than blanking it with a surface that
+        // can render nothing. A restart restores companion-first.
+        if (mode === 'companion' && !hasBridgeMethod(bridge, 'companionPresent')) {
+          mode = 'widget';
+        }
         setWakeMode(mode);
         // Every presentation is a new activation: bump the token so the widget
         // resets any frozen edit from a previous wake.
@@ -372,16 +385,21 @@ export function ChatHost({
           // Hand the activation to the already-open companion without a reload
           // (so a live realtime call survives); only open a window when none
           // exists. `dictate` tells the companion which surface it is.
-          const presented = await bridge
-            .companionPresent({
+          // `callBridge` falls back to "no live companion" on a preload that
+          // predates the channel, so the wake degrades to `companionOpen`.
+          const presented = await callBridge(
+            bridge,
+            'companionPresent',
+            false,
+            {
               contactId: target.contactId,
               conversationId,
               agentId: target.agentId,
               phrase: target.phrase,
               dictate: !voiceMode,
               token: Date.now(),
-            })
-            .catch(() => false);
+            },
+          );
           if (!presented) {
             await bridge.companionOpen({
               contactId: target.contactId,
@@ -504,15 +522,17 @@ export function ChatHost({
       engineLabel: wakeEngineLabel,
       agentName: wakeTarget.agentName,
     };
-    void bridge.companionPushSession(view).catch(() => undefined);
+    void callBridge(bridge, 'companionPushSession', false, view);
   }, [wakeMode, wakeTarget, wakeSession, wakeEngineLabel]);
 
   /**
    * The companion's composer (submit / cancel / send-as-voice / edit) is relayed
-   * back into the session that owns the capture.
+   * back into the session that owns the capture. Subscribed via `onBridge` so a
+   * preload that predates the channel yields a no-op unsubscribe instead of
+   * throwing inside this effect (which would blank the window).
    */
   useEffect(() => {
-    const off = bridge.onCompanionActionRelay((action) => {
+    const off = onBridge<CompanionAction>(bridge, 'onCompanionActionRelay', (action) => {
       const target = wakeTargetRef.current;
       if (!target || action.contactId !== target.contactId) return;
       if (action.action === 'submit') void wakeRouterRef.current?.submit();
@@ -546,16 +566,14 @@ export function ChatHost({
       // Hand the live wake session to the companion (it renders the STT preview +
       // composer straight away) instead of starting a separate realtime call:
       // voice mode is a toggle the user opts into, not the wake default.
-      const presented = await bridge
-        .companionPresent({
-          contactId: target.contactId,
-          conversationId: conversationIdRef.current,
-          agentId: target.agentId,
-          phrase: wakeSession?.target.phrase ?? null,
-          dictate: true,
-          token: Date.now(),
-        })
-        .catch(() => false);
+      const presented = await callBridge(bridge, 'companionPresent', false, {
+        contactId: target.contactId,
+        conversationId: conversationIdRef.current,
+        agentId: target.agentId,
+        phrase: wakeSession?.target.phrase ?? null,
+        dictate: true,
+        token: Date.now(),
+      });
       if (presented) return;
       await bridge.companionOpen({
         contactId: target.contactId,

@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useState, type CSSProperties } from 'react';
-import { bridge, type CompanionSessionView } from '../bridge.js';
+import { bridge, callBridge, onBridge, type CompanionSessionView } from '../bridge.js';
 
 const KEYFRAMES =
   '@keyframes nexus-companion-wave{0%,100%{transform:scaleY(0.35)}50%{transform:scaleY(1)}}';
@@ -111,7 +111,9 @@ export function CompanionComposer({ contactId }: CompanionComposerProps) {
   const [typed, setTyped] = useState<string | null>(null);
 
   useEffect(() => {
-    const off = bridge.onCompanionSession((next) => {
+    // `onBridge` tolerates a preload that predates this channel (returns a no-op
+    // unsubscribe) so the companion never blanks on an older main process.
+    const off = onBridge<CompanionSessionView>(bridge, 'onCompanionSession', (next) => {
       if (next.contactId !== contactId) return;
       setView(next);
     });
@@ -136,11 +138,11 @@ export function CompanionComposer({ contactId }: CompanionComposerProps) {
   const canSendAudio = view.batchAvailable && !done;
 
   const send = (action: 'submit' | 'cancel' | 'sendAudio') => {
-    void bridge.companionAction({ contactId, action }).catch(() => undefined);
+    void callBridge(bridge, 'companionAction', false, { contactId, action });
   };
   const edit = (text: string) => {
     setTyped(text);
-    void bridge.companionAction({ contactId, action: 'edit', text }).catch(() => undefined);
+    void callBridge(bridge, 'companionAction', false, { contactId, action: 'edit', text });
   };
 
   return (
