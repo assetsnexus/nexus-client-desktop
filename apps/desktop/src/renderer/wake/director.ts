@@ -44,13 +44,26 @@ export type WakeActivationHandler = (input: {
 
 export type WakeDirectorOptions = {
   bridge: WakeDirectorBridge;
-  /** Build a detector for one resolved binding (null when unavailable). */
-  buildDetector: (resolution: WakeBindingResolution) => Promise<WakeDetector | null>;
   /**
-   * Optional sample-rate sink for the STT-phrase hub: called once the microphone
-   * is live so segment timing matches the real capture rate.
+   * Build a detector for one resolved binding (null when unavailable).
+   *
+   * `groupKey` identifies the microphone stream the detector will serve. Detectors
+   * that carry per-stream state (the STT-phrase hub's segmentation buffer) must be
+   * built *per stream* — a shared buffer would interleave frames from different
+   * microphones into one corrupt segment, so nothing ever transcribes.
    */
-  onSampleRate?: (sampleRate: number) => void;
+  buildDetector: (resolution: WakeBindingResolution, groupKey: string) => Promise<WakeDetector | null>;
+  /**
+   * Optional sample-rate sink for a microphone's STT-phrase hub: called once the
+   * stream is live so segment timing matches the real capture rate.
+   */
+  onSampleRate?: (sampleRate: number, groupKey: string) => void;
+  /**
+   * Called when a microphone group is torn down, so per-stream resources (the
+   * group's STT hub) can be released. Optional; without it resources are dropped
+   * when the detector set is rebuilt.
+   */
+  disposeGroup?: (groupKey: string) => void;
   /**
    * The microphone source for the primary input; injectable for tests. When
    * `wakeInputIds` is non-empty the source is looked up per device via
@@ -195,12 +208,24 @@ export function createWakeDirector(options: WakeDirectorOptions) {
 
   /** Recompute the derived fields (phrases, listening) and push them. */
   function refreshDerived(message?: string | null): void {
-    const allArmed = groups.flatMap((g) => g.entries);
-    const activePhrases = allArmed.map((a) => a.binding.phrase);
+    // Every microphone group arms the SAME bindings, so the union across groups
+    // would list each phrase once per microphone. Report the distinct armed
+    // phrases instead (first-seen order preserved), never a duplicate.
+    const activePhrases: string[] = [];
+    const seen = new Set<string>();
+    for (const group of groups) {
+      for (const entry of group.entries) {
+        const phrase = entry.binding.phrase;
+        if (seen.has(phrase)) continue;
+        seen.add(phrase);
+        activePhrases.push(phrase);
+      }
+    }
     const anyMicActive = groups.some((g) => g.mic.active);
+    const anyArmed = groups.some((g) => g.entries.length > 0);
     emit({
       enabled: settings.enabled,
-      listening: running && anyMicActive && allArmed.length > 0,
+      listening: running && anyMicActive && anyArmed,
       activePhrases,
       level,
       transcript,
@@ -271,13 +296,18 @@ export function createWakeDirector(options: WakeDirectorOptions) {
     return { resolved, reason: resolved.length === 0 ? firstReason : null };
   }
 
-  /** Build one detector set (one detector per resolved binding) for a mic group. */
+  /**
+   * Build one detector set (one detector per resolved binding) for a mic group.
+   * `groupKey` scopes per-stream detector state (e.g. the STT hub) to this mic, so
+   * frames from different microphones never share a segmentation buffer.
+   */
   async function buildGroupEntries(
     resolved: Array<{ binding: WakeWordBinding; resolution: WakeBindingResolution }>,
+    groupKey: string,
   ): Promise<ArmedBinding[]> {
     const entries: ArmedBinding[] = [];
     for (const { binding, resolution } of resolved) {
-      const detector = await options.buildDetector(resolution).catch(() => null);
+      const detector = await options.buildDetector(resolution, groupKey).catch(() => null);
       if (!detector || !detector.detecting) continue;
       entries.push({ binding, detector });
     }
@@ -289,6 +319,7 @@ export function createWakeDirector(options: WakeDirectorOptions) {
     for (const group of groups) {
       for (const entry of group.entries) entry.detector.dispose?.();
       group.mic.stop();
+      options.disposeGroup?.(group.key);
     }
     groups = [];
     for (const mic of extraMics.values()) mic.stop();
@@ -320,30 +351,34 @@ export function createWakeDirector(options: WakeDirectorOptions) {
 
     // The primary input is always used; the configured extra wake mics join it.
     const wakeInputIds = options.getWakeInputIds?.() ?? [];
-    const primaryEntries = await buildGroupEntries(resolved);
-    const candidates: Array<{ key: string; mic: WakeMicSource; entries: ArmedBinding[] }> = [
-      { key: 'primary', mic: primaryMic, entries: primaryEntries },
+    const candidates: Array<{ key: string; mic: WakeMicSource }> = [
+      { key: 'primary', mic: primaryMic },
     ];
     if (options.createMicForDevice) {
       for (const deviceId of wakeInputIds) {
         if (!extraMics.has(deviceId)) extraMics.set(deviceId, options.createMicForDevice(deviceId));
-        const mic = extraMics.get(deviceId)!;
-        candidates.push({ key: `device:${deviceId}`, mic, entries: await buildGroupEntries(resolved) });
+        candidates.push({ key: `device:${deviceId}`, mic: extraMics.get(deviceId)! });
       }
     }
 
     // Start every mic; keep the ones that came up. Any live mic contributes frames.
+    // Each mic gets its own detector set built for its `key`, so per-stream state
+    // (the STT segmentation buffer) is never shared across microphones.
     let anyStarted = false;
     for (const candidate of candidates) {
-      const group: MicGroup = { key: candidate.key, mic: candidate.mic, entries: candidate.entries };
+      const entries = await buildGroupEntries(resolved, candidate.key);
+      const group: MicGroup = { key: candidate.key, mic: candidate.mic, entries };
       const started = await candidate.mic.start((frame) => handleGroupFrame(group, frame));
       if (started) {
         groups.push(group);
         anyStarted = true;
+        options.onSampleRate?.(candidate.mic.sampleRate, candidate.key);
+      } else {
+        for (const entry of entries) entry.detector.dispose?.();
+        options.disposeGroup?.(candidate.key);
       }
     }
     running = anyStarted;
-    if (anyStarted) options.onSampleRate?.(primaryMic.sampleRate);
     refreshDerived(anyStarted ? null : (primaryMic.message ?? 'Microphone capture failed.'));
   }
 
@@ -356,6 +391,7 @@ export function createWakeDirector(options: WakeDirectorOptions) {
       for (const group of groups) {
         group.mic.stop();
         for (const entry of group.entries) entry.detector.dispose?.();
+        options.disposeGroup?.(group.key);
       }
       groups = [];
       for (const mic of extraMics.values()) mic.stop();

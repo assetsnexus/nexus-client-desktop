@@ -39,37 +39,54 @@ const directorBridge = {
 };
 
 /**
- * One STT-phrase hub shared by every `stt_phrase` binding, so a single
- * segmentation + transcription pass serves all phrases (auto-mapping N agents
- * must not mean N transcriptions per utterance). Transcription is local-only.
+ * One STT-phrase hub **per microphone stream**, shared by every `stt_phrase`
+ * binding armed on that stream. A single segmentation + transcription pass
+ * serves all phrases (auto-mapping N agents must not mean N transcriptions per
+ * utterance), while keeping each microphone's audio in its own buffer so frames
+ * from different devices never interleave into a corrupt segment.
+ *
+ * Transcription is local-only (see `wake-stt.ts`).
  */
-let sttHub: SttPhraseHub | null = null;
+const sttHubs = new Map<string, SttPhraseHub>();
 
-function getSttHub(sampleRate: number): SttPhraseHub {
-  if (!sttHub || sttHub.size === 0) {
-    sttHub = createSttPhraseHub({
+function getSttHub(sampleRate: number, groupKey: string): SttPhraseHub {
+  let hub = sttHubs.get(groupKey);
+  if (!hub || hub.size === 0) {
+    hub = createSttPhraseHub({
       sampleRate,
       transcribe: (pcm, rate) => bridge.wakeTranscribeLocal({ pcm, sampleRate: rate }),
       // Stream what was actually heard into the bottom bar (UI-only).
       onTranscript: (text) => singleton?.noteTranscript(text),
     });
+    sttHubs.set(groupKey, hub);
   }
-  return sttHub;
+  return hub;
+}
+
+/** Release a microphone stream's hub when its group is torn down. */
+function disposeSttHub(groupKey: string): void {
+  const hub = sttHubs.get(groupKey);
+  if (!hub) return;
+  hub.reset();
+  sttHubs.delete(groupKey);
 }
 
 let singleton: WakeDirector | null = null;
 /** True once the wake host has been mounted (avoids double-starting). */
 let started = false;
 
-const buildDetector = (resolution: Parameters<typeof buildDetectorWithStt>[0]) =>
-  buildDetectorWithStt(resolution, { getHub: getSttHub });
+const buildDetector = (
+  resolution: Parameters<typeof buildDetectorWithStt>[0],
+  groupKey: string,
+) => buildDetectorWithStt(resolution, { getHub: getSttHub }, undefined, groupKey);
 
 export function wakeDirector(): WakeDirector {
   if (!singleton) {
     singleton = createWakeDirector({
       bridge: directorBridge,
       buildDetector,
-      onSampleRate: (rate) => sttHub?.setSampleRate(rate),
+      onSampleRate: (rate, groupKey) => sttHubs.get(groupKey)?.setSampleRate(rate),
+      disposeGroup: disposeSttHub,
       createMic: () => createWakeMic(),
       // Extra wake-listening microphones (audio settings): each gets its own stream.
       createMicForDevice: (deviceId) => createWakeMic({ deviceId }),

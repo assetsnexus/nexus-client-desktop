@@ -76,6 +76,7 @@ export function createWakeLiveTest(options: WakeLiveTestOptions): WakeLiveTest {
       buildDetectorWithStt(
         resolution,
         {
+          // The live test drives a single microphone, so one hub is enough.
           getHub: (sampleRate) =>
             (sttHubRef.hub ??= createSttPhraseHub({
               sampleRate,

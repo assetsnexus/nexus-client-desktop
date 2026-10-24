@@ -97,10 +97,11 @@ function toFloat32(envelope: number[] | Float32Array, frames: number): Float32Ar
  * artifact is missing (model not installed / runtime absent) or the package is
  * unavailable, so the caller shows an honest "not available" state.
  *
- * `buildDetector` has no `stt_phrase` branch on purpose: STT detection shares
- * one segmentation/transcription hub across all phrases, so it is built through
- * {@link buildDetectorWithStt} with the hub the director owns. Calling this with
- * an `stt_phrase` resolution returns null rather than silently degrading.
+ * `buildDetector` has no `stt_phrase` branch on purpose: STT detection needs a
+ * segmentation/transcription hub scoped to the microphone stream, so it is built
+ * through {@link buildDetectorWithStt} with the per-stream hub the director owns.
+ * Calling this with an `stt_phrase` resolution returns null rather than silently
+ * degrading.
  */
 export async function buildDetector(
   resolution: WakeBindingResolution,
@@ -137,15 +138,17 @@ export async function buildDetector(
 }
 
 /**
- * STT-phrase detector construction, given the shared hub.
+ * STT-phrase detector construction, given a per-microphone hub.
  *
- * `getHub` returns the single hub for the current microphone stream (created on
- * first use, disposed with the stream). One hub segments and transcribes once
- * per speech segment and dispatches to every registered phrase, so auto-mapping
- * many agents does not multiply the transcription work.
+ * `getHub` returns the hub for the microphone stream the detector belongs to.
+ * One hub segments and transcribes once per speech segment and dispatches to
+ * every registered phrase, so auto-mapping many agents does not multiply the
+ * transcription work. It must be scoped **per stream**: a hub holds one
+ * segmentation buffer, and feeding it frames from several microphones would
+ * interleave their audio into a corrupt segment that never transcribes.
  */
 export type SttDetectorDeps = {
-  getHub: (sampleRate: number) => SttPhraseHub;
+  getHub: (sampleRate: number, groupKey: string) => SttPhraseHub;
 };
 
 /**
@@ -158,11 +161,12 @@ export async function buildDetectorWithStt(
   resolution: WakeBindingResolution,
   deps: SttDetectorDeps,
   sampleRate = 16_000,
+  groupKey = 'primary',
 ): Promise<WakeDetector | null> {
   if (resolution.engineKind !== 'stt_phrase') return buildDetector(resolution);
   const phrase = resolution.binding.phrase?.trim();
   if (!phrase) return null;
-  const hub = deps.getHub(sampleRate);
+  const hub = deps.getHub(sampleRate, groupKey);
   return createSttPhraseDetector({
     id: `stt:${resolution.binding.id}`,
     phrase,

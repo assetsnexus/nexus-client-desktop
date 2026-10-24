@@ -66,10 +66,16 @@ function makeDirector(opts: {
   detectors?: Record<string, WakeDetector | null>;
   resolutions?: Record<string, WakeBindingResolution | null>;
   agents?: WakeAgentRow[];
+  /** Extra wake-listening microphones, keyed by device id. */
+  extraMics?: Record<string, ReturnType<typeof makeMic>>;
+  wakeInputIds?: string[];
 }) {
   const states: unknown[] = [];
   const activated: Array<{ phrase: string; agentId: string | null }> = [];
   const saved = [] as WakeSettings[];
+  /** groupKey → the binding ids built for that stream (per-stream isolation). */
+  const builtPerGroup: Record<string, string[]> = {};
+  const disposedGroups: string[] = [];
   let current = opts.settings;
   const mic = makeMic();
   const bridge: WakeDirectorBridge = {
@@ -111,11 +117,19 @@ function makeDirector(opts: {
   }
   const director = createWakeDirector({
     bridge,
-    buildDetector: async (res) => opts.detectors?.[res.binding.id] ?? firingDetector(res.binding.id),
+    buildDetector: async (res, groupKey) => {
+      (builtPerGroup[groupKey] ??= []).push(res.binding.id);
+      return opts.detectors?.[res.binding.id] ?? firingDetector(`${groupKey}:${res.binding.id}`);
+    },
     createMic: () => mic,
+    createMicForDevice: opts.extraMics
+      ? (deviceId) => opts.extraMics![deviceId] ?? makeMic()
+      : undefined,
+    getWakeInputIds: opts.wakeInputIds ? () => opts.wakeInputIds! : undefined,
+    disposeGroup: (groupKey) => disposedGroups.push(groupKey),
     onStateChange: (s) => states.push(s),
   });
-  return { director, mic, states, activated, saved, bridge };
+  return { director, mic, states, activated, saved, bridge, builtPerGroup, disposedGroups };
 }
 
 describe('smoothLevel', () => {
@@ -263,5 +277,72 @@ describe('createWakeDirector', () => {
     expect(director.getState().transcript).toBe('hello there');
     director.stop();
     expect(director.getState().transcript).toBeNull();
+  });
+});
+
+describe('multiple wake microphones', () => {
+  const twoMic = () => ({
+    settings: settings({ enabled: true, bindings: [binding('a'), binding('b')] }),
+    extraMics: { 'mic-2': makeMic(), 'mic-3': makeMic() },
+    wakeInputIds: ['mic-2', 'mic-3'],
+  });
+
+  it('lists each armed phrase once, not once per microphone', async () => {
+    const { director, builtPerGroup } = makeDirector(twoMic());
+    await director.start();
+    // Three streams (primary + 2 extras) each arm both bindings...
+    expect(Object.keys(builtPerGroup).sort()).toEqual(['device:mic-2', 'device:mic-3', 'primary']);
+    expect(builtPerGroup.primary).toEqual(['a', 'b']);
+    // ...but the bar must not show the duplicates.
+    expect(director.getState().activePhrases).toEqual(['phrase-a', 'phrase-b']);
+  });
+
+  it('builds detectors per stream so per-stream state is never shared', async () => {
+    const { director, builtPerGroup } = makeDirector(twoMic());
+    await director.start();
+    // Every group was asked to build the same bindings — the point is that the
+    // builder was called with a distinct groupKey each time (see the engine hub).
+    for (const key of ['primary', 'device:mic-2', 'device:mic-3']) {
+      expect(builtPerGroup[key]).toEqual(['a', 'b']);
+    }
+  });
+
+  it('releases per-stream resources when a group is torn down', async () => {
+    const { director, disposedGroups } = makeDirector(twoMic());
+    await director.start();
+    disposedGroups.length = 0;
+    await director.reconcileNow();
+    expect(disposedGroups.sort()).toEqual(['device:mic-2', 'device:mic-3', 'primary']);
+  });
+
+  it('fires once even when two microphones hear the same phrase', async () => {
+    const second = makeMic();
+    const { director, mic, activated } = makeDirector({
+      settings: settings({ enabled: true, bindings: [binding('a')] }),
+      extraMics: { 'mic-2': second },
+      wakeInputIds: ['mic-2'],
+    });
+    await director.start();
+    // Both streams hear the phrase; the de-dupe must collapse it to one fire.
+    mic.feed(0.9);
+    second.feed(0.9);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(activated.filter((a) => a.phrase === 'phrase-a')).toHaveLength(1);
+  });
+
+  it('drops a group whose microphone fails to start', async () => {
+    const failing = makeMic();
+    failing.start = async () => false;
+    const { director, disposedGroups, builtPerGroup } = makeDirector({
+      settings: settings({ enabled: true, bindings: [binding('a')] }),
+      extraMics: { 'mic-bad': failing },
+      wakeInputIds: ['mic-bad'],
+    });
+    await director.start();
+    // The primary still listens; the failed group's detectors are disposed.
+    expect(director.getState().listening).toBe(true);
+    expect(disposedGroups).toContain('device:mic-bad');
+    expect(builtPerGroup['device:mic-bad']).toEqual(['a']);
   });
 });
