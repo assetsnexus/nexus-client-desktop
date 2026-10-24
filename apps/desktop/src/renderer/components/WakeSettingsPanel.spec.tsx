@@ -158,6 +158,25 @@ describe('WakeSettingsPanel', () => {
     expect(written.agentAliases.xeni).toEqual(['Zeni']);
   });
 
+  it('exposes the capture mode (live / batch / both) and persists a change', async () => {
+    render();
+    await flush();
+    const capture = [...container.querySelectorAll('select')].find((s) =>
+      [...s.options].some((o) => o.textContent === 'Audio batch only'),
+    ) as HTMLSelectElement;
+    expect(capture).toBeTruthy();
+    expect(capture.value).toBe('both');
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set;
+    await act(async () => {
+      setter.call(capture, 'batch');
+      capture.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+    const written = h.setSettings.mock.calls.at(-1)![0] as WakeSettings;
+    expect(written.captureMode).toBe('batch');
+  });
+
   it('shows an existing nickname and removes it', async () => {
     h.settings.mockResolvedValue(settings({ agentAliases: { xeni: ['Zeni'] } }));
     render();
