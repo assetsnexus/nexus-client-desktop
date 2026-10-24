@@ -18,13 +18,20 @@
  * testable without React or Electron.
  */
 
-import type { LocalVoiceState, VoiceBinaryStatus, WakeSttStatus } from '../../shared/ipc.js';
+import type {
+  GpuSttEngineStatus,
+  LocalVoiceState,
+  VoiceBinaryStatus,
+  WakeSttStatus,
+} from '../../shared/ipc.js';
 
-/** The three bridge reads the store keeps warm. */
+/** The bridge reads the store keeps warm. */
 export type VoiceStoreReader = {
   localVoiceGetState(): Promise<LocalVoiceState>;
   voiceBinaryStatus(): Promise<VoiceBinaryStatus>;
   wakeSttStatus(): Promise<WakeSttStatus>;
+  /** faster-whisper GPU engine status (optional: older preloads may lack it). */
+  gpuSttStatus?: () => Promise<GpuSttEngineStatus>;
 };
 
 export type VoiceSnapshot = {
@@ -34,11 +41,13 @@ export type VoiceSnapshot = {
   binary: VoiceBinaryStatus | null;
   /** Whether an `stt_phrase` wake can transcribe on-device right now. */
   wakeStt: WakeSttStatus | null;
+  /** The faster-whisper GPU engine status; null until read (or unsupported). */
+  gpuStt: GpuSttEngineStatus | null;
   /** True while a read is in flight (so the UI can show a subtle spinner). */
   loading: boolean;
 };
 
-const EMPTY: VoiceSnapshot = { state: null, binary: null, wakeStt: null, loading: false };
+const EMPTY: VoiceSnapshot = { state: null, binary: null, wakeStt: null, gpuStt: null, loading: false };
 
 export type VoiceStore = {
   /** Subscribe to snapshot changes; returns an unsubscribe. */
@@ -78,15 +87,17 @@ export function createVoiceStore(options: VoiceStoreOptions): VoiceStore {
     if (inFlight) return inFlight;
     emit({ ...snapshot, loading: true });
     inFlight = (async () => {
-      const [state, binary, wakeStt] = await Promise.all([
+      const [state, binary, wakeStt, gpuStt] = await Promise.all([
         options.reader.localVoiceGetState().catch(() => null),
         options.reader.voiceBinaryStatus().catch(() => null),
         options.reader.wakeSttStatus().catch(() => null),
+        options.reader.gpuSttStatus?.().catch(() => null) ?? Promise.resolve(null),
       ]);
       emit({
         state: state ?? snapshot.state,
         binary: binary ?? snapshot.binary,
         wakeStt: wakeStt ?? snapshot.wakeStt,
+        gpuStt: gpuStt ?? snapshot.gpuStt,
         loading: false,
       });
     })().finally(() => {

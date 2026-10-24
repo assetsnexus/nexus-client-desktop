@@ -368,6 +368,12 @@ export type WakeSttStatus = {
    * the settings UI can explain the speed.
    */
   threads: number;
+  /**
+   * Which on-device engine would serve the wake: the faster-whisper GPU engine
+   * (`faster_whisper`, effectively realtime), the CPU whisper.cpp server
+   * (`whisper_cpp`), or the user's custom local endpoint (`custom`).
+   */
+  backend: 'whisper_cpp' | 'faster_whisper' | 'custom';
 };
 
 export type AuthState =
@@ -764,6 +770,13 @@ export type LocalVoiceSettings = {
   customTtsEndpoint: LocalVoiceEndpoint | null;
   /** Acknowledge self-signed TLS for custom endpoints. */
   ignoreTlsForCustom: boolean;
+  /**
+   * On-device STT backend: `auto` prefers the faster-whisper GPU engine when it
+   * is installed and an NVIDIA GPU is available, else the whisper.cpp CPU server.
+   */
+  sttBackend: SttBackend;
+  /** CTranslate2 compute precision; `auto` picks the best for the device. */
+  sttComputeType: SttComputeType;
 };
 
 export type LocalVoiceEngineRow = {
@@ -785,6 +798,37 @@ export type LocalVoiceState = {
 };
 
 export type LocalVoiceSettingsPatch = Partial<LocalVoiceSettings>;
+
+/** On-device STT backend preference (renderer mirror of `@nexus/local-voice`). */
+export type SttBackend = 'auto' | 'whisper_cpp' | 'faster_whisper';
+
+/** CTranslate2 compute precision for the faster-whisper engine. */
+export type SttComputeType = 'auto' | 'float16' | 'int8_float16' | 'int8' | 'float32';
+
+/**
+ * State of the faster-whisper GPU STT engine. It is a Python runtime, so unlike
+ * the whisper.cpp binary it needs a local Python + a created virtualenv. Mirrors
+ * the main process's `GpuEngineStatus`.
+ */
+export type GpuSttEngineStatus = {
+  installed: boolean;
+  /** Directory the private Python environment lives in. */
+  envDir: string;
+  /** The detected NVIDIA GPU, or null when none was found. */
+  gpu: { name: string; memoryMiB: number; driverVersion: string | null } | null;
+  /** True when the GPU has enough VRAM to be worth using. */
+  gpuUsable: boolean;
+  /** True when a `python3` interpreter was found to build the venv from. */
+  pythonAvailable: boolean;
+  /** Interpreter used, when found. */
+  pythonPath: string | null;
+  /** pip requirement specifiers that will be installed. */
+  requirements: string[];
+  state: 'missing' | 'installing' | 'installed' | 'error';
+  progressPercent: number | null;
+  error: string | null;
+  instructions: { manualRequired: boolean; steps: string[] };
+};
 
 /**
  * State of the speech-engine runner binary (`whisper-server`) that the local
@@ -1586,6 +1630,12 @@ export type NexusBridge = {
   voiceBinaryInstall(): Promise<VoiceBinaryStatus>;
   voiceBinaryCancelInstall(): Promise<VoiceBinaryStatus>;
   voiceBinaryRemove(): Promise<VoiceBinaryStatus>;
+  // faster-whisper GPU engine: a private Python runtime for near-realtime local
+  // STT on an NVIDIA GPU (status / install / cancel / remove).
+  gpuSttStatus(): Promise<GpuSttEngineStatus>;
+  gpuSttInstall(): Promise<GpuSttEngineStatus>;
+  gpuSttCancelInstall(): Promise<GpuSttEngineStatus>;
+  gpuSttRemove(): Promise<GpuSttEngineStatus>;
 };
 
 /** IPC channel names. Kept explicit so main/preload stay in sync. */
@@ -1731,5 +1781,9 @@ export const IPC = {
   voiceBinaryInstall: 'nexus:voice-binary:install',
   voiceBinaryCancelInstall: 'nexus:voice-binary:cancel-install',
   voiceBinaryRemove: 'nexus:voice-binary:remove',
+  gpuSttStatus: 'nexus:gpu-stt:status',
+  gpuSttInstall: 'nexus:gpu-stt:install',
+  gpuSttCancelInstall: 'nexus:gpu-stt:cancel-install',
+  gpuSttRemove: 'nexus:gpu-stt:remove',
   openExternal: 'nexus:open-external',
 } as const;

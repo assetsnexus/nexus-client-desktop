@@ -193,6 +193,10 @@ const bridge: NexusBridge = {
   voiceBinaryInstall: () => ipcRenderer.invoke(IPC.voiceBinaryInstall),
   voiceBinaryCancelInstall: () => ipcRenderer.invoke(IPC.voiceBinaryCancelInstall),
   voiceBinaryRemove: () => ipcRenderer.invoke(IPC.voiceBinaryRemove),
+  gpuSttStatus: () => ipcRenderer.invoke(IPC.gpuSttStatus),
+  gpuSttInstall: () => ipcRenderer.invoke(IPC.gpuSttInstall),
+  gpuSttCancelInstall: () => ipcRenderer.invoke(IPC.gpuSttCancelInstall),
+  gpuSttRemove: () => ipcRenderer.invoke(IPC.gpuSttRemove),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 };
 

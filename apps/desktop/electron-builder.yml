@@ -26,6 +26,11 @@ asarUnpack:
 extraResources:
   - from: build/window-icon.png
     to: window-icon.png
+  # The faster-whisper server script the GPU STT engine spawns. It is a plain
+  # Python file (not compiled), so it ships next to the app bundle where
+  # `createGpuSttEngine` looks for it (`resources/local-voice/`).
+  - from: ../../packages/local-voice/python
+    to: local-voice
 
 # Auto-update channel metadata; a real update server is a later layer.
 publish:

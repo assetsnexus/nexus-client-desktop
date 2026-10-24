@@ -11,6 +11,7 @@
 import type { VoiceEngineKind, VoiceEngineProtocol } from './protocol.js';
 import { resolveEndpoint, validateBaseUrl, VOICE_ENGINE_PROTOCOLS } from './protocol.js';
 import type { CustomVoiceEndpoint } from './catalog.js';
+import { COMPUTE_TYPES, STT_BACKENDS, type ComputeType, type SttBackend } from './gpu-engine.js';
 
 export type LocalVoiceSettings = {
   enabled: boolean;
@@ -27,6 +28,10 @@ export type LocalVoiceSettings = {
   customTtsEndpoint: CustomVoiceEndpoint | null;
   /** Whether to acknowledge a self-signed TLS endpoint for all custom endpoints. */
   ignoreTlsForCustom: boolean;
+  /** On-device STT backend preference (GPU faster-whisper vs. CPU whisper.cpp). */
+  sttBackend: SttBackend;
+  /** CTranslate2 compute precision; 'auto' picks the best for the device. */
+  sttComputeType: ComputeType;
 };
 
 export const DEFAULT_LOCAL_VOICE_SETTINGS: LocalVoiceSettings = {
@@ -39,6 +44,8 @@ export const DEFAULT_LOCAL_VOICE_SETTINGS: LocalVoiceSettings = {
   customSttEndpoint: null,
   customTtsEndpoint: null,
   ignoreTlsForCustom: false,
+  sttBackend: 'auto',
+  sttComputeType: 'auto',
 };
 
 /** Coerce an untrusted persisted blob into valid settings. */
@@ -60,6 +67,12 @@ export function normalizeLocalVoiceSettings(raw: unknown): LocalVoiceSettings {
     customSttEndpoint: normalizeCustomEndpoint(r.customSttEndpoint, 'stt'),
     customTtsEndpoint: normalizeCustomEndpoint(r.customTtsEndpoint, 'tts'),
     ignoreTlsForCustom: r.ignoreTlsForCustom === true,
+    sttBackend: (STT_BACKENDS as string[]).includes(String(r.sttBackend))
+      ? (r.sttBackend as SttBackend)
+      : DEFAULT_LOCAL_VOICE_SETTINGS.sttBackend,
+    sttComputeType: (COMPUTE_TYPES as string[]).includes(String(r.sttComputeType))
+      ? (r.sttComputeType as ComputeType)
+      : DEFAULT_LOCAL_VOICE_SETTINGS.sttComputeType,
   };
 }
 

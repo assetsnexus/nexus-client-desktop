@@ -18,6 +18,7 @@ export * from './resources.js';
 export * from './archive.js';
 export * from './binary-catalog.js';
 export * from './binary-plan.js';
+export * from './gpu-engine.js';
 export * from './download.js';
 export * from './downloader.js';
 export * from './lifecycle.js';

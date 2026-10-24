@@ -1,12 +1,14 @@
 import { useCallback, useState, type CSSProperties } from 'react';
 import {
   bridge,
+  type GpuSttEngineStatus,
   type LocalVoiceEndpoint,
   type LocalVoiceModelKind,
   type LocalVoiceModelRow,
   type LocalVoiceProtocol,
   type LocalVoiceSettings,
   type LocalVoiceState,
+  type SttBackend,
   type VoiceBinaryStatus,
 } from '../bridge.js';
 import { useVoiceSnapshot, refreshVoiceState } from '../voice/use-voice-store.js';
@@ -473,6 +475,163 @@ function VoiceBinaryRow({ status }: { status: VoiceBinaryStatus | null }) {
   );
 }
 
+/**
+ * faster-whisper GPU engine row: a private Python runtime that runs Whisper on
+ * an NVIDIA GPU (near-realtime), as an alternative to the CPU whisper.cpp server.
+ * Shows the detected GPU, the install state, and a one-click install.
+ */
+function GpuEngineRow({ status }: { status: GpuSttEngineStatus | null }) {
+  const [busy, setBusy] = useState(false);
+  const [showSteps, setShowSteps] = useState(false);
+
+  async function act(fn: () => Promise<GpuSttEngineStatus>) {
+    setBusy(true);
+    try {
+      await fn();
+      await refreshVoiceState();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!status) return null;
+  const working = status.state === 'installing';
+  const gpuLabel = status.gpu
+    ? `${status.gpu.name} (${Math.round(status.gpu.memoryMiB / 1024)} GB VRAM)`
+    : 'No NVIDIA GPU detected';
+
+  return (
+    <div
+      style={{
+        ...row,
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        gap: 4,
+        padding: '8px 10px',
+        borderRadius: 8,
+        background: status.gpuUsable ? '#101823' : 'transparent',
+        border: status.gpuUsable ? '1px solid #2f5c9e' : '1px solid transparent',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            color: '#7fb2ff',
+            border: '1px solid #2f5c9e',
+            borderRadius: 999,
+            padding: '1px 7px',
+          }}
+        >
+          gpu
+        </span>
+        <strong style={{ fontSize: 12 }}>faster-whisper (NVIDIA GPU)</strong>
+        <span style={{ flex: 1 }} />
+        {status.installed ? (
+          <span style={{ fontSize: 11, color: '#4ade80', fontWeight: 600 }}>✓ Installed</span>
+        ) : status.gpuUsable ? (
+          <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 600 }}>Not installed</span>
+        ) : null}
+      </div>
+      <span style={{ fontSize: 11, color: '#6b7784', lineHeight: 1.5 }}>
+        Runs Whisper through CTranslate2 on your GPU — the same model that takes tens of seconds on
+        CPU finishes in a fraction of a second, i.e. effectively realtime. Used for wake words and
+        dictation when selected above. {gpuLabel}.
+      </span>
+
+      {working ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div
+            style={{
+              height: 6,
+              borderRadius: 999,
+              background: '#0f1419',
+              border: '1px solid #2a333d',
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ height: '100%', width: `${status.progressPercent ?? 0}%`, background: '#3f6cb0' }} />
+          </div>
+          <div style={{ display: 'flex', fontSize: 11, color: '#6b7784', alignItems: 'center' }}>
+            <span>Installing the Python runtime + faster-whisper…</span>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={tinyButton} onClick={() => void act(() => bridge.gpuSttCancelInstall())}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {status.error ? <span style={{ fontSize: 11, color: '#f2a1a1' }}>{status.error}</span> : null}
+
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {status.installed ? (
+          <button
+            type="button"
+            style={tinyButton}
+            disabled={busy}
+            onClick={() => void act(() => bridge.gpuSttRemove())}
+          >
+            Remove
+          </button>
+        ) : (
+          <button
+            type="button"
+            style={{ ...button, padding: '3px 12px' }}
+            disabled={busy || working || !status.gpuUsable || !status.pythonAvailable}
+            title={
+              !status.gpuUsable
+                ? 'No usable NVIDIA GPU was detected'
+                : !status.pythonAvailable
+                  ? 'Python 3 is required to build the environment'
+                  : undefined
+            }
+            onClick={() => void act(() => bridge.gpuSttInstall())}
+          >
+            Install (one click)
+          </button>
+        )}
+        <button type="button" style={tinyButton} onClick={() => setShowSteps((v) => !v)}>
+          {showSteps ? 'Hide details' : 'Details'}
+        </button>
+      </div>
+
+      {showSteps ? (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            padding: '8px 10px',
+            borderRadius: 8,
+            background: '#0f1419',
+            border: '1px solid #2a333d',
+            fontSize: 11,
+            color: '#9aa7b5',
+          }}
+        >
+          <span>
+            Private environment: <code>{status.envDir}</code>
+            {status.pythonPath ? (
+              <>
+                {' '}· Python: <code>{status.pythonPath}</code>
+              </>
+            ) : null}
+          </span>
+          <span>Installs: {status.requirements.join(', ')}</span>
+          <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
+            {status.instructions.steps.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** Custom self-hosted endpoint editor (protocol + URL + ignore-TLS). */
 function EndpointEditor({
   kind,
@@ -725,6 +884,19 @@ export function LocalVoicePanel() {
             <option value="local">On-device</option>
           </select>
         </label>
+        <label style={{ ...field, flex: 1, minWidth: 220 }}>
+          <span>On-device speech backend</span>
+          <select
+            style={input}
+            value={settings.sttBackend}
+            disabled={busy}
+            onChange={(e) => void patch({ sttBackend: e.target.value as SttBackend })}
+          >
+            <option value="auto">Automatic (prefer GPU when available)</option>
+            <option value="faster_whisper">faster-whisper (NVIDIA GPU)</option>
+            <option value="whisper_cpp">whisper.cpp (CPU)</option>
+          </select>
+        </label>
         <label style={{ ...field, minWidth: 180 }}>
           <span>Unload after idle (seconds)</span>
           <input
@@ -755,6 +927,13 @@ export function LocalVoicePanel() {
         manual setup.
       </p>
       <VoiceBinaryRow status={binary} />
+
+      <h3 style={{ margin: '4px 0 0', fontSize: 13 }}>GPU speech engine (faster-whisper)</h3>
+      <p style={{ margin: 0, color: '#6b7784', fontSize: 11 }}>
+        For an NVIDIA GPU: near-realtime local transcription (no more tens-of-seconds waits on
+        CPU). The app creates a private Python environment — nothing is installed system-wide.
+      </p>
+      <GpuEngineRow status={snapshot.gpuStt} />
 
       <h3 style={{ margin: '4px 0 0', fontSize: 13 }}>Text-to-speech</h3>
       {ttsModels.map((m) => (

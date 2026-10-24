@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { LocalVoiceModel } from '@nexus/local-voice';
+import { FASTER_WHISPER_DEFAULT_PORT, type LocalVoiceModel } from '@nexus/local-voice';
 import {
   encodeWav,
   isLocalWakeHost,
+  isSttServerServing,
   createWakeStt,
   buildPhraseBiasPrompt,
   defaultWhisperThreads,
@@ -66,14 +67,12 @@ describe('defaultWhisperThreads', () => {
 });
 
 describe('buildPhraseBiasPrompt', () => {
-  it('builds a vocabulary hint from the armed phrases', () => {
-    expect(buildPhraseBiasPrompt(['Nox', 'Razail'])).toBe('Vocabulary: Nox, Razail.');
+  it('builds a bare comma list from the armed phrases (no leak-prone framing)', () => {
+    expect(buildPhraseBiasPrompt(['Nox', 'Razail'])).toBe('Nox, Razail');
   });
 
   it('de-duplicates case-insensitively and trims/collapses whitespace', () => {
-    expect(buildPhraseBiasPrompt(['  Nox ', 'nox', 'B2B   Services'])).toBe(
-      'Vocabulary: Nox, B2B Services.',
-    );
+    expect(buildPhraseBiasPrompt(['  Nox ', 'nox', 'B2B   Services'])).toBe('Nox, B2B Services');
   });
 
   it('returns null when there is nothing to bias toward', () => {
@@ -93,6 +92,37 @@ describe('isLocalWakeHost', () => {
     for (const h of ['api.openai.com', '8.8.8.8', '172.32.0.1', 'example.com', '']) {
       expect(isLocalWakeHost(h)).toBe(false);
     }
+  });
+});
+
+describe('isSttServerServing', () => {
+  const json = (body: unknown, ok = true) => ({
+    ok,
+    text: async () => JSON.stringify(body),
+  });
+
+  it('accepts our whisper.cpp / faster-whisper health shape', async () => {
+    const fetchFn = vi.fn(async () => json({ status: 'ok' })) as unknown as typeof fetch;
+    expect(await isSttServerServing(18085, fetchFn)).toBe(true);
+    expect(fetchFn).toHaveBeenCalledWith('http://127.0.0.1:18085/health', expect.anything());
+  });
+
+  it('rejects a foreign service that only happens to hold the port (InfluxDB /health)', async () => {
+    // InfluxDB answers /health with a different shape; a bare TCP connect would
+    // have wrongly adopted it as our STT server.
+    const fetchFn = vi.fn(async () =>
+      json({ name: 'influxdb', message: 'ready for queries and writes', status: 'pass' }),
+    ) as unknown as typeof fetch;
+    expect(await isSttServerServing(8086, fetchFn)).toBe(false);
+  });
+
+  it('rejects a non-JSON / non-ok response and a failed fetch', async () => {
+    const html = vi.fn(async () => ({ ok: true, text: async () => '<html>hi</html>' })) as unknown as typeof fetch;
+    expect(await isSttServerServing(8086, html)).toBe(false);
+    const down = vi.fn(async () => {
+      throw new Error('ECONNREFUSED');
+    }) as unknown as typeof fetch;
+    expect(await isSttServerServing(8086, down)).toBe(false);
   });
 });
 
@@ -486,5 +516,193 @@ describe('createWakeStt', () => {
     const status = await stt.status();
     expect(status.code).toBe('cloud_refused');
     expect(status.usingCustomEndpoint).toBe(true);
+  });
+});
+
+describe('createWakeStt — faster-whisper GPU engine', () => {
+  const GPU_PORT = FASTER_WHISPER_DEFAULT_PORT;
+
+  function gpuRunner(over: Partial<Parameters<typeof createWakeStt>[0]['gpuRunner']> = {}) {
+    return {
+      port: GPU_PORT,
+      isInstalled: vi.fn(async () => true),
+      preferred: vi.fn(async () => true),
+      spawn: vi.fn(() => ({ on: vi.fn(), kill: vi.fn() })),
+      ...over,
+    } as unknown as NonNullable<Parameters<typeof createWakeStt>[0]['gpuRunner']>;
+  }
+
+  it('reports the GPU backend in status without spawning anything', async () => {
+    const model = sttModel();
+    const runner = gpuRunner();
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      listModels: () => [model],
+      fileExists: () => true,
+      portInUse: async () => false,
+      gpuRunner: runner,
+      gpuPort: GPU_PORT,
+    });
+    const status = await stt.status();
+    expect(status.ready).toBe(true);
+    expect(status.backend).toBe('faster_whisper');
+    expect(runner.spawn).not.toHaveBeenCalled();
+  });
+
+  it('serves the wake from the GPU server (its own port) when preferred', async () => {
+    const model = sttModel();
+    let gpuBound = false;
+    const runner = gpuRunner();
+    const fetchFn = vi.fn(async (url: string) => ({
+      ok: true,
+      text: async () => JSON.stringify({ text: url.includes(String(GPU_PORT)) ? 'gpu' : 'cpu' }),
+    })) as unknown as typeof fetch;
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      listModels: () => [model],
+      fileExists: () => true,
+      startDelayMs: 0,
+      // Only the GPU port is bound; the CPU port is free.
+      portInUse: async (p) => (p === GPU_PORT ? gpuBound : false),
+      fetchFn,
+      gpuRunner: runner,
+      gpuPort: GPU_PORT,
+    });
+    setTimeout(() => {
+      gpuBound = true;
+    }, 0);
+    expect(await stt.transcribe(new Float32Array([0.3]), 16_000)).toBe('gpu');
+    // The GPU runner was asked to spawn (phrase hotwords included), never the
+    // whisper.cpp binary.
+    expect(runner.spawn).toHaveBeenCalledOnce();
+    const spawnArg = (runner.spawn as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]![0] as {
+      ggmlFileName: string | null;
+      port: number;
+      hotwords: string | null;
+    };
+    expect(spawnArg.port).toBe(GPU_PORT);
+    expect(spawnArg.ggmlFileName).toBe('ggml-small.bin');
+    stt.dispose();
+  });
+
+  it('falls back to whisper.cpp when the GPU engine is not preferred', async () => {
+    const model = sttModel();
+    const spawnFn = vi.fn(() => ({ on: vi.fn(), kill: vi.fn() }));
+    let cpuBound = false;
+    const runner = gpuRunner({ preferred: vi.fn(async () => false) });
+    const fetchFn = vi.fn(async () => ({ ok: true, text: async () => JSON.stringify({ text: 'cpu' }) })) as unknown as typeof fetch;
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      listModels: () => [model],
+      resolveBinary: () => 'whisper-server',
+      fileExists: () => true,
+      startDelayMs: 0,
+      portInUse: async (p) => (p === 8085 ? cpuBound : false),
+      fetchFn,
+      spawnFn: spawnFn as unknown as typeof import('node:child_process').spawn,
+      gpuRunner: runner,
+      gpuPort: GPU_PORT,
+    });
+    setTimeout(() => {
+      cpuBound = true;
+    }, 0);
+    expect(await stt.transcribe(new Float32Array([0.3]), 16_000)).toBe('cpu');
+    expect(runner.spawn).not.toHaveBeenCalled();
+    expect(spawnFn).toHaveBeenCalledOnce();
+    expect((await stt.status()).backend).toBe('whisper_cpp');
+    stt.dispose();
+  });
+
+  it('falls back to whisper.cpp when the GPU server fails to start', async () => {
+    const model = sttModel();
+    const spawnFn = vi.fn(() => ({ on: vi.fn(), kill: vi.fn() }));
+    const urls: string[] = [];
+    // Preferred, but spawn returns null (engine vanished between checks).
+    const runner = gpuRunner({ spawn: vi.fn(() => null) });
+    const fetchFn = vi.fn(async (url: string) => {
+      urls.push(url);
+      return { ok: true, text: async () => JSON.stringify({ text: 'cpu' }) };
+    }) as unknown as typeof fetch;
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      listModels: () => [model],
+      resolveBinary: () => 'whisper-server',
+      fileExists: () => true,
+      startDelayMs: 0,
+      // The CPU port is already serving (e.g. the lifecycle started it); the GPU
+      // port never comes up.
+      portInUse: async (p) => p === 8085,
+      fetchFn,
+      spawnFn: spawnFn as unknown as typeof import('node:child_process').spawn,
+      gpuRunner: runner,
+      gpuPort: GPU_PORT,
+    });
+    expect(await stt.transcribe(new Float32Array([0.3]), 16_000)).toBe('cpu');
+    // The GPU engine was tried first, then the CPU server answered instead.
+    expect(runner.spawn).toHaveBeenCalledOnce();
+    expect(urls[0]).toContain('8085');
+    expect(urls[0]).not.toContain(String(GPU_PORT));
+    stt.dispose();
+  });
+
+  it('ignores the GPU engine for a custom local endpoint (backend=custom)', async () => {
+    const runner = gpuRunner();
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/none',
+      customEndpoint: () => ({
+        kind: 'stt',
+        protocol: 'whisper_rest',
+        baseUrl: 'http://127.0.0.1:9000',
+        ignoreTls: false,
+      }),
+      findModel: () => null,
+      isInstalled: () => false,
+      selectedModelId: () => null,
+      gpuRunner: runner,
+      gpuPort: GPU_PORT,
+    });
+    expect((await stt.status()).backend).toBe('custom');
+    expect(runner.spawn).not.toHaveBeenCalled();
+  });
+
+  it('does not let a throwing GPU runner break readiness', async () => {
+    const model = sttModel();
+    const runner = gpuRunner({
+      isInstalled: vi.fn(async () => {
+        throw new Error('probe failed');
+      }),
+    });
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      listModels: () => [model],
+      resolveBinary: () => 'whisper-server',
+      fileExists: () => true,
+      portInUse: async () => false,
+      gpuRunner: runner,
+      gpuPort: GPU_PORT,
+    });
+    const status = await stt.status();
+    expect(status.ready).toBe(true);
+    expect(status.backend).toBe('whisper_cpp');
   });
 });

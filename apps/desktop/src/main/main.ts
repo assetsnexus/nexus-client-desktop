@@ -71,6 +71,8 @@ import {
 import { createWakeHost } from './wake-host.js';
 import { createWakeStt } from './wake-stt.js';
 import { createVoiceBinaryManager } from './voice-binaries.js';
+import { createGpuSttEngine } from './gpu-stt-engine.js';
+import { FASTER_WHISPER_DEFAULT_PORT } from '@nexus/local-voice';
 import { normalizeWakeBinding } from '../shared/wake.js';
 import { createWakeManager } from './wake-manager.js';
 import { createWakeAgentDirectory } from './wake-agents.js';
@@ -414,6 +416,27 @@ const localVoiceManager = createLocalVoiceManager({
  */
 const voiceBinaries = createVoiceBinaryManager();
 
+/**
+ * faster-whisper GPU STT engine (near-realtime local speech on an NVIDIA GPU).
+ * It is a private Python runtime under the app data dir; this resolves the
+ * shipped server script across the dev / packaged layouts and wires the status +
+ * one-click install IPC. The wake + dictation paths prefer it when ready.
+ */
+const gpuStt = createGpuSttEngine({
+  dataDir: app.getPath('userData'),
+  // Dev: the script sits in the sibling `packages/local-voice/python`. Packaged:
+  // electron-builder copies it to `resources/` (see electron-builder.yml). Both
+  // are tried so no environment has to guess.
+  scriptPath: isDev
+    ? join(__dirname_, '../../../packages/local-voice/python/local-stt-server.py')
+    : join(process.resourcesPath, 'local-voice/local-stt-server.py'),
+  scriptCandidates: [
+    join(__dirname_, '../../../packages/local-voice/python/local-stt-server.py'),
+    join(process.resourcesPath, 'local-voice/local-stt-server.py'),
+    join(process.resourcesPath, 'local-stt-server.py'),
+  ],
+});
+
 // Desktop-local model instances (Ollama / ComfyUI). The user may configure
 // several and have a job routed to the first available (or least-busy, or a
 // round-robin) one. Probing never throws; a dead box just drops out of rotation.
@@ -450,6 +473,17 @@ const wakeStt = createWakeStt({
   binaryResolver: (command) => voiceBinaries.resolveBinary(command),
   // Tell "install a model" apart from "install the runner" for the UI.
   runnerInstalled: () => voiceBinaries.isInstalled(),
+  // When the faster-whisper GPU engine is installed and the user's backend
+  // preference allows it, serve the wake from the GPU (effectively realtime)
+  // instead of the CPU whisper.cpp server.
+  gpuRunner: {
+    // A high port, deliberately clear of 8080-8090 where common dev services squat
+    // (InfluxDB owns 8086 on the dev box); a stolen port silently forced CPU.
+    port: FASTER_WHISPER_DEFAULT_PORT,
+    isInstalled: () => gpuStt.isInstalled(),
+    preferred: () => localVoiceManager.preferGpuStt(gpuStt),
+    spawn: (input) => gpuStt.spawnServer(input),
+  },
 });
 
 /**
@@ -1474,6 +1508,17 @@ function registerIpc(): void {
   ipcMain.handle(IPC.voiceBinaryInstall, () => voiceBinaries.install());
   ipcMain.handle(IPC.voiceBinaryCancelInstall, () => voiceBinaries.cancelInstall());
   ipcMain.handle(IPC.voiceBinaryRemove, () => voiceBinaries.remove());
+  // faster-whisper GPU engine: private Python runtime for near-realtime STT.
+  ipcMain.handle(IPC.gpuSttStatus, () => gpuStt.status());
+  ipcMain.handle(IPC.gpuSttInstall, () => gpuStt.install());
+  ipcMain.handle(IPC.gpuSttCancelInstall, () => {
+    gpuStt.cancelInstall();
+    return gpuStt.status();
+  });
+  ipcMain.handle(IPC.gpuSttRemove, () => {
+    gpuStt.remove();
+    return gpuStt.status();
+  });
 
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {

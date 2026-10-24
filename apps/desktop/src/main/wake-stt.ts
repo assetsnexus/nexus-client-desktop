@@ -17,10 +17,14 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { connect } from 'node:net';
 import { cpus } from 'node:os';
 import { join } from 'node:path';
-import { modelDirName, resolveEndpoint, type LocalVoiceModel } from '@nexus/local-voice';
+import {
+  FASTER_WHISPER_DEFAULT_PORT,
+  modelDirName,
+  resolveEndpoint,
+  type LocalVoiceModel,
+} from '@nexus/local-voice';
 import type { LocalVoiceEndpoint } from '../shared/ipc.js';
 import { primaryModelFile } from './wake-host.js';
 
@@ -38,10 +42,13 @@ export function defaultWhisperThreads(coreCount: number = cpus().length): number
 }
 
 /**
- * Build the initial-prompt phrase bias. whisper.cpp conditions the decoder on
- * `--prompt` / the `prompt` form field, which sharpens recognition of unusual
- * proper nouns — exactly our case, since wake phrases are agent names ("Nox",
- * "Razail"). Framing them as a vocabulary list keeps it a hint, not a transcript.
+ * Build the phrase-bias string from the armed wake phrases (agent names).
+ *
+ * A **bare, comma-separated list** — no "Vocabulary:" framing. The same value
+ * feeds whisper.cpp's `--prompt` / `prompt` field and the faster-whisper
+ * server's `hotwords`; framing was measured to *leak into* short transcripts
+ * ("Vocabulary and conservation chambers…"), and hotwords in particular should
+ * contain only the terms to favour, not sentence filler.
  */
 export function buildPhraseBiasPrompt(phrases: readonly string[]): string | null {
   const cleaned: string[] = [];
@@ -55,7 +62,7 @@ export function buildPhraseBiasPrompt(phrases: readonly string[]): string | null
     cleaned.push(phrase);
   }
   if (cleaned.length === 0) return null;
-  return `Vocabulary: ${cleaned.join(', ')}.`;
+  return cleaned.join(', ');
 }
 
 /** WAV container for one utterance. Kept pure and testable. */
@@ -111,22 +118,36 @@ export function isLocalWakeHost(hostname: string): boolean {
   return false;
 }
 
-/** True when something is already listening on the loopback port. */
-function defaultPortInUse(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = connect({ host: '127.0.0.1', port }, () => {
-      socket.destroy();
-      resolve(true);
+/**
+ * True when the port is serving *our* STT server (whisper.cpp or the
+ * faster-whisper Python server), verified over HTTP rather than by a bare TCP
+ * connect.
+ *
+ * This matters: any unrelated service can own the port (InfluxDB defaults to
+ * 8086, which collides with the dev-service range), and a bare connect would
+ * then report "already serving" — the engine would reuse a foreign server and
+ * every transcription would silently fail. Both engines answer `GET /health`
+ * with `{"status":"ok"}`, so requiring that shape proves it is ours.
+ */
+export async function isSttServerServing(
+  port: number,
+  doFetch: typeof fetch,
+): Promise<boolean> {
+  try {
+    const res = await doFetch(`http://127.0.0.1:${port}/health`, {
+      signal: AbortSignal.timeout(1500),
     });
-    socket.on('error', () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.setTimeout(400, () => {
-      socket.destroy();
-      resolve(false);
-    });
-  });
+    if (!res.ok) return false;
+    const text = await res.text();
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      return parsed.status === 'ok' || typeof parsed.text === 'string';
+    } catch {
+      return false;
+    }
+  } catch {
+    return false;
+  }
 }
 
 /** A resolved, local-only transcription target. */
@@ -170,6 +191,33 @@ export type WakeSttStatus = {
    * whisper.cpp defaults to 4, which is why an un-tuned CPU build felt unusable.
    */
   threads: number;
+  /**
+   * Which on-device engine would serve the wake. `faster_whisper` is the GPU
+   * (CTranslate2) engine and is effectively realtime; `whisper_cpp` is the CPU
+   * fallback. Surfaced so the settings UI can say which one is in play.
+   */
+  backend: 'whisper_cpp' | 'faster_whisper' | 'custom';
+};
+
+/**
+ * The faster-whisper GPU engine, as the wake resolver needs it. Injected so the
+ * wake module never imports the Python-process machinery directly (and can be
+ * unit-tested without a GPU). Every method is best-effort and must not throw.
+ */
+export type WakeGpuRunner = {
+  /** True when the venv interpreter + server script are present. */
+  isInstalled: () => Promise<boolean>;
+  /** True when the engine should be preferred over whisper.cpp right now. */
+  preferred: () => Promise<boolean>;
+  /** Spawn the Python server for the given GGML model file; null when it cannot. */
+  spawn: (input: {
+    ggmlFileName: string | null;
+    port: number;
+    /** Phrase bias (armed agent names); sent as `--hotwords`, never as a prompt. */
+    hotwords: string | null;
+  }) => ChildProcess | null;
+  /** Port the Python server listens on (kept distinct from the CPU engine's). */
+  port: number;
 };
 
 export type WakeSttDeps = {
@@ -230,6 +278,18 @@ export type WakeSttDeps = {
   portInUse?: (port: number) => Promise<boolean>;
   /** Injected for tests; defaults to global fetch. */
   fetchFn?: typeof fetch;
+  /**
+   * The faster-whisper GPU engine, when configured. When present and ready it is
+   * preferred over the CPU whisper.cpp server: on a GPU the same model is
+   * effectively realtime, and the wake caption stops lagging speech.
+   */
+  gpuRunner?: WakeGpuRunner;
+  /**
+   * The GPU engine's port. Defaults to {@link FASTER_WHISPER_DEFAULT_PORT} (a
+   * high port clear of the dev-service range the CPU engine's 8085 can collide
+   * with). Kept distinct from the CPU engine's port so they never contend.
+   */
+  gpuPort?: number;
 };
 
 export type WakeStt = {
@@ -252,16 +312,44 @@ export type WakeStt = {
  */
 export function createWakeStt(deps: WakeSttDeps): WakeStt {
   const port = deps.port ?? 8085;
+  const gpuPort = deps.gpuPort ?? FASTER_WHISPER_DEFAULT_PORT;
   const command = deps.command ?? 'whisper-server';
   const threads = deps.threads ?? defaultWhisperThreads();
   const spawnFn = deps.spawnFn ?? spawn;
   const doFetch = deps.fetchFn ?? fetch;
   const fileExists = deps.fileExists ?? existsSync;
-  const probePort = deps.portInUse ?? defaultPortInUse;
   let proc: ChildProcess | null = null;
   let starting: Promise<void> | null = null;
+  /** The faster-whisper (GPU) server process, when that engine served the wake. */
+  let gpuProc: ChildProcess | null = null;
+  let gpuStarting: Promise<void> | null = null;
   /** True when a server we did NOT spawn is already serving on our port. */
   let externalServer = false;
+
+  /**
+   * True when *our* STT server is answering on the port. Uses the injected
+   * `portInUse` probe when a test supplied one (so tests keep their TCP-only
+   * semantics), and otherwise proves it over HTTP via the `/health` contract.
+   */
+  function servingOurServer(p: number): Promise<boolean> {
+    if (deps.portInUse) return deps.portInUse(p).catch(() => false);
+    return isSttServerServing(p, doFetch);
+  }
+  /**
+   * Whether the faster-whisper GPU engine should serve the wake. Best-effort:
+   * any failure (engine not installed, no GPU, probe error) means "no", and the
+   * whisper.cpp path is used exactly as before.
+   */
+  async function gpuPreferred(): Promise<boolean> {
+    const runner = deps.gpuRunner;
+    if (!runner) return false;
+    try {
+      if (!(await runner.isInstalled())) return false;
+      return await runner.preferred();
+    } catch {
+      return false;
+    }
+  }
 
   /** True when a runnable runner is present (managed copy or PATH). */
   function runnerIsInstalled(): boolean {
@@ -342,8 +430,10 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
    */
   async function ensureServer(model: LocalVoiceModel): Promise<WakeSttTarget | null> {
     const url = `http://127.0.0.1:${port}/inference`;
-    // Someone already serves this port → reuse it (do not kill what we did not start).
-    if (!proc && (await probePort(port).catch(() => false))) {
+    // Someone already serves this port → reuse it (do not kill what we did not
+    // start). Verified over HTTP, not a bare TCP connect: an unrelated service on
+    // the port must not be mistaken for our STT server.
+    if (!proc && (await servingOurServer(port))) {
       externalServer = true;
       return { url, model: model.modelRef ?? model.label };
     }
@@ -397,7 +487,57 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
     if (!proc) return null;
     // Confirm the server is actually serving: a spawned-but-crashed binary would
     // otherwise be reported as ready and every transcription would silently fail.
-    if (!(await probePort(port).catch(() => false))) return null;
+    if (!(await servingOurServer(port))) return null;
+    return { url, model: model.modelRef ?? model.label };
+  }
+
+  /**
+   * Ensure the faster-whisper (GPU) Python server is serving its own port. Kept
+   * separate from {@link ensureServer} because it is a different process (a venv
+   * Python, not a binary) and a different port, so the two engines never contend
+   * for a socket. Returns null when it cannot start, so the caller falls back to
+   * whisper.cpp rather than failing the wake.
+   */
+  async function ensureGpuServer(model: LocalVoiceModel): Promise<WakeSttTarget | null> {
+    const runner = deps.gpuRunner;
+    if (!runner) return null;
+    const url = `http://127.0.0.1:${gpuPort}/inference`;
+    // Reuse a server already bound to the GPU port (e.g. a prior session). HTTP
+    // verified: a foreign service on this port must not be adopted as our server.
+    if (!gpuProc && (await servingOurServer(gpuPort))) {
+      return { url, model: model.modelRef ?? model.label };
+    }
+    if (!gpuProc) {
+      if (!gpuStarting) {
+        gpuStarting = new Promise<void>((resolve) => {
+          try {
+            // Phrase bias is passed as `hotwords`, not an initial prompt: a prompt
+            // leaks into short transcripts. See `buildPhraseBiasPrompt`.
+            const hotwords = buildPhraseBiasPrompt(deps.wakePhrases?.() ?? []);
+            gpuProc = runner.spawn({
+              ggmlFileName: primaryModelFile(model),
+              port: gpuPort,
+              hotwords,
+            });
+            gpuProc?.on('exit', () => {
+              gpuProc = null;
+            });
+            gpuProc?.on('error', () => {
+              gpuProc = null;
+            });
+          } catch {
+            gpuProc = null;
+          }
+          // The Python server imports CTranslate2 and loads the model before it
+          // binds, which takes noticeably longer than whisper.cpp's startup.
+          setTimeout(resolve, deps.startDelayMs ?? 1200);
+        });
+      }
+      await gpuStarting;
+      gpuStarting = null;
+    }
+    if (!gpuProc) return null;
+    if (!(await servingOurServer(gpuPort))) return null;
     return { url, model: model.modelRef ?? model.label };
   }
 
@@ -455,7 +595,7 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
     }
     if (!spawn) {
       // Capability check: the weights must be on disk, and either a server is
-      // already serving or a runner exists to start one.
+      // already serving or a runner exists (GPU engine or whisper.cpp) to start.
       if (!modelFilePath(model)) {
         return {
           target: null,
@@ -465,7 +605,12 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
           reason: 'The installed speech model file is missing — reinstall it under “Local speech models”.',
         };
       }
-      const serving = await probePort(port).catch(() => false);
+      // A GPU engine that is installed + has a usable GPU is always "capable":
+      // it starts on demand, so readiness must not depend on it running now.
+      if (await gpuPreferred()) {
+        return { target: null, reason: null, code: null, model, usingCustomEndpoint: false, capable: true };
+      }
+      const serving = await servingOurServer(port);
       if (serving || runnerIsInstalled()) {
         return {
           target: null,
@@ -485,6 +630,13 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
           'Install the whisper.cpp runner (“Local speech models” → Speech engine runner → Install) to run the installed speech model.',
       };
     }
+    // Prefer the faster-whisper GPU engine when it is ready: it is effectively
+    // realtime, where whisper.cpp on CPU lags speech. Fall back to whisper.cpp
+    // whenever the GPU engine is unavailable or fails to start.
+    if (await gpuPreferred()) {
+      const gpuTarget = await ensureGpuServer(model);
+      if (gpuTarget) return { target: gpuTarget, reason: null, code: null, model, usingCustomEndpoint: false };
+    }
     const target = await ensureServer(model);
     if (!target) {
       // A model is present but nothing can run it: distinguish a missing runner
@@ -496,7 +648,7 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
         model,
         usingCustomEndpoint: false,
         reason: runner
-          ? 'The local speech server could not start. Try again, or check that port 8085 is free.'
+          ? `The local speech server could not start. Try again, or check that port ${port} is free.`
           : 'Install the whisper.cpp runner (“Local speech models” → Speech engine runner → Install) to run the installed speech model.',
       };
     }
@@ -510,6 +662,13 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
       // already-serving server, a runnable model+runner, or a local endpoint.
       const r = await resolveTarget(false);
       const ready = r.target !== null || r.capable === true;
+      // Which engine would serve: the GPU engine when it is ready, else the CPU
+      // fallback (or the user's custom local endpoint).
+      const backend: WakeSttStatus['backend'] = r.usingCustomEndpoint
+        ? 'custom'
+        : (await gpuPreferred())
+          ? 'faster_whisper'
+          : 'whisper_cpp';
       return {
         ready,
         reason: ready ? null : r.reason,
@@ -519,6 +678,7 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
         usingCustomEndpoint: r.usingCustomEndpoint,
         runnerInstalled: r.usingCustomEndpoint ? true : runnerIsInstalled(),
         threads,
+        backend,
       };
     },
     async transcribe(pcm, sampleRate, phrases) {
@@ -556,7 +716,19 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
       }
     },
     dispose() {
-      // Never kill a server we did not start (the local-voice lifecycle owns it).
+      // Kill the GPU (Python) server we spawned, if any. A GPU server never goes
+      // through the whisper.cpp lifecycle, so it is always ours to stop.
+      if (gpuProc) {
+        const p = gpuProc;
+        gpuProc = null;
+        try {
+          p.kill('SIGTERM');
+        } catch {
+          /* ignore */
+        }
+      }
+      // Never kill a whisper.cpp server we did not start (the local-voice
+      // lifecycle owns that one).
       if (!proc || externalServer) return;
       const p = proc;
       proc = null;

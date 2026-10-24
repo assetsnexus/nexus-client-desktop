@@ -29,6 +29,7 @@ import {
   modelDirName,
   normalizeLocalVoiceSettings,
   parseLocalVoiceCatalog,
+  pickSttBackend,
   probeResources,
   runDownloadPlan,
   validateLocalVoiceSettings,
@@ -617,6 +618,39 @@ export function createLocalVoiceManager(options: LocalVoiceManagerOptions) {
     /** The configured custom STT endpoint, if any (wake STT target selection). */
     customSttEndpoint(): LocalVoiceSettings['customSttEndpoint'] {
       return readSettings().customSttEndpoint;
+    },
+
+    /** The user's on-device STT backend preference (wake/dictation engine pick). */
+    sttBackendPreference(): LocalVoiceSettings['sttBackend'] {
+      return readSettings().sttBackend;
+    },
+
+    /** The CTranslate2 compute precision preference for the GPU engine. */
+    sttComputeTypePreference(): LocalVoiceSettings['sttComputeType'] {
+      return readSettings().sttComputeType;
+    },
+
+    /**
+     * Whether the faster-whisper GPU engine should serve local STT right now,
+     * given the user's backend preference and the engine's readiness. Combines
+     * the two into the single verdict the wake resolver wants, so the GPU probe
+     * runs once per check rather than being re-derived by every caller.
+     */
+    async preferGpuStt(engine: {
+      status: () => Promise<{ installed: boolean; gpuUsable: boolean }>;
+    }): Promise<boolean> {
+      try {
+        const status = await engine.status();
+        return (
+          pickSttBackend({
+            preference: readSettings().sttBackend,
+            gpuInstalled: status.installed,
+            gpuUsable: status.gpuUsable,
+          }) === 'faster_whisper'
+        );
+      } catch {
+        return false;
+      }
     },
 
     /** Free a local engine's VRAM immediately (settings toggle / unload all). */

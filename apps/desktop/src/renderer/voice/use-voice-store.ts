@@ -20,6 +20,7 @@ export function voiceStore(): VoiceStore {
         localVoiceGetState: () => bridge.localVoiceGetState(),
         voiceBinaryStatus: () => bridge.voiceBinaryStatus(),
         wakeSttStatus: () => bridge.wakeSttStatus(),
+        gpuSttStatus: () => bridge.gpuSttStatus(),
       },
     });
   }

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createVoiceStore, type VoiceStoreReader } from './state-store.js';
-import type { LocalVoiceState, VoiceBinaryStatus, WakeSttStatus } from '../../shared/ipc.js';
+import type {
+  GpuSttEngineStatus,
+  LocalVoiceState,
+  VoiceBinaryStatus,
+  WakeSttStatus,
+} from '../../shared/ipc.js';
 
 /** Minimal stand-ins for the three bridge reads. */
 function voiceState(models: number): LocalVoiceState {
@@ -15,6 +20,8 @@ function voiceState(models: number): LocalVoiceState {
       customSttEndpoint: null,
       customTtsEndpoint: null,
       ignoreTlsForCustom: false,
+      sttBackend: 'auto',
+      sttComputeType: 'auto',
     },
     resources: {
       ram: { totalBytes: 1, freeBytes: 1 },
@@ -66,6 +73,21 @@ const wakeStt: WakeSttStatus = {
   usingCustomEndpoint: false,
   runnerInstalled: true,
   threads: 8,
+  backend: 'whisper_cpp',
+};
+
+const gpuStt: GpuSttEngineStatus = {
+  installed: true,
+  envDir: '/data/voice-py',
+  gpu: { name: 'NVIDIA GeForce RTX 2080', memoryMiB: 8192, driverVersion: '595.0' },
+  gpuUsable: true,
+  pythonAvailable: true,
+  pythonPath: '/usr/bin/python3',
+  requirements: ['faster-whisper>=1.0.0'],
+  state: 'installed',
+  progressPercent: null,
+  error: null,
+  instructions: { manualRequired: false, steps: [] },
 };
 
 function reader(over: Partial<VoiceStoreReader> = {}): VoiceStoreReader {
@@ -73,6 +95,7 @@ function reader(over: Partial<VoiceStoreReader> = {}): VoiceStoreReader {
     localVoiceGetState: vi.fn(async () => voiceState(2)),
     voiceBinaryStatus: vi.fn(async () => binary),
     wakeSttStatus: vi.fn(async () => wakeStt),
+    gpuSttStatus: vi.fn(async () => gpuStt),
     ...over,
   };
 }
@@ -89,9 +112,19 @@ describe('createVoiceStore', () => {
     expect(snap.state?.models).toHaveLength(2);
     expect(snap.binary?.installed).toBe(true);
     expect(snap.wakeStt?.ready).toBe(true);
+    expect(snap.gpuStt?.installed).toBe(true);
     expect(snap.loading).toBe(false);
     expect(listener).toHaveBeenCalled();
     unsubscribe();
+    release();
+  });
+
+  it('tolerates a reader without the GPU-engine read (older preload)', async () => {
+    const r = reader({ gpuSttStatus: undefined });
+    const store = createVoiceStore({ reader: r, intervalMs: 100_000 });
+    const release = store.retain();
+    await store.refresh();
+    expect(store.getSnapshot().gpuStt).toBeNull();
     release();
   });
 
