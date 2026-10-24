@@ -55,6 +55,7 @@ export function liveTestBinding(options: Pick<WakeLiveTestOptions, 'phrase' | 'm
   return {
     id: `test:${options.phrase.trim().toLowerCase()}`,
     phrase: options.phrase.trim(),
+    aliases: [],
     agentId: null,
     agentName: null,
     modelId: options.modelId,

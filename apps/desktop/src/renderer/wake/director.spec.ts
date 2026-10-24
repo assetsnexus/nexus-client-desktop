@@ -14,6 +14,7 @@ function binding(id: string, extra: Partial<WakeSettings['bindings'][number]> = 
   return {
     id,
     phrase: `phrase-${id}`,
+    aliases: [] as string[],
     agentId: `agent-${id}`,
     agentName: `Agent ${id}`,
     modelId: 'catalog:desktop/wake-hey-jarvis',
@@ -173,6 +174,107 @@ describe('createWakeDirector', () => {
     expect(activated).toHaveLength(1);
     expect(activated[0]).toEqual({ phrase: 'phrase-a', agentId: 'agent-a' });
     expect(director.getState().lastDetection?.phrase).toBe('phrase-a');
+  });
+
+  it('re-fires the same phrase after the cooldown (re-arms, no one-shot lock)', async () => {
+    let clock = 1_000_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    try {
+      const { director, mic, activated } = makeDirector({
+        settings: settings({ enabled: true, bindings: [binding('a')] }),
+      });
+      await director.start();
+      mic.feed(0.9);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(activated).toHaveLength(1);
+      // Same utterance on a second microphone within the cooldown stays collapsed…
+      mic.feed(0.9);
+      await Promise.resolve();
+      expect(activated).toHaveLength(1);
+      // …but after the cooldown the user can wake the same agent again. Without
+      // clearing the old permanent set the agent window only ever opened once.
+      clock += 5_000;
+      mic.feed(0.9);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(activated).toHaveLength(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('arms one detector per alias and reports the spoken alias phrase', async () => {
+    const { director, mic, activated, builtPerGroup } = makeDirector({
+      settings: settings({
+        enabled: true,
+        bindings: [binding('a', { phrase: 'Xeni', aliases: ['Zeni'], modelId: 'stt:1' })],
+      }),
+      resolutions: {
+        a: {
+          binding: binding('a', { phrase: 'Xeni', aliases: ['Zeni'], modelId: 'stt:1' }),
+          engineKind: 'stt_phrase',
+          armed: true,
+          modelBytes: null,
+          customSampleFingerprint: null,
+          transcribeLocally: true,
+          unavailableReason: null,
+        },
+      },
+    });
+    await director.start();
+    // Both the primary phrase and the alias are armed (text matching), and the
+    // bar lists both.
+    expect(builtPerGroup.primary!.filter((id) => id === 'a')).toHaveLength(2);
+    expect(director.getState().activePhrases).toEqual(['Xeni', 'Zeni']);
+    mic.feed(0.9);
+    await Promise.resolve();
+    await Promise.resolve();
+    // The reported phrase is the exact one that fired (the alias is distinct),
+    // while both route to the same agent.
+    expect(new Set(activated.map((a) => a.phrase))).toEqual(new Set(['Xeni', 'Zeni']));
+    expect(activated.every((a) => a.agentId === 'agent-a')).toBe(true);
+  });
+
+  it('arms a global alias configured for a phrase, with no binding-level alias', async () => {
+    // The alias lives only in `agentAliases` (the shape an auto-mapped agent
+    // uses), so the binding itself carries no aliases.
+    const xeni = binding('a', { phrase: 'Xeni', aliases: [], modelId: 'stt:1' });
+    const { director, builtPerGroup } = makeDirector({
+      settings: settings({
+        enabled: true,
+        bindings: [xeni],
+        agentAliases: { xeni: ['Zeni'] },
+      }),
+      resolutions: {
+        a: {
+          binding: xeni,
+          engineKind: 'stt_phrase',
+          armed: true,
+          modelBytes: null,
+          customSampleFingerprint: null,
+          transcribeLocally: true,
+          unavailableReason: null,
+        },
+      },
+    });
+    await director.start();
+    expect(builtPerGroup.primary!.filter((id) => id === 'a')).toHaveLength(2);
+    expect(director.getState().activePhrases).toEqual(['Xeni', 'Zeni']);
+  });
+
+  it('does not arm aliases for a fixed keyword (non-STT) binding', async () => {
+    const { director, builtPerGroup } = makeDirector({
+      settings: settings({
+        enabled: true,
+        bindings: [binding('a', { phrase: 'Hey Jarvis', aliases: ['Jarvis'] })],
+      }),
+      // default resolution is `builtin`
+    });
+    await director.start();
+    // Only the primary phrase is armed: a keyword model fires on its own phrase.
+    expect(builtPerGroup.primary).toEqual(['a']);
+    expect(director.getState().activePhrases).toEqual(['Hey Jarvis']);
   });
 
   it('reports a reason when a binding cannot be armed', async () => {

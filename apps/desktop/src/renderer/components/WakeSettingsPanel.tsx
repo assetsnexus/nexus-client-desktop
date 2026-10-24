@@ -44,12 +44,17 @@ import {
   type WakeWordBinding,
 } from '../bridge.js';
 import {
+  MAX_WAKE_ALIASES,
   SUGGESTED_SUBMIT_PHRASES,
   WAKE_TIMEOUT_MAX_SECONDS,
   WAKE_TIMEOUT_MIN_SECONDS,
+  aliasKey,
+  aliasesForPhrase,
+  bindingPhrases,
   isLargeWakeModel,
+  normalizeAliasPhrase,
 } from '../../shared/wake.js';
-import { isAutoBinding } from '../../shared/wake-automap.js';
+import { agentIsAutoMapped, isAutoBinding, phraseFromAgentName } from '../../shared/wake-automap.js';
 import { reloadWakeDirector } from '../wake/director-host.js';
 import { createUtteranceSource } from '../wake/utterance.js';
 import { startEnrollment, type EnrollmentSession } from '../wake/enroll.js';
@@ -205,6 +210,7 @@ function emptyBinding(): WakeWordBinding {
   return {
     id: newBindingId(),
     phrase: '',
+    aliases: [],
     agentId: null,
     agentName: null,
     modelId: null,
@@ -501,6 +507,223 @@ function SubmitPhraseEditor({
   );
 }
 
+/**
+ * Alternate phrases for one binding ("Zeni" for "Xeni"). Aliases are matched by
+ * on-device speech recognition, exactly like the primary phrase, and all route
+ * to the same agent. Only meaningful for a speech-model (STT) engine — a fixed
+ * keyword model can only fire on the phrase it was trained for — so the editor
+ * says so rather than silently doing nothing.
+ */
+function AliasEditor({
+  aliases,
+  primary,
+  enabled,
+  busy,
+  onChange,
+}: {
+  aliases: string[];
+  primary: string;
+  /** False when the chosen engine cannot match arbitrary phrases (fixed keyword). */
+  enabled: boolean;
+  busy: boolean;
+  onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const add = () => {
+    setDraft('');
+    const alias = normalizeAliasPhrase(draft, primary);
+    if (!alias) return;
+    if (aliases.some((a) => a.toLowerCase() === alias.toLowerCase())) return;
+    if (aliases.length >= MAX_WAKE_ALIASES) return;
+    onChange([...aliases, alias]);
+  };
+  return (
+    <div style={field}>
+      <span>Also wake on (aliases — e.g. a nickname)</span>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {aliases.map((a) => (
+          <span key={a} style={chip}>
+            “{a}”
+            <button
+              type="button"
+              style={{ border: 'none', background: 'transparent', color: '#f2a1a1', cursor: 'pointer', fontSize: 12 }}
+              disabled={busy}
+              onClick={() => onChange(aliases.filter((x) => x !== a))}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {!aliases.length ? <span style={{ color: '#6b7784' }}>None</span> : null}
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          style={{ ...input, flex: 1 }}
+          value={draft}
+          disabled={busy || !enabled}
+          placeholder={enabled ? 'e.g. Zeni' : 'Pick a speech model to use aliases'}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button type="button" style={tinyButton} disabled={busy || !enabled || !draft.trim()} onClick={add}>
+          Add
+        </button>
+      </div>
+      <span style={{ color: '#6b7784' }}>
+        {enabled
+          ? 'Any of these phrases wakes the same agent. Matched by on-device speech recognition.'
+          : 'Aliases need a speech model — a wake-word model only fires on its own fixed phrase.'}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * One editable alias row for a single agent/word (a phrase + its nicknames).
+ * Keyed by the phrase, not the agent id, so it works for auto-mapped agents
+ * whose binding is re-derived on every arm and therefore cannot hold aliases.
+ */
+function AliasRow({
+  phrase,
+  label,
+  aliases,
+  enabled,
+  busy,
+  onChange,
+}: {
+  phrase: string;
+  label: string;
+  aliases: string[];
+  enabled: boolean;
+  busy: boolean;
+  onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const add = () => {
+    setDraft('');
+    const alias = normalizeAliasPhrase(draft, phrase);
+    if (!alias) return;
+    if (aliases.some((a) => a.toLowerCase() === alias.toLowerCase())) return;
+    if (aliases.length >= MAX_WAKE_ALIASES) return;
+    onChange([...aliases, alias]);
+  };
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 8,
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        padding: '6px 0',
+        borderTop: '1px solid #1f2833',
+      }}
+    >
+      <span style={{ minWidth: 120, fontSize: 12, color: '#e8eef4' }}>{label}</span>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1, minWidth: 140 }}>
+        {aliases.map((a) => (
+          <span key={a} style={chip}>
+            “{a}”
+            <button
+              type="button"
+              style={{ border: 'none', background: 'transparent', color: '#f2a1a1', cursor: 'pointer', fontSize: 12 }}
+              disabled={busy}
+              onClick={() => onChange(aliases.filter((x) => x !== a))}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {!aliases.length ? <span style={{ fontSize: 11, color: '#6b7784' }}>No nicknames</span> : null}
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          style={{ ...input, width: 150 }}
+          value={draft}
+          disabled={busy || !enabled}
+          placeholder={enabled ? `e.g. ${phrase}…` : 'Needs a speech model'}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button type="button" style={tinyButton} disabled={busy || !enabled || !draft.trim()} onClick={add}>
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Per-agent nicknames (e.g. "Zeni" for "Xeni"). Shown for every agent that a
+ * wake can address — the auto-mapped ones included, which is the whole point:
+ * an auto-mapped agent has no editable binding, so this list is where its alias
+ * has to live. Only meaningful for speech-model wakes (a keyword model can only
+ * fire on its trained phrase), so it is disabled when no speech model is set up.
+ */
+function AgentAliasesEditor({
+  rows,
+  agentAliases,
+  enabled,
+  busy,
+  onChange,
+}: {
+  rows: { phrase: string; label: string }[];
+  agentAliases: Record<string, string[]>;
+  enabled: boolean;
+  busy: boolean;
+  onChange: (next: Record<string, string[]>) => void;
+}) {
+  const setAliases = (phrase: string, aliases: string[]) => {
+    const key = aliasKey(phrase);
+    const next = { ...agentAliases };
+    if (aliases.length) next[key] = aliases;
+    else delete next[key];
+    onChange(next);
+  };
+  return (
+    <div style={card}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <strong style={{ fontSize: 12, color: '#e8eef4' }}>Agent nicknames</strong>
+        <span style={{ flex: 1 }} />
+        {!enabled ? (
+          <span style={{ fontSize: 11, color: '#fbbf24' }}>Pick a speech model to use nicknames</span>
+        ) : null}
+      </div>
+      <span style={{ fontSize: 11, color: '#6b7784' }}>
+        Additional phrases that wake a given agent — e.g. “Zeni” for “Xeni”. Matched by on-device
+        speech recognition, exactly like the agent&apos;s name, and they work for auto-mapped agents
+        too.
+      </span>
+      {rows.length ? (
+        rows.map((row) => (
+          <AliasRow
+            key={row.phrase}
+            phrase={row.phrase}
+            label={row.label}
+            aliases={aliasesForPhrase(agentAliases, row.phrase)}
+            enabled={enabled}
+            busy={busy}
+            onChange={(aliases) => setAliases(row.phrase, aliases)}
+          />
+        ))
+      ) : (
+        <span style={{ fontSize: 11, color: '#6b7784' }}>
+          Sign in to list agents, or add a wake word below.
+        </span>
+      )}
+    </div>
+  );
+}
+
 function BindingEditor({
   binding,
   agents,
@@ -581,6 +804,14 @@ function BindingEditor({
             any phrase
           </span>
         ) : null}
+        {sttChosen && binding.aliases.length ? (
+          <span
+            style={{ ...chip, borderColor: '#2f5c9e', color: '#7fb2ff' }}
+            title={`Also wakes on: ${bindingPhrases(binding).slice(1).join(', ')}`}
+          >
+            +{binding.aliases.length} alias{binding.aliases.length === 1 ? '' : 'es'}
+          </span>
+        ) : null}
         <span style={{ flex: 1 }} />
         <button type="button" style={tinyButton} disabled={busy} onClick={onRemove}>
           {auto ? 'Remove (adds to the auto-map blocklist)' : 'Remove'}
@@ -637,12 +868,21 @@ function BindingEditor({
         </label>
       </div>
 
+      <AliasEditor
+        aliases={binding.aliases}
+        primary={binding.phrase}
+        enabled={sttChosen}
+        busy={busy}
+        onChange={(aliases) => onChange({ ...binding, aliases })}
+      />
+
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <label style={{ ...field, flex: 1, minWidth: 190 }}>
           <span>
             Engine
             {missingModel ? <span style={{ color: '#fbbf24' }}> · required</span> : null}
           </span>
+
           <select
             style={missingModel || modelNeedsInstall ? inputNeedsAttention : input}
             value={binding.modelId ?? ''}
@@ -814,6 +1054,44 @@ export function WakeSettingsPanel() {
     if (installed) void persist({ ...settings, autoMapModelId: installed.id });
   }, [settings, voice, persist]);
 
+  const manualBindings = useMemo(
+    () => (settings?.bindings ?? []).filter((b) => !isAutoBinding(b)),
+    [settings],
+  );
+
+  /**
+   * Every phrase a wake can be addressed by, for the nickname editor: the manual
+   * bindings plus each auto-mapped agent's derived name (so an alias can be
+   * given to an agent the user never hand-configured). Binding/agent names are
+   * deduped case-insensitively, and a phrase already covered by a manual binding
+   * is not listed twice.
+   *
+   * NOTE: this hook must run on *every* render, so it is deliberately above the
+   * `if (!settings)` loading return — placing it after caused React's
+   * "Rendered more hooks than during the previous render" crash.
+   */
+  const aliasRows = useMemo(() => {
+    const rows: { phrase: string; label: string }[] = [];
+    const seen = new Set<string>();
+    const push = (phrase: string | null, label: string) => {
+      const trimmed = (phrase ?? '').trim();
+      if (!trimmed) return;
+      const key = aliasKey(trimmed);
+      if (seen.has(key)) return;
+      seen.add(key);
+      rows.push({ phrase: trimmed, label });
+    };
+    for (const b of manualBindings) push(b.phrase, b.agentName ?? b.phrase);
+    if (settings?.autoMapAgents) {
+      for (const agent of agents) {
+        if (!agentIsAutoMapped(agent.contactId, settings.autoMapMode, settings.autoMapIds)) continue;
+        if (manualBindings.some((b) => b.agentId === agent.contactId)) continue;
+        push(phraseFromAgentName(agent.name), agent.name);
+      }
+    }
+    return rows;
+  }, [agents, manualBindings, settings]);
+
   if (!settings) {
     return (
       <section style={section}>
@@ -885,7 +1163,6 @@ export function WakeSettingsPanel() {
     settings.autoMapAgents ||
     settings.bindings.some((b) => isSttModel(b.modelId)) ||
     isSttModel(settings.autoMapModelId);
-  const manualBindings = settings.bindings.filter((b) => !isAutoBinding(b));
 
   return (
     <section style={section}>
@@ -982,6 +1259,19 @@ export function WakeSettingsPanel() {
         </select>
         <span style={{ color: '#6b7784' }}>
           {ACTIVATION_MODES.find((m) => m.id === settings.activationMode)?.help}
+        </span>
+      </label>
+
+      <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <input
+          type="checkbox"
+          checked={settings.companionOnWake}
+          disabled={busy}
+          onChange={(e) => void persist({ ...settings, companionOnWake: e.target.checked })}
+        />
+        <span>
+          Open the referenced agent in the companion window + voice mode on a wake (overrides the
+          mode above; also toggleable from the listening widget)
         </span>
       </label>
 
@@ -1129,6 +1419,14 @@ export function WakeSettingsPanel() {
           </>
         ) : null}
       </div>
+
+      <AgentAliasesEditor
+        rows={aliasRows}
+        agentAliases={settings.agentAliases}
+        enabled={installedStt.length > 0}
+        busy={busy}
+        onChange={(agentAliases) => void persist({ ...settings, agentAliases })}
+      />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <strong style={{ fontSize: 12, color: '#9aa7b5' }}>Your wake words</strong>

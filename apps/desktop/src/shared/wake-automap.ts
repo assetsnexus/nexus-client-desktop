@@ -15,7 +15,13 @@
  * one — it opens a conversation and dictates. It never authenticates.
  */
 
-import type { WakeAgentRow, WakeAutoMapMode, WakeWordBinding } from './wake.js';
+import {
+  bindingPhrases,
+  mergeBindingAliases,
+  type WakeAgentRow,
+  type WakeAutoMapMode,
+  type WakeWordBinding,
+} from './wake.js';
 
 /** Default sensitivity for a derived phrase (the engine base is 0.5). */
 const AUTO_SENSITIVITY = 0.5;
@@ -66,6 +72,12 @@ export function withAutoMappedBindings(input: {
   /** Previously derived bindings, so the user's per-agent tweaks survive. */
   existing?: readonly WakeWordBinding[];
   /**
+   * Global nicknames per phrase (see {@link WakeSettings.agentAliases}). Folding
+   * them onto a derived binding here means an auto-mapped agent fires on its
+   * nickname too, without the user having to hand-write a binding for it.
+   */
+  agentAliases?: Record<string, string[]>;
+  /**
    * Model every derived binding uses. An agent is mapped to its own name, which
    * only a speech (STT) model can match — a fixed-phrase keyword model never can.
    * Null leaves derived bindings un-armed (the UI shows what to pick).
@@ -77,7 +89,12 @@ export function withAutoMappedBindings(input: {
 
   const takenPhrases = new Set(
     [
-      ...manual.map((b) => b.phrase),
+      // A manual binding reserves both its primary phrase and every alias
+      // (including global nicknames), so a derived agent name can never shadow
+      // (or be shadowed by) a nickname.
+      ...manual.flatMap((b) =>
+        bindingPhrases({ phrase: b.phrase, aliases: mergeBindingAliases(b, input.agentAliases) }),
+      ),
       ...(input.reservedPhrases ?? []),
     ]
       .map((p) => p.trim().toLowerCase())
@@ -104,6 +121,13 @@ export function withAutoMappedBindings(input: {
     derived.push({
       id,
       phrase,
+      // A derived binding inherits any aliases the user added to it previously
+      // *and* the global nicknames for its phrase, so per-agent nicknames both
+      // survive a recompute and work without a hand-written binding.
+      aliases: mergeBindingAliases(
+        { phrase, aliases: prior?.aliases ?? [] },
+        input.agentAliases,
+      ),
       agentId: agent.contactId,
       agentName: agent.name,
       modelId: prior?.modelId ?? input.defaultModelId ?? null,

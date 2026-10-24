@@ -39,6 +39,11 @@ export type WakeChatRouter = {
   cancel(): void;
   /** Submit the buffered transcript from a review surface. */
   submit(): Promise<void>;
+  /**
+   * Replace the committed transcript with user-edited text (the widget's input
+   * field), folding any live partial in first. A no-op when idle.
+   */
+  setBuffer(text: string): void;
   /** The inactivity timer fired; apply the unsent policy. */
   timeout(): Promise<void>;
   /** Current session state, or null when idle. */
@@ -90,7 +95,14 @@ export type WakeChatRouterOptions = {
 
 export function createWakeChatRouter(options: WakeChatRouterOptions) {
   const pollMs = options.timeoutPollMs ?? 5_000;
-  let active = false;
+  /**
+   * True between the start of `route()` and the moment its session is created.
+   * The same utterance can arrive from several microphones, so two routes can be
+   * issued back to back; only the first should present. A *lingering* session
+   * (one still on screen in review) is deliberately not gated by this: a new wake
+   * supersedes it, so the agent window opens every time the user speaks.
+   */
+  let routing = false;
   let current: ReturnType<typeof createWakeSession> | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -104,8 +116,8 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
   /** Release the session lock and clear the presentation surface. */
   function conclude(): void {
     stopTimer();
+    routing = false;
     current = null;
-    active = false;
     options.onSessionChange?.(null);
     options.onStateChange?.('idle');
   }
@@ -130,8 +142,18 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
 
   return {
     async route(target: WakeChatTarget) {
-      if (active) return;
-      active = true;
+      // The *same* utterance can reach us from several microphones at once; only
+      // the first in-flight route should present (the detector's 2.5s cooldown is
+      // the other half of that de-dup).
+      if (routing) return;
+      // A *different* wake supersedes any session still on screen (e.g. a review
+      // bar the user left open). Returning early here instead was why the agent
+      // window only opened once: the first session held the lock until its
+      // inactivity timeout, so every wake in between was silently dropped.
+      routing = true;
+      if (current) current.cancel();
+      stopTimer();
+      current = null;
       try {
         const settings = await options.getSettings();
         // Cloud transcription means audio leaves the device while the user
@@ -141,15 +163,24 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
           (await Promise.resolve()
             .then(() => options.transcriptionIsCloud?.())
             .catch(() => false)) === true;
-        const mode: WakeActivationMode = cloudTranscription ? 'widget' : settings.activationMode;
+        // `companionOnWake` is the one-click "open the companion in voice mode"
+        // link (available in the widget and settings). It wins over the configured
+        // mode: a companion window runs its own realtime voice session, and it is
+        // the only surface that is *not* streaming dictation audio to the cloud,
+        // so it is safe even when the STT engine is cloud.
+        const mode: WakeActivationMode = settings.companionOnWake
+          ? 'companion'
+          : cloudTranscription
+            ? 'widget'
+            : settings.activationMode;
         options.onStateChange?.('opening');
         const presented = await options.present(mode, target);
 
         // A surface that runs its own realtime voice (the companion window) owns
         // the session; opening a second microphone capture here would double it.
         if (presented && presented.dictate === false) {
+          routing = false;
           options.onStateChange?.('idle');
-          active = false;
           options.onSessionChange?.(null);
           return;
         }
@@ -185,13 +216,20 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
           },
         });
         current = session;
+        // Released *after* the session exists: anything that arrives during the
+        // `await present(...)` above is the same utterance on another mic.
+        routing = false;
         session.start();
         startTimer();
       } catch (err) {
+        routing = false;
         const message = err instanceof Error ? err.message : 'The wake command could not start.';
         conclude();
         options.onError?.(message);
       }
+    },
+    setBuffer(text: string) {
+      current?.setBuffer(text);
     },
     cancel() {
       current?.cancel();
@@ -202,9 +240,8 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
       const session = current;
       await session.submit();
       stopTimer();
-      // Keep the review surface visible so the user sees the sent state, then
-      // release the lock so the next wake can route.
-      active = false;
+      // Keep the review surface visible so the user sees the sent state; the
+      // next wake supersedes it rather than being blocked by it.
       if (session.state.status === 'submitted' || session.state.status === 'discarded') {
         options.onStateChange?.('idle');
       }

@@ -195,6 +195,25 @@ export function ChatHost({
   const [wakeMode, setWakeMode] = useState<WakeActivationMode>('chat');
   const [wakeAgent, setWakeAgent] = useState<{ name: string; avatarUrl: string | null } | null>(null);
   const [queued, setQueued] = useState<QueuedUtterance[]>([]);
+  /** The agent the live wake session is addressed to, for the companion link. */
+  const [wakeTarget, setWakeTarget] = useState<{
+    contactId: string;
+    agentId: string | null;
+    agentName: string | null;
+    avatarUrl: string | null;
+  } | null>(null);
+  /**
+   * Mirrors `WakeSettings.companionOnWake` so the widget checkbox reflects and
+   * persists the one-click "open in companion + voice mode" link. Loaded on
+   * mount and whenever a wake session opens.
+   */
+  const [companionOnWake, setCompanionOnWake] = useState(false);
+  /**
+   * Bumped once per activation, so the widget can tell a *new* wake from a state
+   * update on the current one (the session object changes on every emit, so it
+   * cannot serve as a reset key).
+   */
+  const [wakeSessionToken, setWakeSessionToken] = useState(0);
 
   // Surface any transcript an earlier wake left behind under the `queue` policy.
   useEffect(() => {
@@ -207,11 +226,16 @@ export function ChatHost({
       getSettings: () => bridge.wakeGetSettings(),
       present: async (mode, target) => {
         setWakeMode(mode);
+        // Every presentation is a new activation: bump the token so the widget
+        // resets any frozen edit from a previous wake.
+        setWakeSessionToken((n) => n + 1);
         const agentRow = chat.getState().contacts.find((c) => c.id === target.contactId) ?? null;
-        setWakeAgent({
-          name: target.agentName ?? agentRow?.name ?? 'Agent',
-          avatarUrl: agentRow?.avatarUrl ?? null,
-        });
+        const agentName = target.agentName ?? agentRow?.name ?? null;
+        const avatarUrl = agentRow?.avatarUrl ?? null;
+        setWakeAgent({ name: agentName ?? 'Agent', avatarUrl });
+        // Remember the session's address so the widget can offer "open companion
+        // + voice" for exactly this agent.
+        setWakeTarget({ contactId: target.contactId, agentId: target.agentId, agentName, avatarUrl });
         if (mode === 'companion') {
           // The companion window runs its own realtime voice session, so the
           // router must not open a second microphone capture.
@@ -285,6 +309,51 @@ export function ChatHost({
       wakeRouterRef.current = null;
     };
   }, [chat, client]);
+
+  // Load the "companion + voice on wake" preference so the widget checkbox
+  // reflects it, and re-read it whenever a wake session surfaces (the user may
+  // have changed it in Settings).
+  useEffect(() => {
+    if (!wakeSession) return;
+    void bridge
+      .wakeGetSettings()
+      .then((s) => setCompanionOnWake(s.companionOnWake))
+      .catch(() => undefined);
+  }, [wakeSession]);
+
+  /**
+   * Open the wake session's agent in the immersive companion window in voice
+   * mode (the companion's realtime voice session owns listening). Used by the
+   * widget's "Open now" button; the router does the same inline when
+   * `companionOnWake` is on and the wake fires.
+   */
+  const openWakeCompanion = useCallback(
+    async (target: { contactId: string; agentId: string | null; agentName: string | null; avatarUrl: string | null }) => {
+      if (!chat) return;
+      await bridge.companionOpen({
+        contactId: target.contactId,
+        conversationId: chat.getState().conversationId ?? null,
+        agentId: target.agentId,
+        title: target.agentName ?? null,
+        avatarUrl: target.avatarUrl ?? null,
+        autoStart: true,
+      });
+    },
+    [chat],
+  );
+
+  /**
+   * Persist the one-click companion link. The router reads the settings fresh on
+   * the next wake, so saving is enough to change future behaviour.
+   */
+  const toggleCompanionOnWake = useCallback((next: boolean) => {
+    setCompanionOnWake(next);
+    void bridge
+      .wakeGetSettings()
+      .then((s) => bridge.wakeSetSettings({ ...s, companionOnWake: next }))
+      .then((written) => setCompanionOnWake(written.companionOnWake))
+      .catch(() => undefined);
+  }, []);
 
   /**
    * Route an activation handed down by the shell. `token` is the effect key so a
@@ -457,8 +526,15 @@ export function ChatHost({
       {wakeSession ? (
         <WakeOverlay
           session={wakeSession}
+          sessionToken={wakeSessionToken}
           mode={wakeMode}
           agent={wakeAgent}
+          companionOnWake={companionOnWake}
+          onToggleCompanion={toggleCompanionOnWake}
+          onEdit={(text) => wakeRouterRef.current?.setBuffer(text)}
+          onOpenCompanion={
+            wakeTarget ? () => void openWakeCompanion(wakeTarget) : undefined
+          }
           onSubmit={() => void wakeRouterRef.current?.submit()}
           onCancel={() => wakeRouterRef.current?.cancel()}
         />

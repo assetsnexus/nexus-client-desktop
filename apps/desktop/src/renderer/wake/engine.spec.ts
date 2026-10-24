@@ -8,6 +8,7 @@ function sttResolution(id: string, phrase: string): WakeBindingResolution {
     binding: {
       id,
       phrase,
+      aliases: [],
       sensitivity: 0.5,
       enabled: true,
       agentId: null,

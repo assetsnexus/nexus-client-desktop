@@ -219,6 +219,32 @@ describe('createWakeSession', () => {
     expect(h.last().message).toContain('mic denied');
   });
 
+  it('folds the live partial into the buffer on submit (visible text is sent)', async () => {
+    // A dictation turn that never resolves: only the partial is available, which
+    // is exactly the widget case where the field showed text but Send was empty.
+    const dictate = vi.fn(
+      (onPartial: (text: string) => void) => new Promise<string | null>(() => onPartial('live partial')),
+    );
+    const h = makeSession({ reviewBeforeSend: false, dictate });
+    h.session.start();
+    await flush();
+    expect(h.last().partial).toBe('live partial');
+    expect(h.last().buffer).toBe('');
+    await h.session.submit();
+    expect(h.sent).toEqual([{ agentId: null, text: 'live partial' }]);
+  });
+
+  it('replaces the buffer with user-edited text and clears the partial', async () => {
+    const h = makeSession({ reviewBeforeSend: false }, ['original words']);
+    h.session.start();
+    await flush();
+    h.session.setBuffer('edited by hand');
+    expect(h.last().buffer).toBe('edited by hand');
+    expect(h.last().partial).toBe('');
+    await h.session.submit();
+    expect(h.sent).toEqual([{ agentId: null, text: 'edited by hand' }]);
+  });
+
   it('ignores a submit on an already-completed session', async () => {
     const h = makeSession({ reviewBeforeSend: false }, ['go submit']);
     h.session.start();

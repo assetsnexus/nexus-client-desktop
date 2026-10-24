@@ -15,7 +15,7 @@
  * approve/confirm affordance and can never satisfy 2FA / SCA / biometric.
  */
 
-import { useMemo, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { SessionState } from '../wake/session.js';
 import { useWakeState } from '../wake/director-host.js';
 
@@ -56,6 +56,12 @@ const ghostButton: CSSProperties = {
   borderColor: '#3a4654',
   color: '#e8eef4',
   fontWeight: 500,
+};
+
+const tinyGhostButton: CSSProperties = {
+  ...ghostButton,
+  padding: '3px 9px',
+  fontSize: 11,
 };
 
 const KEYFRAMES =
@@ -159,19 +165,61 @@ const STATUS_COPY: Record<SessionState['status'], string> = {
 
 export type WakeOverlayProps = {
   session: SessionState;
+  /**
+   * Bumped once per activation. Used to reset the frozen edit so a second wake
+   * never shows the previous session's typed text. Optional for tests.
+   */
+  sessionToken?: number;
   /** `chat` renders the slim review bar; `widget` the standalone card. */
   mode: 'chat' | 'widget' | 'companion';
   agent: WakeOverlayAgent | null;
   onSubmit: () => void;
   onCancel: () => void;
+  /** Reflects / toggles the "open the agent in the companion window in voice mode" setting. */
+  companionOnWake?: boolean;
+  onToggleCompanion?: (next: boolean) => void;
+  /** Replace the committed transcript with user-edited text. */
+  onEdit?: (text: string) => void;
+  /** Open this agent in the companion window in voice mode right now. */
+  onOpenCompanion?: () => void;
 };
 
-export function WakeOverlay({ session, mode, agent, onSubmit, onCancel }: WakeOverlayProps) {
+export function WakeOverlay({
+  session,
+  sessionToken = 0,
+  mode,
+  agent,
+  onSubmit,
+  onCancel,
+  companionOnWake = false,
+  onToggleCompanion,
+  onEdit,
+  onOpenCompanion,
+}: WakeOverlayProps) {
   const wake = useWakeState();
   const live = session.status === 'listening' || session.status === 'transcribing';
   const compact = mode === 'chat';
-  const transcript = session.preview.trim();
   const done = session.status === 'submitted' || session.status === 'discarded' || session.status === 'queued';
+
+  /**
+   * The field streams the live partial as it arrives (`session.preview` is the
+   * committed buffer plus the in-flight partial). Once the user types, we freeze
+   * their text so a late partial cannot clobber a manual edit; `onEdit` commits
+   * that text to the session so Submit sends exactly what is visible.
+   */
+  const [typed, setTyped] = useState<string | null>(null);
+  // A fresh wake must not show the previous session's typed text. The token is
+  // bumped once per activation by the host (the session object itself changes on
+  // every state emit, so it cannot be the reset key).
+  useEffect(() => {
+    setTyped(null);
+  }, [sessionToken]);
+  const fieldValue = typed ?? session.preview;
+  const canSend = fieldValue.trim().length > 0 && !done;
+  const edit = (next: string) => {
+    setTyped(next);
+    onEdit?.(next);
+  };
 
   const style: CSSProperties = compact
     ? { ...cardBase, right: 16, bottom: 16, width: 420, maxWidth: 'calc(100% - 32px)' }
@@ -193,32 +241,43 @@ export function WakeOverlay({ session, mode, agent, onSubmit, onCancel }: WakeOv
         <Soundwave level={wake.level} live={live} />
       </div>
 
-      <div
+      {/* An editable field, not a read-only caption: the live STT streams in here
+          (committed buffer + the in-flight partial) and the user can fix it or
+          type before pressing Send. Submitting folds the partial in, so whatever
+          is visible is exactly what is sent. */}
+      <textarea
+        data-nexus-surface="wake-field"
+        value={fieldValue}
+        readOnly={done}
+        placeholder={live ? 'Say something…' : 'Nothing was captured.'}
+        onChange={(e) => edit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (canSend) onSubmit();
+          }
+        }}
         style={{
           minHeight: 46,
           maxHeight: 160,
-          overflowY: 'auto',
+          resize: 'vertical',
           padding: '8px 10px',
           borderRadius: 10,
           background: '#0f1419',
           border: '1px solid #2a333d',
+          color: '#e8eef4',
           fontSize: 13,
           lineHeight: 1.45,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
+          fontFamily: 'inherit',
         }}
-      >
-        {transcript ? (
-          <span>{session.buffer}</span>
-        ) : (
-          <span style={{ color: '#6b7784' }}>
-            {live ? 'Say something…' : 'Nothing was captured.'}
-          </span>
-        )}
-        {live && session.partial ? (
-          <span style={{ color: '#9aa7b5' }}>{session.buffer ? ' ' : ''}{session.partial}</span>
-        ) : null}
-      </div>
+      />
+      {live && session.partial ? (
+        <span style={{ fontSize: 10, color: '#9aa7b5' }}>
+          streaming live… press Send to send what you see
+        </span>
+      ) : null}
 
       {session.message ? (
         <span style={{ fontSize: 11, color: '#fbbf24' }}>{session.message}</span>
@@ -241,7 +300,7 @@ export function WakeOverlay({ session, mode, agent, onSubmit, onCancel }: WakeOv
       ) : null}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button type="button" style={button} disabled={done || !session.buffer.trim()} onClick={onSubmit}>
+        <button type="button" style={button} disabled={!canSend} onClick={onSubmit}>
           Send
         </button>
         <button type="button" style={ghostButton} onClick={onCancel}>
@@ -251,6 +310,35 @@ export function WakeOverlay({ session, mode, agent, onSubmit, onCancel }: WakeOv
         <span style={{ fontSize: 10, color: '#6b7784' }}>
           Reviewing before send — nothing is sent until you press Send.
         </span>
+      </div>
+
+      {/* Companion + voice mode: link this wake to the immersive companion window.
+          The checkbox persists the setting, so every future wake for any agent
+          opens there in voice mode; the button opens *this* agent now. */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          paddingTop: 8,
+          borderTop: '1px solid #2a333d',
+        }}
+      >
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#cbd5e1', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={companionOnWake}
+            disabled={!onToggleCompanion}
+            onChange={(e) => onToggleCompanion?.(e.target.checked)}
+          />
+          Open the agent in the companion window + voice mode on a wake
+        </label>
+        {onOpenCompanion ? (
+          <button type="button" style={tinyGhostButton} onClick={onOpenCompanion}>
+            Open companion + voice now
+          </button>
+        ) : null}
       </div>
     </div>
   );

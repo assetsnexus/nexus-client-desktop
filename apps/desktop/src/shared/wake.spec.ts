@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_WAKE_SETTINGS,
+  MAX_WAKE_ALIASES,
   bindingEngineKind,
   bindingIsArmed,
+  bindingPhrases,
   clampSensitivity,
   clampWakeTimeout,
   dequeueUtterance,
   dictationTranscribesInCloud,
   enqueueUtterance,
+  aliasKey,
+  aliasesForPhrase,
+  mergeBindingAliases,
+  normalizeAgentAliases,
+  normalizeAliasList,
+  normalizeAliasPhrase,
   normalizeSubmitPhrase,
   normalizeSubmitPhrases,
   normalizeUtteranceQueue,
@@ -30,11 +38,95 @@ describe('clampSensitivity', () => {
   });
 });
 
+describe('alias helpers', () => {
+  it('rejects an alias equal to the primary phrase or blank', () => {
+    expect(normalizeAliasPhrase('  Xeni ', 'Xeni')).toBeNull();
+    expect(normalizeAliasPhrase('xeni', 'XENI')).toBeNull();
+    expect(normalizeAliasPhrase('   ', 'Xeni')).toBeNull();
+    expect(normalizeAliasPhrase('Zeni', 'Xeni')).toBe('Zeni');
+  });
+
+  it('trims, dedupes and drops the primary from an alias list', () => {
+    const aliases = normalizeAliasList([' Zeni ', 'zeni', 'Xeni', '', 'Zenny'], 'Xeni');
+    expect(aliases).toEqual(['Zeni', 'Zenny']);
+  });
+
+  it('caps the alias list', () => {
+    const many = Array.from({ length: MAX_WAKE_ALIASES + 5 }, (_, i) => `alias ${i}`);
+    expect(normalizeAliasList(many, 'Xeni')).toHaveLength(MAX_WAKE_ALIASES);
+  });
+
+  it('lists the primary phrase first, then aliases, deduped', () => {
+    expect(bindingPhrases({ phrase: 'Xeni', aliases: ['Xeni', 'Zeni'] })).toEqual(['Xeni', 'Zeni']);
+    expect(bindingPhrases({ phrase: 'Hey Jarvis', aliases: [] })).toEqual(['Hey Jarvis']);
+  });
+
+  it('round-trips aliases through normalizeWakeBinding', () => {
+    const b = normalizeWakeBinding({ phrase: 'Xeni', aliases: ['Zeni', 'Zeni', 'Xeni'] });
+    expect(b?.aliases).toEqual(['Zeni']);
+  });
+});
+
+describe('agent aliases (per-phrase nicknames)', () => {
+  it('keys phrases case- and whitespace-insensitively', () => {
+    expect(aliasKey('  Xeni  Now ')).toBe('xeni now');
+    expect(aliasKey(null)).toBe('');
+  });
+
+  it('coerces an untrusted alias map, dropping junk and primary duplicates', () => {
+    const map = normalizeAgentAliases({
+      '  Xeni ': [' Zeni ', 'zeni', 'Xeni', ''],
+      '': ['ghost'],
+      bad: 'not-an-array',
+      Nova: ['Nova', 'Novi'],
+    });
+    expect(map).toEqual({ xeni: ['Zeni'], nova: ['Novi'] });
+  });
+
+  it('returns no aliases for junk input', () => {
+    expect(normalizeAgentAliases(null)).toEqual({});
+    expect(normalizeAgentAliases(['Zeni'])).toEqual({});
+  });
+
+  it('reads aliases for a phrase regardless of casing/whitespace', () => {
+    const map = { xeni: ['Zeni'] };
+    expect(aliasesForPhrase(map, 'XENI')).toEqual(['Zeni']);
+    expect(aliasesForPhrase(map, '  xeni ')).toEqual(['Zeni']);
+    expect(aliasesForPhrase(map, 'Bob')).toEqual([]);
+    expect(aliasesForPhrase(undefined, 'Xeni')).toEqual([]);
+  });
+
+  it('merges binding aliases with the phrase aliases, deduped and bounded', () => {
+    const merged = mergeBindingAliases(
+      { phrase: 'Xeni', aliases: ['Zenny', 'Zeni'] },
+      { xeni: ['Zeni', 'Zenna'] },
+    );
+    expect(merged).toEqual(['Zenny', 'Zeni', 'Zenna']);
+  });
+
+  it('never lets the phrase itself leak into the merged aliases', () => {
+    expect(mergeBindingAliases({ phrase: 'Xeni', aliases: ['Xeni'] }, { xeni: ['xeni'] })).toEqual(
+      [],
+    );
+  });
+
+  it('round-trips agentAliases through normalizeWakeSettings', () => {
+    const s = normalizeWakeSettings({ agentAliases: { Xeni: ['Zeni'], '': ['x'] } });
+    expect(s.agentAliases).toEqual({ xeni: ['Zeni'] });
+  });
+});
+
 describe('normalizeWakeSettings', () => {
   it('returns defaults for junk input', () => {
     expect(normalizeWakeSettings(null)).toEqual(DEFAULT_WAKE_SETTINGS);
     expect(normalizeWakeSettings('nope')).toEqual(DEFAULT_WAKE_SETTINGS);
     expect(normalizeWakeSettings({})).toEqual(DEFAULT_WAKE_SETTINGS);
+  });
+
+  it('defaults companionOnWake to off and coerces a boolean', () => {
+    expect(normalizeWakeSettings({}).companionOnWake).toBe(false);
+    expect(normalizeWakeSettings({ companionOnWake: true }).companionOnWake).toBe(true);
+    expect(normalizeWakeSettings({ companionOnWake: 'yes' }).companionOnWake).toBe(false);
   });
 
   it('keeps a well-formed binding and clamps sensitivity', () => {
@@ -76,6 +168,7 @@ describe('bindingIsArmed', () => {
   const binding = {
     id: 'w1',
     phrase: 'Hey',
+    aliases: [] as string[],
     agentId: null,
     agentName: null,
     modelId: 'catalog:desktop/wake-hey-jarvis',
@@ -103,6 +196,7 @@ describe('bindingEngineKind', () => {
     const base = {
       id: 'w1',
       phrase: 'Hey',
+      aliases: [] as string[],
       agentId: null,
       agentName: null,
       modelId: 'm',

@@ -16,6 +16,13 @@ export type WakeWordBinding = {
   id: string;
   /** The spoken phrase shown to the user (e.g. "Hey Jarvis"). */
   phrase: string;
+  /**
+   * 0..n alternate phrases that activate the *same* agent (e.g. the nickname
+   * "Zeni" for "Xeni"). Match by on-device speech recognition, aliases work for
+   * any phrase the engine's model can transcribe; they are normalized, deduped,
+   * and never collide with the primary phrase. Empty = no aliases.
+   */
+  aliases: string[];
   /** Chat contact id of the agent this word activates. */
   agentId: string | null;
   /** Display name of that agent, for the settings row. */
@@ -82,6 +89,13 @@ export const WAKE_TIMEOUT_DEFAULT_SECONDS = 60;
  */
 export const DEFAULT_WAKE_BEHAVIOR = {
   activationMode: 'chat' as WakeActivationMode,
+  /**
+   * When true, a wake word opens the referenced agent in the immersive companion
+   * window in **voice mode** (and its realtime voice session owns dictation).
+   * Independent of {@link WakeActivationMode} so the widget's one-click toggle can
+   * turn it on without disturbing the mode the user picked. Default off.
+   */
+  companionOnWake: false,
   reviewBeforeSend: true,
   submitPhrases: [] as string[],
   unsentPolicy: 'discard' as WakeUnsentPolicy,
@@ -89,6 +103,13 @@ export const DEFAULT_WAKE_BEHAVIOR = {
   autoMapAgents: true,
   autoMapMode: 'blocklist' as WakeAutoMapMode,
   autoMapIds: [] as string[],
+  /**
+   * Nicknames keyed by the phrase they belong to (lowercased), e.g.
+   * `{ xeni: ['Zeni'] }`. Applied to *every* binding whose phrase matches —
+   * including auto-mapped agents, which are derived at runtime and therefore
+   * have nowhere else to persist an alias.
+   */
+  agentAliases: {} as Record<string, string[]>,
   /**
    * Model used for auto-mapped agents. An agent is mapped to its own *name*,
    * which no fixed-phrase keyword model can match, so this is normally a speech
@@ -103,6 +124,12 @@ export type WakeSettings = {
   bindings: WakeWordBinding[];
   /** What a wake does (see {@link WakeActivationMode}). */
   activationMode: WakeActivationMode;
+  /**
+   * When true, a wake opens the referenced agent in the companion window in
+   * voice mode, regardless of {@link activationMode}. Surfaced as a one-click
+   * link in the listening widget as well as the settings panel. Default off.
+   */
+  companionOnWake: boolean;
   /**
    * When true (default), a finished transcript is placed in the composer/
    * dictation buffer for review and is **not** sent automatically. The realtime
@@ -134,6 +161,15 @@ export type WakeSettings = {
    * model can never match an arbitrary name. Null = auto-mapped agents are inert.
    */
   autoMapModelId: string | null;
+  /**
+   * Nicknames per agent, keyed by the (lowercased) phrase they wake — e.g.
+   * `{ xeni: ['Zeni'] }`. Aliases configured on a *manual* binding live on the
+   * binding itself ({@link WakeWordBinding.aliases}); this map is the one place
+   * an alias can be attached to an auto-mapped agent, whose binding is derived
+   * on every arm and therefore has nothing stable to hold it. Both are merged
+   * when a binding is armed, so a nickname wakes either kind of agent.
+   */
+  agentAliases: Record<string, string[]>;
 };
 
 /**
@@ -184,6 +220,116 @@ export function normalizeSubmitPhrases(raw: unknown): string[] {
   return out;
 }
 
+/** Cap on alternate phrases per binding, so one agent cannot arm unbounded detectors. */
+export const MAX_WAKE_ALIASES = 8;
+
+/**
+ * Normalize one alias phrase: trimmed, whitespace-collapsed, and rejected when
+ * it is empty or simply repeats the primary phrase (an alias must add a *new*
+ * phrase, not duplicate the one already spoken for).
+ */
+export function normalizeAliasPhrase(raw: unknown, primary: string): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().replace(/\s+/g, ' ');
+  if (!trimmed) return null;
+  if (trimmed.toLowerCase() === (primary ?? '').trim().toLowerCase()) return null;
+  return trimmed;
+}
+
+/**
+ * Coerce a binding's alias list: strings only, trimmed, deduped (case-insensitive),
+ * order preserved, and never equal to the primary phrase. Bounded so a runaway
+ * list cannot bloat the persisted settings or arm an unreasonable number of
+ * detectors for one agent.
+ */
+export function normalizeAliasList(raw: unknown, primary: string): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>([(primary ?? '').trim().toLowerCase()]);
+  for (const entry of raw) {
+    const alias = normalizeAliasPhrase(entry, primary);
+    if (!alias) continue;
+    const key = alias.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(alias);
+    if (out.length >= MAX_WAKE_ALIASES) break;
+  }
+  return out;
+}
+
+/** Normalize the phrase key used by {@link WakeSettings.agentAliases}. */
+export function aliasKey(phrase: string | null | undefined): string {
+  return (phrase ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
+ * Coerce the untrusted `agentAliases` map: string keys (normalized), alias
+ * values normalized against the key phrase, deduped and bounded per phrase.
+ */
+export function normalizeAgentAliases(raw: unknown): Record<string, string[]> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const phrase = aliasKey(key);
+    if (!phrase) continue;
+    // The key is itself a phrase, so normalize aliases against it: an alias may
+    // never simply repeat the phrase it is a nickname for.
+    const aliases = normalizeAliasList(value, phrase);
+    if (aliases.length) out[phrase] = aliases;
+  }
+  return out;
+}
+
+/**
+ * Aliases configured globally for a phrase (see {@link WakeSettings.agentAliases}).
+ * Exposed so the settings UI and tests can read one phrase's nicknames without
+ * knowing the key shape.
+ */
+export function aliasesForPhrase(
+  agentAliases: Record<string, string[]> | undefined,
+  phrase: string | null | undefined,
+): string[] {
+  if (!agentAliases) return [];
+  return agentAliases[aliasKey(phrase)] ?? [];
+}
+
+/**
+ * Merge a binding's own aliases with the aliases configured for its phrase in
+ * settings. Order is binding-first (an inline alias is more specific), both are
+ * normalized, deduped case-insensitively, and bounded by {@link MAX_WAKE_ALIASES}.
+ * This is what the arm loop uses, so a nickname reaches both manual and derived
+ * (auto-mapped) bindings.
+ */
+export function mergeBindingAliases(
+  binding: Pick<WakeWordBinding, 'phrase' | 'aliases'>,
+  agentAliases?: Record<string, string[]>,
+): string[] {
+  const combined = [...(binding.aliases ?? []), ...aliasesForPhrase(agentAliases, binding.phrase)];
+  return normalizeAliasList(combined, binding.phrase);
+}
+
+/**
+ * Every phrase a binding should arm: its primary phrase plus any aliases, in
+ * order. The arm loop registers one detector per phrase, all mapped to the same
+ * agent, so a nickname wakes the agent exactly like its name does.
+ */
+export function bindingPhrases(binding: Pick<WakeWordBinding, 'phrase' | 'aliases'>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string | null | undefined) => {
+    const value = (raw ?? '').trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(value);
+  };
+  push(binding.phrase);
+  for (const alias of binding.aliases ?? []) push(alias);
+  return out;
+}
+
 /** Clamp the unsubmitted-transcript timeout into its valid range, in seconds. */
 export function clampWakeTimeout(value: unknown, fallback = WAKE_TIMEOUT_DEFAULT_SECONDS): number {
   const n = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -199,6 +345,7 @@ function normaliseBinding(raw: unknown, index: number): WakeWordBinding | null {
   return {
     id: str(r.id) ?? `wake-${index}-${phrase.toLowerCase().replace(/\s+/g, '-')}`,
     phrase,
+    aliases: normalizeAliasList(r.aliases, phrase),
     agentId: str(r.agentId),
     agentName: str(r.agentName),
     modelId: str(r.modelId),
@@ -236,6 +383,10 @@ export function normalizeWakeSettings(raw: unknown): WakeSettings {
     activationMode: WAKE_ACTIVATION_MODES.includes(r.activationMode as WakeActivationMode)
       ? (r.activationMode as WakeActivationMode)
       : DEFAULT_WAKE_BEHAVIOR.activationMode,
+    companionOnWake:
+      typeof r.companionOnWake === 'boolean'
+        ? r.companionOnWake
+        : DEFAULT_WAKE_BEHAVIOR.companionOnWake,
     reviewBeforeSend:
       typeof r.reviewBeforeSend === 'boolean'
         ? r.reviewBeforeSend
@@ -254,6 +405,7 @@ export function normalizeWakeSettings(raw: unknown): WakeSettings {
         : DEFAULT_WAKE_BEHAVIOR.autoMapMode,
     autoMapIds: normalizeIdList(r.autoMapIds),
     autoMapModelId: typeof r.autoMapModelId === 'string' ? r.autoMapModelId : null,
+    agentAliases: normalizeAgentAliases(r.agentAliases),
   };
 }
 

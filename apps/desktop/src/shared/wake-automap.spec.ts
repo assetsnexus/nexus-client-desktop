@@ -10,6 +10,7 @@ function binding(over: Partial<WakeWordBinding>): WakeWordBinding {
   return {
     id: 'w1',
     phrase: 'Hey Jarvis',
+    aliases: [],
     agentId: 'a1',
     agentName: 'Jarvis',
     modelId: 'm',
@@ -82,6 +83,33 @@ describe('withAutoMappedBindings', () => {
     expect(out[0]!.agentName).toBe('Bob');
   });
 
+  it('never derives a phrase that collides with a manual binding\u2019s alias', () => {
+    // The manual binding reserves "Nova" as an *alias*, so the agent literally
+    // named "Nova" must not also derive it (which would shadow the alias).
+    const manual = [binding({ id: 'manual', phrase: 'Hey X', aliases: ['Nova'], agentId: 'x' })];
+    const out = withAutoMappedBindings({
+      manual,
+      agents: [agent('nova', 'Nova')],
+      autoMap: true,
+      mode: 'blocklist',
+      ids: [],
+    });
+    expect(out.filter((b) => isAutoBinding(b))).toEqual([]);
+  });
+
+  it('inherits aliases the user added to a derived binding', () => {
+    const out = withAutoMappedBindings({
+      manual: [],
+      agents: [agent('bob', 'Bob')],
+      autoMap: true,
+      mode: 'blocklist',
+      ids: [],
+      existing: [binding({ id: autoBindingId('bob'), phrase: 'Bob', aliases: ['Bobby'], agentId: 'bob' })],
+    });
+    const derived = out.find((b) => isAutoBinding(b));
+    expect(derived?.aliases).toEqual(['Bobby']);
+  });
+
   it('excludes blocklisted agents', () => {
     const out = withAutoMappedBindings({
       manual: [],
@@ -116,6 +144,36 @@ describe('withAutoMappedBindings', () => {
     expect(out[0]).toBe(manual[0]);
     // Nova is taken by the manual binding, so only Bob is derived.
     expect(out.map((b) => b.phrase)).toEqual(['Nova', 'Bob']);
+  });
+
+  it('folds the global agent aliases onto a derived binding (Xeni → Zeni)', () => {
+    const out = withAutoMappedBindings({
+      manual: [],
+      agents: [agent('xeni', 'Xeni'), agent('nova', 'Nova')],
+      autoMap: true,
+      mode: 'blocklist',
+      ids: [],
+      agentAliases: { xeni: ['Zeni'] },
+    });
+    const xeni = out.find((b) => b.agentId === 'xeni')!;
+    expect(xeni.aliases).toEqual(['Zeni']);
+    // Nova has no configured nickname, so it stays clean.
+    expect(out.find((b) => b.agentId === 'nova')!.aliases).toEqual([]);
+  });
+
+  it('lets a global alias for a manual phrase block the derived agent name', () => {
+    // "Zeni" is a nickname for the manual "Xeni"; an agent literally named
+    // "Zeni" must therefore not derive that phrase (it would shadow the alias).
+    const manual = [binding({ id: 'manual-xeni', phrase: 'Xeni', agentId: 'xeni', agentName: 'Xeni' })];
+    const out = withAutoMappedBindings({
+      manual,
+      agents: [agent('zeni', 'Zeni'), agent('nova', 'Nova')],
+      autoMap: true,
+      mode: 'blocklist',
+      ids: [],
+      agentAliases: { xeni: ['Zeni'] },
+    });
+    expect(out.filter((b) => isAutoBinding(b)).map((b) => b.phrase)).toEqual(['Nova']);
   });
 
   it('de-duplicates derived phrases against reserved phrases', () => {

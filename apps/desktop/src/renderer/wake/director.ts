@@ -20,7 +20,7 @@ import type {
   WakeSettings,
   WakeWordBinding,
 } from '../../shared/wake.js';
-import { DEFAULT_WAKE_SETTINGS } from '../../shared/wake.js';
+import { DEFAULT_WAKE_SETTINGS, bindingPhrases, mergeBindingAliases } from '../../shared/wake.js';
 import { isAutoBinding, withAutoMappedBindings } from '../../shared/wake-automap.js';
 import type { WakeBindingResolution, WakeListenState } from '../../shared/ipc.js';
 import type { WakeDetector } from './engine.js';
@@ -94,22 +94,38 @@ export type WakeDirectorOptions = {
   levelSmoothing?: number;
 };
 
-/** An armed binding and the detector watching for its phrase. */
+/**
+ * An armed binding and the detector watching for one of its phrases. A binding
+ * with aliases arms one detector per phrase (all mapped to the same agent), so
+ * `phrase` is the exact phrase *this* detector listens for — which can differ
+ * from `binding.phrase` for an alias entry.
+ */
 type ArmedBinding = {
   binding: WakeWordBinding;
+  /** The exact phrase this detector watches (the binding's phrase or an alias). */
+  phrase: string;
   detector: WakeDetector;
 };
 
 /**
  * One microphone stream and the detectors watching *its* frames. Detectors carry
  * per-stream state (audio buffers), so each microphone gets its own detector set;
- * `firedThisActivation` still de-dupes so a phrase heard on two mics fires once.
+ * `firedAt` still de-dupes so a phrase heard on two mics fires once.
  */
 type MicGroup = {
   key: string;
   mic: WakeMicSource;
   entries: ArmedBinding[];
 };
+
+/**
+ * How long a phrase stays "just fired" after a detection. Long enough to
+ * collapse the same utterance arriving from several microphones into one wake,
+ * short enough that the user can immediately wake the same agent again. A STT
+ * hub already enforces its own ~1.5s per-phrase cooldown; this is the belt to
+ * that suspenders and also covers the ONNX/custom-sample detectors.
+ */
+const FIRE_COOLDOWN_MS = 2_500;
 
 const DEFAULT_STATE: WakeListenState = {
   enabled: false,
@@ -167,8 +183,14 @@ export function createWakeDirector(options: WakeDirectorOptions) {
   /** Latest on-device transcript, for the live caption. UI-only. */
   let transcript: string | null = null;
   let running = false;
-  /** Bindings whose detector fired this activation, so one phrase fires once. */
-  const firedThisActivation = new Set<string>();
+  /**
+   * Phrase → epoch-ms the phrase last fired. A phrase heard on two microphones
+   * fires once because the second frame arrives within the cooldown, but the
+   * entry *expires* so the user can wake the same agent again later. Keeping a
+   * permanent set (the previous behaviour) meant each phrase fired exactly once
+   * until settings reloaded — the agent window "only opened once".
+   */
+  const firedAt = new Map<string, number>();
 
   function emit(patch: Partial<WakeListenState>): void {
     state = { ...state, ...patch };
@@ -200,8 +222,15 @@ export function createWakeDirector(options: WakeDirectorOptions) {
       mode: next.autoMapMode,
       ids: next.autoMapIds,
       defaultModelId: next.autoMapModelId,
-      // Derived bindings must not collide with the user's own phrases.
-      reservedPhrases: next.bindings.map((b) => b.phrase),
+      // Derived bindings must not collide with the user's own phrases — primary
+      // *or* alias, so a nickname never gets shadowed by a derived agent name.
+      reservedPhrases: [
+        ...next.bindings.map((b) => b.phrase),
+        ...next.bindings.flatMap((b) => mergeBindingAliases(b, next.agentAliases)),
+      ],
+      // The global alias map is the only place an alias can live for an
+      // auto-mapped agent, so hand it to the derivation to fold onto each entry.
+      agentAliases: next.agentAliases,
       existing: effectiveBindings.filter(isAutoBinding),
     });
   }
@@ -215,10 +244,9 @@ export function createWakeDirector(options: WakeDirectorOptions) {
     const seen = new Set<string>();
     for (const group of groups) {
       for (const entry of group.entries) {
-        const phrase = entry.binding.phrase;
-        if (seen.has(phrase)) continue;
-        seen.add(phrase);
-        activePhrases.push(phrase);
+        if (seen.has(entry.phrase)) continue;
+        seen.add(entry.phrase);
+        activePhrases.push(entry.phrase);
       }
     }
     const anyMicActive = groups.some((g) => g.mic.active);
@@ -243,7 +271,11 @@ export function createWakeDirector(options: WakeDirectorOptions) {
     level = smoothLevel(level, frameRms(frame) * 3, smoothing);
     const at = Date.now();
     for (const entry of group.entries) {
-      if (firedThisActivation.has(entry.binding.id)) continue;
+      // Suppress a repeat only while the phrase is inside its short cooldown
+      // (a phrase heard on a second microphone must not fire twice), then let it
+      // fire again — a permanent lock would make each agent wake once per reload.
+      const lastFired = firedAt.get(entry.phrase);
+      if (lastFired !== undefined && at - lastFired < FIRE_COOLDOWN_MS) continue;
       let result: { fired: boolean; confidence: number | null };
       try {
         result = entry.detector.push({ frame, at });
@@ -252,20 +284,26 @@ export function createWakeDirector(options: WakeDirectorOptions) {
         continue;
       }
       if (!result.fired) continue;
-      firedThisActivation.add(entry.binding.id);
-      void fire(entry.binding, result.confidence);
+      firedAt.set(entry.phrase, at);
+      void fire(entry.binding, result.confidence, entry.phrase);
     }
     emitLocal({ level });
   }
 
-  async function fire(binding: WakeWordBinding, confidence: number | null): Promise<void> {
+  async function fire(
+    binding: WakeWordBinding,
+    confidence: number | null,
+    phrase: string,
+  ): Promise<void> {
+    // Report the exact phrase that fired (an alias, when the user spoke one), so
+    // the UI can say "heard 'Zeni'" while still routing to the same agent.
     const next = {
-      lastDetection: { phrase: binding.phrase, agentId: binding.agentId, at: Date.now() },
+      lastDetection: { phrase, agentId: binding.agentId, at: Date.now() },
     };
     emit(next);
     // Tell main first (raises the window), then let the UI route to the agent.
     await options.bridge
-      .wakeActivated({ phrase: binding.phrase, agentId: binding.agentId })
+      .wakeActivated({ phrase, agentId: binding.agentId })
       .catch(() => undefined);
     options.onActivate?.({ binding, confidence });
   }
@@ -307,15 +345,36 @@ export function createWakeDirector(options: WakeDirectorOptions) {
   ): Promise<ArmedBinding[]> {
     const entries: ArmedBinding[] = [];
     for (const { binding, resolution } of resolved) {
-      const detector = await options.buildDetector(resolution, groupKey).catch(() => null);
-      if (!detector || !detector.detecting) continue;
-      entries.push({ binding, detector });
+      // Arm the primary phrase *and* every alias. Aliases only apply to the
+      // text-matching `stt_phrase` engine: a fixed keyword (ONNX) model fires on
+      // the single phrase it was trained for and a `custom_sample` fingerprint is
+      // one enrolled utterance, so arming extra phrases for those would be dead
+      // detectors. The detector builder keys off `resolution.binding.phrase`, so
+      // an alias is armed by swapping in a resolution whose binding carries that
+      // phrase — the engine kind, model, and readiness are otherwise identical.
+      // A binding's effective phrases are its own aliases *plus* any aliases
+      // configured globally for its phrase (which is how an auto-mapped agent
+      // gets a nickname). Fixed-phrase keyword engines can only fire on their
+      // trained phrase, so they still arm the primary phrase alone.
+      const armed: WakeWordBinding =
+        resolution.engineKind === 'stt_phrase'
+          ? { ...binding, aliases: mergeBindingAliases(binding, settings.agentAliases) }
+          : binding;
+      const phrases =
+        resolution.engineKind === 'stt_phrase' ? bindingPhrases(armed) : [binding.phrase];
+      for (const phrase of phrases) {
+        const phraseResolution: WakeBindingResolution =
+          phrase === binding.phrase ? resolution : { ...resolution, binding: { ...binding, phrase } };
+        const detector = await options.buildDetector(phraseResolution, groupKey).catch(() => null);
+        if (!detector || !detector.detecting) continue;
+        entries.push({ binding, phrase, detector });
+      }
     }
     return entries;
   }
 
   async function reconcile(): Promise<void> {
-    firedThisActivation.clear();
+    firedAt.clear();
     for (const group of groups) {
       for (const entry of group.entries) entry.detector.dispose?.();
       group.mic.stop();
@@ -396,7 +455,7 @@ export function createWakeDirector(options: WakeDirectorOptions) {
       groups = [];
       for (const mic of extraMics.values()) mic.stop();
       running = false;
-      firedThisActivation.clear();
+      firedAt.clear();
       level = 0;
       transcript = null;
       refreshDerived(null);

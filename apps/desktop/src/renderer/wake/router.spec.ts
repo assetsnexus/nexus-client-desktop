@@ -195,6 +195,38 @@ describe('createWakeChatRouter', () => {
     expect(onError).toHaveBeenCalledTimes(2);
   });
 
+  it('supersedes a lingering review session so a later wake still opens the agent', async () => {
+    // The bug: the first session held the lock until its inactivity timeout, so
+    // every wake in between was dropped and the agent window "only opened once".
+    const h = makeRouter({
+      getSettings: () => settings({ reviewBeforeSend: true, submitPhrases: ['submit'] }),
+      dictate: scripted(['draft one submit', 'draft two submit']),
+    });
+    await h.router.route(target);
+    await flush();
+    expect(h.presented).toHaveLength(1);
+    expect(h.router.getSession()?.status).toBe('review');
+    // A second wake arrives while the review bar is still up: it must present.
+    await h.router.route(target);
+    await flush();
+    expect(h.presented).toHaveLength(2);
+  });
+
+  it('ignores the same utterance arriving twice while a route is in flight', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const present = vi.fn(() => gate);
+    const h = makeRouter({ present });
+    const first = h.router.route(target);
+    // Runs before `present` resolves, so this is the same wake on another mic.
+    await h.router.route(target);
+    release();
+    await first;
+    expect(present).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores a second activation while one is in flight', async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
@@ -224,6 +256,39 @@ describe('createWakeChatRouter', () => {
     await flush();
     h.router.cancel();
     expect(h.states[h.states.length - 1]).toBe('idle');
+  });
+
+  it('routes to the companion window when companionOnWake is set, even in chat mode', async () => {
+    const h = makeRouter({
+      getSettings: () => settings({ activationMode: 'chat', companionOnWake: true }),
+      transcriptionIsCloud: () => true,
+      present: async (mode) => {
+        h.presented.push({ mode, target: null });
+        return { dictate: false };
+      },
+    });
+    await h.router.route(target);
+    await flush();
+    // The one-click companion link wins over both the configured mode and the
+    // cloud-forces-widget rule (the companion owns its own realtime voice).
+    expect(h.presented[0]!.mode).toBe('companion');
+  });
+
+  it('delegates setBuffer to the live session', async () => {
+    const gate: { resolve: (v: string | null) => void } = { resolve: () => {} };
+    const dictate = vi.fn(
+      () => new Promise<string | null>((resolve) => (gate.resolve = resolve)),
+    );
+    const h = makeRouter({
+      getSettings: () => settings({ activationMode: 'widget', reviewBeforeSend: false }),
+      dictate,
+    });
+    await h.router.route(target);
+    await flush();
+    h.router.setBuffer('typed instead');
+    expect(h.router.getSession()?.buffer).toBe('typed instead');
+    await h.router.submit();
+    expect(h.sent).toEqual([{ contactId: 'contact-1', text: 'typed instead' }]);
   });
 
   it('skips dictation when the surface runs its own voice (companion)', async () => {

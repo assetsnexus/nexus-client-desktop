@@ -36,6 +36,7 @@ function settings(bindings: WakeSettings['bindings']): WakeSettings {
 const binding = {
   id: 'w1',
   phrase: 'Hey Jarvis',
+  aliases: [] as string[],
   agentId: 'a1',
   agentName: 'Jarvis',
   modelId: 'catalog:desktop/wake-hey-jarvis',

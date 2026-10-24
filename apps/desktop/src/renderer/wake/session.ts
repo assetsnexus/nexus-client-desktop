@@ -99,6 +99,13 @@ export type WakeSession = {
   stopTurn(): void;
   /** Submit the buffer now (manual submit via click). */
   submit(): Promise<void>;
+  /**
+   * Replace the committed buffer with user-edited text (the widget's input
+   * field). Also folds the live partial into the buffer and clears it, so a
+   * manual edit — or submitting the visible live transcript — never races the
+   * in-flight preview. Counts as activity, so it delays the inactivity timeout.
+   */
+  setBuffer(text: string): void;
   /** Abandon the session; nothing is sent or queued. */
   cancel(): void;
   /** The inactivity timer fired — apply the unsent policy. */
@@ -208,8 +215,20 @@ export function createWakeSession(options: SessionOptions): WakeSession {
     emit({ status: 'listening' });
   }
 
+  /**
+   * Fold the live partial into the committed buffer and clear it. Called before
+   * a manual submit/edit so whatever the user can *see* in the field is what
+   * gets sent — a partial was previously invisible to Send, which is why the
+   * widget felt like it "never streamed" and could not be submitted.
+   */
+  function foldPartial(): void {
+    const combined = appendTranscript(state.buffer, state.partial);
+    if (combined !== state.buffer) emit({ buffer: combined, partial: '' });
+  }
+
   async function submit(): Promise<void> {
     if (sending) return;
+    foldPartial();
     const buffer = state.buffer.trim();
     if (!buffer) {
       captureStopped = true;
@@ -248,6 +267,13 @@ export function createWakeSession(options: SessionOptions): WakeSession {
     async submit() {
       if (terminal) return;
       await submit();
+    },
+    setBuffer(text) {
+      if (terminal) return;
+      // An explicit edit is user activity: reset the inactivity clock so the
+      // unsent policy does not fire mid-typing.
+      lastActivityAt = now();
+      emit({ buffer: (text ?? '').replace(/\s+$/g, ''), partial: '' });
     },
     cancel() {
       captureStopped = true;
