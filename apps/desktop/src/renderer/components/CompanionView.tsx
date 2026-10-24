@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import {
   ThreadView,
   VoiceLayout,
@@ -59,6 +68,12 @@ import {
   type CompanionAvatarAsset,
   type CompanionAvatarChoice,
 } from '../companion/avatar-gallery.js';
+import {
+  CLOSED_COMPANION_MENU,
+  companionMenuReducer,
+  type CompanionMenuAction,
+} from '../companion/companion-scene-menu.js';
+import { SceneContextMenu, SceneMenuAnchorContext } from '../companion/SceneContextMenu.js';
 
 type ChatIdentity = Parameters<typeof createRegionCommandClient>[0]['identity'];
 
@@ -97,6 +112,23 @@ const btnActive: CSSProperties = {
   background: '#2f5c9e',
   color: '#fff',
 };
+
+/**
+ * Compact square icon button for the header (pin / fullscreen). Deliberately
+ * smaller than {@link btn} so the crowded bar leaves room for the agent name.
+ */
+const iconBtn = (active: boolean): CSSProperties => ({
+  ...(active ? btnActive : btn),
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 22,
+  height: 22,
+  minWidth: 22,
+  padding: 0,
+  lineHeight: 1,
+  fontSize: 12,
+});
 
 const voiceBadge: CSSProperties = {
   display: 'inline-flex',
@@ -223,6 +255,13 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
    */
   const [roomHost, setRoomHost] = useState<CompanionStageHost | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  // Scene right-click menu: the reducer owns open/close, the anchor feeds the
+  // card's clamped position. Keeping both here (rather than inside the menu) lets
+  // a scene click anywhere open it at the cursor.
+  const [menu, dispatchMenu] = useReducer(companionMenuReducer, CLOSED_COMPANION_MENU);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+  // Windowed vs fullscreen for this companion window (standard Fullscreen API).
+  const [fullscreen, setFullscreen] = useState(false);
   const [assets, setAssets] = useState<CompanionAvatarAsset[]>([]);
   const [choiceId, setChoiceId] = useState<string | null>(() => avatarStore.get(launch.contactId)?.choiceId ?? null);
   const clientRef = useRef<ReturnType<typeof createRegionCommandClient> | null>(null);
@@ -569,6 +608,69 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     });
   }, [onTop, launch.contactId]);
 
+  // Fullscreen toggle: the whole companion window (browser Fullscreen API). The
+  // document-level `fullscreenchange` listener keeps the button in sync when the
+  // user leaves fullscreen with Esc or an OS shortcut.
+  const toggleFullscreen = useCallback(() => {
+    const doc = document;
+    if (doc.fullscreenElement) {
+      void doc.exitFullscreen?.().catch(() => undefined);
+    } else {
+      void doc.documentElement.requestFullscreen?.().catch(() => undefined);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    onChange();
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // Right-click anywhere on the scene surface opens the companion menu at the
+  // cursor instead of the browser context menu.
+  const openSceneMenu = useCallback(
+    (e: ReactMouseEvent) => {
+      e.preventDefault();
+      const anchor = { x: e.clientX, y: e.clientY };
+      setMenuAnchor(anchor);
+      dispatchMenu({ type: 'open', ...anchor });
+    },
+    [],
+  );
+  const closeSceneMenu = useCallback(() => dispatchMenu({ type: 'close' }), []);
+
+  // Reset the avatar to its idle rest pose. Routed through the live stage host so
+  // it works for both the flat stage and the shared room scene.
+  const resetPose = useCallback(() => {
+    const host = hostGetterRef.current;
+    if (!host?.resetPose) return;
+    host.resetPose('menu');
+  }, []);
+
+  const onMenuAction = useCallback(
+    (action: CompanionMenuAction) => {
+      switch (action) {
+        case 'avatars':
+          setGalleryOpen(true);
+          break;
+        case 'reset-pose':
+          resetPose();
+          break;
+        case 'motion-feed':
+          setMotionFeedOpen((open) => !open);
+          break;
+        case 'gestures':
+          setGestureTestOpen((open) => !open);
+          break;
+        case 'status-motions':
+          setStatusMotionsOpen((open) => !open);
+          break;
+      }
+    },
+    [resetPose],
+  );
+
   // A wake may resolve a different (latest active) conversation than the one this
   // window opened with; follow it so the composer sends to the right thread.
   useEffect(() => {
@@ -585,8 +687,6 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   // realtime call is not live (voice mode owns the capture). A window that does
   // not own the mic never shows the composer, so captures never compete.
   const showComposer = dictate && !voiceStatus.active && sttPrimary;
-
-  const debugActive = debugEnabled.motionFeed || debugEnabled.gestureTest || debugEnabled.statusMotions;
 
   return (
     <MotionFeedProvider host={stageHost}>
@@ -617,15 +717,6 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
         <span style={{ flex: 1 }} />
         <button
           type="button"
-          style={galleryOpen ? btnActive : btn}
-          aria-label="Avatar gallery"
-          title="Switch avatar (3D model or profile image)"
-          onClick={() => setGalleryOpen((open) => !open)}
-        >
-          Avatars
-        </button>
-        <button
-          type="button"
           style={chatOpen ? btnActive : btn}
           aria-label="Expand chat"
           title={chatOpen ? 'Collapse chat' : 'Expand chat'}
@@ -635,50 +726,22 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
         </button>
         <button
           type="button"
-          style={onTop ? btnActive : btn}
+          style={iconBtn(onTop)}
           aria-label="Always on top"
           title={onTop ? 'Unpin from top' : 'Keep on top'}
           onClick={togglePin}
         >
-          {onTop ? '📌' : '📍'}
+          <span aria-hidden>{onTop ? '📌' : '📍'}</span>
         </button>
-        {debugActive ? (
-          <>
-            {debugEnabled.motionFeed ? (
-              <button
-                type="button"
-                style={motionFeedOpen ? btnActive : btn}
-                aria-label="Motion feed"
-                title="Live action feed (dev)"
-                onClick={() => setMotionFeedOpen((open) => !open)}
-              >
-                Motion
-              </button>
-            ) : null}
-            {debugEnabled.gestureTest ? (
-              <button
-                type="button"
-                style={gestureTestOpen ? btnActive : btn}
-                aria-label="Gesture tester"
-                title="Play any loaded clip (dev)"
-                onClick={() => setGestureTestOpen((open) => !open)}
-              >
-                Gestures
-              </button>
-            ) : null}
-            {debugEnabled.statusMotions ? (
-              <button
-                type="button"
-                style={statusMotionsOpen ? btnActive : btn}
-                aria-label="Status motions"
-                title="Clips cycled while the agent works (dev)"
-                onClick={() => setStatusMotionsOpen((open) => !open)}
-              >
-                Status
-              </button>
-            ) : null}
-          </>
-        ) : null}
+        <button
+          type="button"
+          style={iconBtn(fullscreen)}
+          aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+          title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          onClick={toggleFullscreen}
+        >
+          <FullscreenGlyph exit={fullscreen} />
+        </button>
         <button
           type="button"
           style={btn}
@@ -769,6 +832,9 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
         }}
       >
         <div
+          // Right-clicking the scene surface opens the companion menu (avatar
+          // controls + Reset pose) instead of the browser context menu.
+          onContextMenu={openSceneMenu}
           style={{
             flex: chatOpen ? '0 0 60%' : 1,
             minWidth: 0,
@@ -936,8 +1002,55 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
           />
         </div>
       ) : null}
+
+      {menu.open ? (
+        <SceneMenuAnchorContext.Provider value={menuAnchor}>
+          <SceneContextMenu
+            debugEnabled={debugEnabled}
+            open={{
+              galleryOpen,
+              motionFeedOpen,
+              gestureTestOpen,
+              statusMotionsOpen,
+            }}
+            poseResetAvailable={Boolean(stageHost?.resetPose)}
+            onAction={onMenuAction}
+            onClose={closeSceneMenu}
+          />
+        </SceneMenuAnchorContext.Provider>
+      ) : null}
     </div>
     </MotionFeedProvider>
+  );
+}
+
+/**
+ * Fullscreen toggle glyph. Inline SVG rather than an emoji/symbol so it renders
+ * identically across platforms and stays crisp at the compact 22px button size.
+ * `exit` swaps the corner arrows inward (contract) for outward (expand).
+ */
+function FullscreenGlyph({ exit }: { exit: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      focusable="false"
+    >
+      {exit ? (
+        // Contract: corner brackets pulled inward (Minimize).
+        <path d="M4.5 1.5 V4.5 H1.5 M7.5 1.5 V4.5 H10.5 M4.5 10.5 V7.5 H1.5 M7.5 10.5 V7.5 H10.5" />
+      ) : (
+        // Expand: corner brackets pushed outward (Maximize).
+        <path d="M1.5 4.5 V1.5 H4.5 M7.5 1.5 H10.5 V4.5 M1.5 7.5 V10.5 H4.5 M10.5 7.5 V10.5 H7.5" />
+      )}
+    </svg>
   );
 }
 

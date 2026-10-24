@@ -67,6 +67,12 @@ export type CompanionStageHost = CharacterToolHostLike & {
   }) => unknown;
   /** Click nod (configurable gesture) enable / pick. */
   setClickAck?: (opts: { enabled?: boolean; gesture?: string }) => unknown;
+  /**
+   * Hard-reset the avatar to its idle rest pose: halts any clip still holding
+   * weight and snaps the skeleton back to a relaxed stance. Wired to the scene
+   * context menu's "Reset pose" escape hatch and safe to call at any time.
+   */
+  resetPose?: (reason?: string) => void;
 };
 
 export type ToolResultLike = {
