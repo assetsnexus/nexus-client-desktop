@@ -185,6 +185,12 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * A conversation link failure (e.g. the agent is not ours to resume) must not
+   * blank the stage — the companion still renders the agent's avatar and voice
+   * surface; only the transcript/composer binding is degraded.
+   */
+  const [conversationError, setConversationError] = useState<string | null>(null);
   // Compact chat strip by default; expands to the full pane without leaving.
   // A `split` launch opens already expanded.
   const [chatOpen, setChatOpen] = useState(launch.mode === 'split');
@@ -378,14 +384,58 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
             avatarUrl: launch.avatarUrl ?? undefined,
           },
         );
-        // Resume the existing thread when we know it; otherwise open the latest.
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'could not load contacts');
+        return;
+      }
+      if (cancelled) return;
+      // Link to the *same* thread the main chat view shows. `openContact` now
+      // resumes the latest active conversation for the contact (creating one
+      // only when none exists), so opening a companion no longer forks a new
+      // session. This is deliberately separate from contact loading: a link
+      // failure degrades to the transcript-less stage instead of blanking the
+      // avatar stage (the window stays usable and the 3D/voice surface mounts).
+      try {
         if (launch.conversationId) {
           await nextChat.reopenConversation(launch.conversationId);
         } else {
           await nextChat.openContact(launch.contactId);
         }
+        if (cancelled) return;
+        setConversationError(null);
+        // Show the *same* thread the main chat view has: pull the shared
+        // conversation's turns so the companion's transcript mirrors it rather
+        // than appearing empty. Best-effort — a history read that fails (or a
+        // thread the viewer cannot read) leaves the stage intact.
+        const linkedId = nextChat.getState().conversationId;
+        if (linkedId) {
+          try {
+            const messages = await nextChat.listMessages(linkedId, { limit: 60 });
+            if (!cancelled) {
+              nextChat.rehydrateTurns(
+                (messages as Array<Record<string, unknown>>).map((m) => ({
+                  id: m.id as string | undefined,
+                  role: String(m.role || 'assistant'),
+                  content: String(m.content ?? m.text ?? ''),
+                  toolCalls: Array.isArray(m.toolCalls)
+                    ? (m.toolCalls as Array<Record<string, unknown>>)
+                    : undefined,
+                  attachments: m.attachments as never,
+                  createdAt: (m.createdAt as string) || null,
+                  senderId: (m.senderId as string) || null,
+                  senderName: (m.senderName as string) || null,
+                })),
+                { conversationId: linkedId, detachStream: true },
+              );
+            }
+          } catch {
+            // Keep whatever turns already streamed in.
+          }
+        }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'could not open the agent');
+        if (!cancelled) {
+          setConversationError(err instanceof Error ? err.message : 'could not open the agent');
+        }
       }
     })();
 
@@ -798,13 +848,20 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
             }}
           >
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 12px' }}>
-              <ThreadView
-                turns={turns}
-                streaming={streaming}
-                chat={chat}
-                conversationId={contact?.id ? (chat.getState().conversationId ?? null) : null}
-                empty="Transcript will appear here."
-              />
+              {conversationError ? (
+                <p style={{ fontSize: 12, color: '#fbbf24', margin: 0 }}>
+                  Could not link the shared conversation: {conversationError}. The avatar and voice
+                  surfaces still work; reopen from the main chat to restore the transcript.
+                </p>
+              ) : (
+                <ThreadView
+                  turns={turns}
+                  streaming={streaming}
+                  chat={chat}
+                  conversationId={contact?.id ? (chat.getState().conversationId ?? null) : null}
+                  empty="Transcript will appear here."
+                />
+              )}
             </div>
           </div>
         ) : null}
