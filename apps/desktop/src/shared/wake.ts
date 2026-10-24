@@ -71,6 +71,18 @@ export const WAKE_ACTIVATION_MODES: readonly WakeActivationMode[] = [
   'companion',
 ];
 
+/**
+ * How a wake turn captures audio. Both modes share one microphone stream:
+ * - `live`  — stream an on-device STT preview into the field (no audio batch);
+ * - `batch` — record an audio batch and send it as a voice message (cloud/custom
+ *   STT), with no live preview;
+ * - `both`  — do both in parallel (default), so the user can send either the
+ *   transcript or the recording.
+ */
+export type WakeCaptureMode = 'live' | 'batch' | 'both';
+
+export const WAKE_CAPTURE_MODES: readonly WakeCaptureMode[] = ['live', 'batch', 'both'];
+
 /** Default spoken phrases the settings UI suggests for submit-on-speak. */
 export const SUGGESTED_SUBMIT_PHRASES = ['submit', 'answer now', 'send it', 'over'];
 
@@ -96,6 +108,12 @@ export const DEFAULT_WAKE_BEHAVIOR = {
    * turn it on without disturbing the mode the user picked. Default off.
    */
   companionOnWake: false,
+  /**
+   * Dual-mode capture (live STT preview + parallel audio batch) so the user can
+   * send either the transcript or the recording. `both` is the default; `live`
+   * skips the audio batch, `batch` skips the live preview.
+   */
+  captureMode: 'both' as WakeCaptureMode,
   reviewBeforeSend: true,
   submitPhrases: [] as string[],
   unsentPolicy: 'discard' as WakeUnsentPolicy,
@@ -130,6 +148,12 @@ export type WakeSettings = {
    * link in the listening widget as well as the settings panel. Default off.
    */
   companionOnWake: boolean;
+  /**
+   * How a wake turn captures audio: `live` (on-device STT preview only), `batch`
+   * (audio batch only), or `both` (parallel — the default). See
+   * {@link WakeCaptureMode}.
+   */
+  captureMode: WakeCaptureMode;
   /**
    * When true (default), a finished transcript is placed in the composer/
    * dictation buffer for review and is **not** sent automatically. The realtime
@@ -387,6 +411,9 @@ export function normalizeWakeSettings(raw: unknown): WakeSettings {
       typeof r.companionOnWake === 'boolean'
         ? r.companionOnWake
         : DEFAULT_WAKE_BEHAVIOR.companionOnWake,
+    captureMode: WAKE_CAPTURE_MODES.includes(r.captureMode as WakeCaptureMode)
+      ? (r.captureMode as WakeCaptureMode)
+      : DEFAULT_WAKE_BEHAVIOR.captureMode,
     reviewBeforeSend:
       typeof r.reviewBeforeSend === 'boolean'
         ? r.reviewBeforeSend
@@ -449,6 +476,49 @@ export type QueuedUtterance = {
 
 /** Cap the queue so an unattended microphone cannot grow it without bound. */
 export const MAX_QUEUED_UTTERANCES = 20;
+
+/**
+ * Resolve which surface a wake should target. Single source of truth shared by
+ * the renderer router (which opens the surface) and main (which decides whether
+ * to foreground the main window — a companion wake must **not**, so only the
+ * addressed agent's companion pops forward).
+ *
+ * Precedence:
+ *  - `companionOnWake` wins: the immersive companion owns the session (and, being
+ *    its own surface, is the one path that does not stream dictation to cloud STT);
+ *  - cloud transcription forces the compact **widget** so the streaming is always
+ *    visible, even if the user configured "open chat" / "companion";
+ *  - otherwise the user's configured {@link WakeSettings.activationMode}.
+ */
+export function resolveWakeActivationMode(input: {
+  activationMode: WakeActivationMode;
+  companionOnWake: boolean;
+  cloudTranscription: boolean;
+}): WakeActivationMode {
+  if (input.companionOnWake) return 'companion';
+  if (input.cloudTranscription) return 'widget';
+  return input.activationMode;
+}
+
+/**
+ * Companion-first focus policy. A wake that resolves to **companion** mode must
+ * not force the main window forward — only the addressed agent's companion should
+ * pop forward. Main can decide this from persisted settings alone (it cannot run
+ * the renderer's cloud-transcription probe synchronously), so an explicit
+ * `companion` mode or the one-click `companionOnWake` link both count.
+ *
+ * A companion-mode wake still raises the main window when the mapped agent has no
+ * open companion window yet (there is nothing else to pop forward).
+ */
+export function wakeRaisesMainWindow(input: {
+  settings: Pick<WakeSettings, 'activationMode' | 'companionOnWake'>;
+  /** Whether the mapped agent already has an open companion window. */
+  companionOpen: boolean;
+}): boolean {
+  const wantsCompanion =
+    input.settings.companionOnWake || input.settings.activationMode === 'companion';
+  return !(wantsCompanion && input.companionOpen);
+}
 
 /**
  * Whether wake-triggered *dictation* will transcribe in the cloud (audio leaves

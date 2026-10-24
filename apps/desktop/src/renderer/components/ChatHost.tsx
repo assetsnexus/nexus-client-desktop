@@ -4,19 +4,29 @@ import {
   createNexusChat,
   createRegionCommandClient,
   findChatContact,
+  blobToInlineAudio,
   type NexusChat,
   type SdkToHostMessage,
 } from '@nexus/chat-react';
 import '@nexus/chat-react/style.css';
-import { bridge, type AuthState, type DesktopConnectionConfig, type ToolsConfig } from '../bridge.js';
+import { runDictation, encodeWavBlob, type Transcriber } from '@nexus/voice-capture';
+import {
+  bridge,
+  type AuthState,
+  type CompanionSessionView,
+  type DesktopConnectionConfig,
+  type ToolsConfig,
+} from '../bridge.js';
 import { DEFAULT_DESKTOP_TOOLS, AUDIO_TOOLS, localCommandTools } from '../tools/descriptors.js';
 import { setToolAuditContext, resolveToolAuditContext } from '../tools/audit-context.js';
 import { createIncomingWatcher, resolveSenderName } from '../notifications/incoming.js';
 import { createWakeChatRouter } from '../wake/router.js';
 import type { SessionState } from '../wake/session.js';
-import { runDictation } from '../wake/dictation.js';
-import { createUtteranceSource } from '../wake/utterance.js';
-import { transcribeUtterance } from '../wake/transcribe.js';
+import { createPreviewUtteranceSource } from '../wake/utterance.js';
+import { pickWakeTranscriber } from '../wake/stt-transcriber.js';
+import { drainWakePreRoll } from '../wake/pre-roll.js';
+import { startWakeTurnRecording } from '../wake/turn-recorder.js';
+import { setWakeCapturing, wakeDirector } from '../wake/director-host.js';
 import { WakeOverlay } from './WakeOverlay.js';
 import { WakeQueueBanner } from './WakeQueueBanner.js';
 import {
@@ -214,11 +224,111 @@ export function ChatHost({
    * cannot serve as a reset key).
    */
   const [wakeSessionToken, setWakeSessionToken] = useState(0);
+  /** Engine label for the active capture's transcript ("On-device" / "Region inference"). */
+  const [wakeEngineLabel, setWakeEngineLabel] = useState<string | null>(null);
+  /**
+   * Per-turn refs the router's `sendAudio` / `batchProgress` read. Set when a
+   * capture starts and cleared when the turn ends.
+   */
+  const activeRecorderRef = useRef<Awaited<ReturnType<typeof startWakeTurnRecording>> | null>(null);
+  const activeBatchBlobRef = useRef<Blob | null>(null);
+  /** The conversation id resolved for the active wake (for the companion payload). */
+  const conversationIdRef = useRef<string | null>(null);
 
   // Surface any transcript an earlier wake left behind under the `queue` policy.
   useEffect(() => {
     void bridge.wakeGetQueue().then(setQueued).catch(() => setQueued([]));
   }, []);
+
+  /**
+   * Encode the recorder's batch so far into the WAV blob "send as voice" uses.
+   * Called after each burst so the button is available as soon as audio exists.
+   */
+  const publishBatchSnapshot = useCallback(
+    (recorder: Awaited<ReturnType<typeof startWakeTurnRecording>>): void => {
+      const batch = recorder.snapshot();
+      activeBatchBlobRef.current =
+        batch && batch.pcm.length ? encodeWavBlob(batch.pcm, batch.sampleRate) : null;
+    },
+    [],
+  );
+
+  /** Finish the turn's audio recording and clear the per-turn refs. */
+  const endTurnRecording = useCallback((): void => {
+    const recorder = activeRecorderRef.current;
+    if (!recorder) return;
+    activeRecorderRef.current = null;
+    const batch = recorder.finish();
+    // Keep the finished blob so the review surface can still "send as voice".
+    activeBatchBlobRef.current =
+      batch && batch.pcm.length ? encodeWavBlob(batch.pcm, batch.sampleRate) : activeBatchBlobRef.current;
+  }, []);
+
+  /**
+   * Capture one wake utterance with dual-mode capture: a live STT preview from
+   * the preferred engine (local GPU first, then region cloud) streamed into the
+   * field, plus a parallel audio batch recorded for the whole turn. The wake-turn
+   * recorder is stored in a ref so `sendAudio` can deliver it as a voice message.
+   */
+  const captureOneUtterance = useCallback(
+    async (chatInstance: NexusChat, clientInstance: unknown, onPartial: (text: string) => void) => {
+      // The capture mode is read fresh each turn so a settings change applies to
+      // the next wake without a reload. Defaults to `both` (never crash on a
+      // settings read failure).
+      const captureMode = await bridge
+        .wakeGetSettings()
+        .then((s) => s.captureMode)
+        .catch(() => 'both' as const);
+      const wantLive = captureMode !== 'batch';
+      const wantBatch = captureMode !== 'live';
+
+      // The audio batch must span the *whole* turn, but the router calls `dictate`
+      // once per burst. Start it on the first burst (seeded with the pre-roll so
+      // the utterance is not clipped) and let it keep running while the session
+      // listens for the next burst; the session's terminal outcome ends it.
+      let recorder = activeRecorderRef.current;
+      if (wantBatch && !recorder) {
+        recorder = await startWakeTurnRecording(drainWakePreRoll());
+        activeRecorderRef.current = recorder;
+      }
+      // The live-preview source records no batch of its own (the turn recorder
+      // owns the audio), so the two never duplicate capture work.
+      const source = createPreviewUtteranceSource({ recordBatch: false });
+
+      const phrases = () => wakeDirector().getState().activePhrases;
+      const transcriber: Transcriber = await pickWakeTranscriber({
+        phrases,
+        cloud: {
+          client: clientInstance,
+          listModels: () => chatInstance.listAvailableModels(),
+        },
+      });
+      setWakeEngineLabel(wantLive ? (transcriber.id === 'local' ? 'On-device' : 'Region inference') : null);
+
+      // Gate wake detection for the whole capture (listening → transcribing) so
+      // the agent's own name spoken inside the instruction is not a new wake.
+      setWakeCapturing(true);
+      try {
+        const session = runDictation({
+          source,
+          // `batch` mode records the audio without streaming a live preview; the
+          // final transcript still lands so the field is usable either way.
+          ...(wantLive ? { onPartial } : {}),
+          transcribePcm: (pcm, sampleRate) =>
+            transcriber.transcribe({ blob: new Blob(), pcm, sampleRate, phrases: phrases() }),
+          transcribe: (blob) => transcriber.transcribe({ blob, phrases: phrases() }),
+        });
+        const text = await session.done;
+        // Publish a snapshot so the widget can already offer "send as voice" for
+        // what was recorded, while the session may still listen for another burst.
+        if (recorder) publishBatchSnapshot(recorder);
+        return text;
+      } finally {
+        setWakeCapturing(false);
+      }
+    },
+    [publishBatchSnapshot],
+  );
 
   useEffect(() => {
     if (!chat || !client) return;
@@ -236,36 +346,75 @@ export function ChatHost({
         // Remember the session's address so the widget can offer "open companion
         // + voice" for exactly this agent.
         setWakeTarget({ contactId: target.contactId, agentId: target.agentId, agentName, avatarUrl });
-        if (mode === 'companion') {
-          // The companion window runs its own realtime voice session, so the
-          // router must not open a second microphone capture.
-          await bridge.companionOpen({
-            contactId: target.contactId,
-            conversationId: chat.getState().conversationId ?? null,
-            agentId: target.agentId,
-            title: target.agentName ?? null,
-            avatarUrl: agentRow?.avatarUrl ?? null,
-          });
-          return { dictate: false };
+        // Resume the agent's most recent thread instead of always allocating a
+        // new conversation, so a wake lands where the user last spoke. `openLatest`
+        // falls back to creating one when there is no active thread.
+        const contactRef = chat.getState().contacts.find((c) => c.id === target.contactId) ?? {
+          id: target.contactId,
+        };
+        let conversationId: string | null = chat.getState().conversationId ?? null;
+        try {
+          const opened = await chat.openLatest(contactRef as never);
+          conversationId = opened.conversationId || conversationId;
+        } catch {
+          // Fall back to whatever thread is already open; a hard failure is
+          // surfaced by the send step rather than blocking the wake.
         }
-        if (mode === 'chat') await chat.openContact(target.contactId);
+        if (mode === 'companion') {
+          if (conversationId) conversationIdRef.current = conversationId;
+          // Read the one-click "companion + voice" link: it decides whether the
+          // companion runs its own realtime call (voice mode) or becomes the
+          // *dictation* surface (this renderer owns the session and mirrors it).
+          const voiceMode = await bridge
+            .wakeGetSettings()
+            .then((s) => s.companionOnWake)
+            .catch(() => false);
+          // Hand the activation to the already-open companion without a reload
+          // (so a live realtime call survives); only open a window when none
+          // exists. `dictate` tells the companion which surface it is.
+          const presented = await bridge
+            .companionPresent({
+              contactId: target.contactId,
+              conversationId,
+              agentId: target.agentId,
+              phrase: target.phrase,
+              dictate: !voiceMode,
+              token: Date.now(),
+            })
+            .catch(() => false);
+          if (!presented) {
+            await bridge.companionOpen({
+              contactId: target.contactId,
+              conversationId,
+              agentId: target.agentId,
+              title: target.agentName ?? null,
+              avatarUrl: agentRow?.avatarUrl ?? null,
+              // A realtime call only auto-starts in voice mode; dictation mode
+              // opens in the STT preview with voice a toggle.
+              autoStart: voiceMode,
+            });
+          }
+          // Voice mode owns the capture (the call); dictation mode runs the
+          // session here and mirrors it into the companion strip.
+          return { dictate: !voiceMode };
+        }
         return { dictate: true };
       },
-      dictate: async (onPartial) => {
-        const session = runDictation({
-          source: createUtteranceSource(),
-          onPartial,
-          transcribe: (blob) =>
-            transcribeUtterance(
-              {
-                client,
-                listModels: () => chat.listAvailableModels(),
-              },
-              blob,
-            ),
+      dictate: (onPartial) => captureOneUtterance(chat, client, onPartial),
+      sendAudio: async ({ contactId }) => {
+        const blob = activeBatchBlobRef.current;
+        if (!blob || blob.size === 0) return false;
+        const audio = await blobToInlineAudio(blob, 'voice-message.wav');
+        const result = await chat.sendMessage('Voice message', {
+          conversationId: chat.getState().conversationId ?? undefined,
+          contactId,
+          attachments: [audio],
+          bypassFallback: true,
         });
-        return session.done;
+        return result.ok;
       },
+      batchProgress: () =>
+        activeRecorderRef.current?.progress() ?? { durationMs: 0, chunks: 0 },
       listAgents: () => chat.getState().contacts.map((c) => ({ contactId: c.id, name: c.name })),
       /**
        * Whether dictation transcribes in the cloud. Uses the same capability
@@ -300,7 +449,26 @@ export function ChatHost({
           return next;
         });
       },
-      onSessionChange: (session) => setWakeSession(session),
+      onSessionChange: (session) => {
+        setWakeSession(session);
+        // A terminal session ends the turn: stop the audio recording so its
+        // handle is released, keeping the finished blob for "send as voice".
+        if (
+          session &&
+          (session.status === 'submitted' ||
+            session.status === 'discarded' ||
+            session.status === 'queued' ||
+            session.status === 'error')
+        ) {
+          endTurnRecording();
+          setWakeCapturing(false);
+        }
+        // A brand-new session (idle→listening) must not inherit the previous
+        // turn's audio.
+        if (!session) {
+          setWakeEngineLabel(null);
+        }
+      },
       onError: (message) => console.warn('anx.wake.route failed', message),
     });
     wakeRouterRef.current = router;
@@ -308,7 +476,52 @@ export function ChatHost({
       router.cancel();
       wakeRouterRef.current = null;
     };
-  }, [chat, client]);
+  }, [chat, client, captureOneUtterance, endTurnRecording]);
+
+  // Latest wake target, read by the companion-action relay without re-subscribing
+  // on every session state change.
+  const wakeTargetRef = useRef(wakeTarget);
+  wakeTargetRef.current = wakeTarget;
+
+  /**
+   * Mirror the live wake session into the companion window so it can render the
+   * STT preview + composer. The session itself stays here (this window owns the
+   * shared mic graph and pre-roll); the companion is a *view* of it, so both
+   * surfaces observe one capture rather than opening a second.
+   */
+  useEffect(() => {
+    if (wakeMode !== 'companion' || !wakeTarget) return;
+    const view: CompanionSessionView = {
+      contactId: wakeTarget.contactId,
+      status: wakeSession?.status ?? 'idle',
+      preview: wakeSession?.preview ?? '',
+      buffer: wakeSession?.buffer ?? '',
+      cloudTranscription: wakeSession?.cloudTranscription ?? false,
+      batchDurationMs: wakeSession?.batchDurationMs ?? 0,
+      batchAvailable: wakeSession?.batchAvailable ?? false,
+      sendingAudio: wakeSession?.sendingAudio ?? false,
+      message: wakeSession?.message ?? null,
+      engineLabel: wakeEngineLabel,
+      agentName: wakeTarget.agentName,
+    };
+    void bridge.companionPushSession(view).catch(() => undefined);
+  }, [wakeMode, wakeTarget, wakeSession, wakeEngineLabel]);
+
+  /**
+   * The companion's composer (submit / cancel / send-as-voice / edit) is relayed
+   * back into the session that owns the capture.
+   */
+  useEffect(() => {
+    const off = bridge.onCompanionActionRelay((action) => {
+      const target = wakeTargetRef.current;
+      if (!target || action.contactId !== target.contactId) return;
+      if (action.action === 'submit') void wakeRouterRef.current?.submit();
+      else if (action.action === 'cancel') wakeRouterRef.current?.cancel();
+      else if (action.action === 'sendAudio') void wakeRouterRef.current?.submitAudio();
+      else if (action.action === 'edit') wakeRouterRef.current?.setBuffer(action.text ?? '');
+    });
+    return () => off();
+  }, []);
 
   // Load the "companion + voice on wake" preference so the widget checkbox
   // reflects it, and re-read it whenever a wake session surfaces (the user may
@@ -330,16 +543,32 @@ export function ChatHost({
   const openWakeCompanion = useCallback(
     async (target: { contactId: string; agentId: string | null; agentName: string | null; avatarUrl: string | null }) => {
       if (!chat) return;
+      // Hand the live wake session to the companion (it renders the STT preview +
+      // composer straight away) instead of starting a separate realtime call:
+      // voice mode is a toggle the user opts into, not the wake default.
+      const presented = await bridge
+        .companionPresent({
+          contactId: target.contactId,
+          conversationId: conversationIdRef.current,
+          agentId: target.agentId,
+          phrase: wakeSession?.target.phrase ?? null,
+          dictate: true,
+          token: Date.now(),
+        })
+        .catch(() => false);
+      if (presented) return;
       await bridge.companionOpen({
         contactId: target.contactId,
-        conversationId: chat.getState().conversationId ?? null,
+        conversationId: conversationIdRef.current,
         agentId: target.agentId,
         title: target.agentName ?? null,
         avatarUrl: target.avatarUrl ?? null,
-        autoStart: true,
+        // Open in dictation, not an auto-started call (the companion's voice
+        // toggle turns the call on when the user wants it).
+        autoStart: false,
       });
     },
-    [chat],
+    [chat, wakeSession?.target.phrase],
   );
 
   /**
@@ -523,7 +752,11 @@ export function ChatHost({
           }
         }}
       />
-      {wakeSession ? (
+      {/* In companion mode the agent's own window is the surface (its STT preview
+          + composer strip are fed by this session), so the widget must not linger
+          here as an empty duplicate. The session keeps running regardless — it is
+          what the companion strip mirrors. */}
+      {wakeSession && wakeMode !== 'companion' ? (
         <WakeOverlay
           session={wakeSession}
           sessionToken={wakeSessionToken}
@@ -537,6 +770,8 @@ export function ChatHost({
           }
           onSubmit={() => void wakeRouterRef.current?.submit()}
           onCancel={() => wakeRouterRef.current?.cancel()}
+          engineLabel={wakeEngineLabel}
+          onSendAudio={() => void wakeRouterRef.current?.submitAudio()}
         />
       ) : null}
     </div>

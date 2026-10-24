@@ -25,6 +25,7 @@ vi.mock('../wake/director-host.js', () => ({
     level: 0.4,
     transcript: null,
     lastDetection: null,
+    capturing: false,
     message: null,
   }),
 }));
@@ -43,6 +44,10 @@ function session(over: Partial<SessionState> = {}): SessionState {
     target: { agentId: 'a1', agentName: 'Xeni', phrase: 'Xeni' },
     message: null,
     cloudTranscription: false,
+    batchDurationMs: 0,
+    batchChunks: 0,
+    batchAvailable: false,
+    sendingAudio: false,
     ...over,
     preview,
   };
@@ -158,5 +163,44 @@ describe('WakeOverlay widget', () => {
     expect(open).toBeTruthy();
     act(() => open.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(onOpenCompanion).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the live-preview engine so the user knows what is listening', () => {
+    render({ engineLabel: 'On-device' });
+    expect(container.querySelector('[data-nexus-wake-engine="On-device"]')).toBeTruthy();
+    expect(container.textContent).toContain('Live preview engine: On-device');
+  });
+
+  it('offers "send as voice" once the parallel audio batch has content', () => {
+    const onSendAudio = vi.fn();
+    render({
+      session: session({ buffer: 'spoken words', batchDurationMs: 1_450, batchChunks: 2, batchAvailable: true }),
+      onSendAudio,
+    });
+    const batch = container.querySelector('[data-nexus-wake-batch="true"]');
+    expect(batch).toBeTruthy();
+    expect(batch!.textContent).toContain('Audio batch · 1.5s recorded');
+    expect(batch!.textContent).toContain('2 parts');
+    const send = [...container.querySelectorAll('button')].find((b) =>
+      /Send as voice/.test(b.textContent ?? ''),
+    ) as HTMLButtonElement;
+    act(() => send.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(onSendAudio).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the audio batch until audio actually exists', () => {
+    render({ session: session({ buffer: 'spoken words' }), onSendAudio: () => {} });
+    expect(container.querySelector('[data-nexus-wake-batch="true"]')).toBeNull();
+  });
+
+  it('shows a sending state and blocks a double audio submit', () => {
+    render({
+      session: session({ buffer: 'spoken', batchDurationMs: 900, batchAvailable: true, sendingAudio: true }),
+      onSendAudio: () => {},
+    });
+    const send = [...container.querySelectorAll('button')].find((b) =>
+      /Sending…/.test(b.textContent ?? ''),
+    ) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
   });
 });

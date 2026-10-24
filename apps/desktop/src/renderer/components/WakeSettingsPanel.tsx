@@ -38,6 +38,7 @@ import {
   type WakeActivationMode,
   type WakeAgentRow,
   type WakeAutoMapMode,
+  type WakeCaptureMode,
   type WakeSettings,
   type WakeSttStatus,
   type WakeUnsentPolicy,
@@ -186,6 +187,24 @@ const ACTIVATION_MODES: { id: WakeActivationMode; label: string; help: string }[
     id: 'companion',
     label: 'Open the companion view',
     help: "Open the agent's immersive companion window in voice mode, driven by the wake word.",
+  },
+];
+
+const CAPTURE_MODES: { id: WakeCaptureMode; label: string; help: string }[] = [
+  {
+    id: 'both',
+    label: 'Live preview + audio batch',
+    help: 'Stream an on-device transcript as you speak *and* record the audio, so you can send either.',
+  },
+  {
+    id: 'live',
+    label: 'Live transcript only',
+    help: 'Stream the on-device transcript into the field with no audio recording.',
+  },
+  {
+    id: 'batch',
+    label: 'Audio batch only',
+    help: 'Record the audio and send it as a voice message (cloud/custom STT); no live preview.',
   },
 ];
 
@@ -1259,6 +1278,27 @@ export function WakeSettingsPanel() {
         </select>
         <span style={{ color: '#6b7784' }}>
           {ACTIVATION_MODES.find((m) => m.id === settings.activationMode)?.help}
+        </span>
+      </label>
+
+      <label style={field}>
+        <span>Capture</span>
+        <select
+          style={input}
+          value={settings.captureMode}
+          disabled={busy}
+          onChange={(e) =>
+            void persist({ ...settings, captureMode: e.target.value as WakeCaptureMode })
+          }
+        >
+          {CAPTURE_MODES.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <span style={{ color: '#6b7784' }}>
+          {CAPTURE_MODES.find((m) => m.id === settings.captureMode)?.help}
         </span>
       </label>
 

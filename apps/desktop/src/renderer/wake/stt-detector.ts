@@ -3,9 +3,14 @@
  *
  * A dedicated keyword model can only ever fire on the fixed phrase it was
  * trained for. To wake on *any* phrase — most importantly an agent's own name —
- * this engine listens the way a person would: it segments speech with a simple
+ * this engine listens the way a person would: it segments speech with the shared
  * energy VAD, transcribes each segment **on-device**, and matches the phrase as
  * text.
+ *
+ * The segmentation itself lives in `@nexus/voice-capture` (`createSegmenter`) and
+ * the phrase matching in its shared `phrase` helpers, so this module is the thin
+ * wake-specific glue: one transcription per segment dispatched to many phrases,
+ * with a per-phrase cooldown.
  *
  * Design notes:
  *  - **Local-only.** Transcription is injected (see `wake-stt.ts` in main, which
@@ -14,15 +19,13 @@
  *  - **One transcription, many phrases.** The hub segments and transcribes once
  *    per speech segment and dispatches the transcript to every registered
  *    phrase, so auto-mapping N agents does not mean N transcriptions per segment.
- *    The director feeds the same frame to every armed detector, so the hub
- *    de-duplicates by frame identity.
  *  - **Never blocks the audio loop.** Transcription is async; a match is queued
  *    and drained on a later frame, exactly like the ONNX detector.
  *
  * Pure of Electron/React so the segmentation + match policy is unit-testable.
  */
 
-import { transcriptAddressesPhrase } from '../../shared/wake-phrase.js';
+import { createSegmenter, transcriptAddressesPhrase } from '@nexus/voice-capture';
 
 export type SttTranscribeFn = (pcm: Float32Array, sampleRate: number) => Promise<string | null>;
 
@@ -82,50 +85,32 @@ type Entry = {
  * per phrase and feed frames from the same microphone stream.
  */
 export function createSttPhraseHub(options: SttPhraseHubOptions): SttPhraseHub {
-  let sampleRate = Math.max(8000, Math.round(options.sampleRate) || 16_000);
-  const silenceLevel = options.silenceLevel ?? 0.012;
-  const silenceMs = options.silenceMs ?? 500;
-  const minSpeechMs = options.minSpeechMs ?? 300;
-  const maxSegmentMs = options.maxSegmentMs ?? 8_000;
   const cooldownMs = options.cooldownMs ?? 1_500;
-
   const entries: Entry[] = [];
-  /** Frames of the in-progress segment (pre-allocated chunks, no per-frame copy). */
-  let segment: Float32Array[] = [];
-  let segmentSamples = 0;
-  let speechMs = 0;
-  let trailingSilenceMs = 0;
-  let sawSpeech = false;
   /** A finalized segment waiting to be transcribed (kept tiny + serial). */
   const queue: Float32Array[] = [];
   let inFlight = false;
   /** De-dup so the same frame fed to many detectors is segmented once. */
   let lastFrame: Float32Array | null = null;
   let lastAt = -1;
+  /**
+   * The authoritative sample rate, tracked here as well as on the segmenter: the
+   * mic may pick a rate other than the one requested, and the transcribed WAV
+   * must be labelled with the real rate or the model misreads the speech.
+   */
+  let currentRate = Math.max(8000, Math.round(options.sampleRate) || 16_000);
 
-  const frameMs = (samples: number) => (samples / sampleRate) * 1000;
-
-  function concatSegment(): Float32Array {
-    const out = new Float32Array(segmentSamples);
-    let offset = 0;
-    for (const chunk of segment) {
-      out.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return out;
-  }
-
-  function finalizeSegment(): void {
-    if (sawSpeech && speechMs >= minSpeechMs && segmentSamples > 0) {
-      queue.push(concatSegment());
-    }
-    segment = [];
-    segmentSamples = 0;
-    speechMs = 0;
-    trailingSilenceMs = 0;
-    sawSpeech = false;
-    void drain();
-  }
+  const segmenter = createSegmenter({
+    sampleRate: options.sampleRate,
+    silenceLevel: options.silenceLevel,
+    silenceMs: options.silenceMs,
+    minSpeechMs: options.minSpeechMs,
+    maxSegmentMs: options.maxSegmentMs,
+    onSegment: (segment) => {
+      queue.push(segment.pcm);
+      void drain();
+    },
+  });
 
   function dispatch(transcript: string): void {
     const text = transcript.trim();
@@ -149,7 +134,7 @@ export function createSttPhraseHub(options: SttPhraseHubOptions): SttPhraseHub {
         const pcm = queue.shift()!;
         let transcript: string | null = null;
         try {
-          transcript = await options.transcribe(pcm, sampleRate);
+          transcript = await options.transcribe(pcm, currentRate);
         } catch (err) {
           options.onError?.(err);
         }
@@ -166,7 +151,9 @@ export function createSttPhraseHub(options: SttPhraseHubOptions): SttPhraseHub {
     },
     setSampleRate(next: number) {
       const rate = Math.max(8000, Math.round(next) || 0);
-      if (rate) sampleRate = rate;
+      if (!rate) return;
+      currentRate = rate;
+      segmenter.setSampleRate(rate);
     },
     register(phrase: string): SttPhraseSubscription {
       const entry: Entry = { phrase, pending: false, cooldownUntil: 0 };
@@ -190,32 +177,10 @@ export function createSttPhraseHub(options: SttPhraseHubOptions): SttPhraseHub {
       lastFrame = frame;
       lastAt = at;
       if (entries.length === 0 || !frame.length) return;
-      // Local energy gate — no model runs on silence.
-      let sum = 0;
-      for (let i = 0; i < frame.length; i++) sum += frame[i]! * frame[i]!;
-      const rms = Math.sqrt(sum / frame.length);
-      const ms = frameMs(frame.length);
-      if (rms > silenceLevel) {
-        sawSpeech = true;
-        speechMs += ms;
-        trailingSilenceMs = 0;
-        segment.push(frame.slice());
-        segmentSamples += frame.length;
-        if (speechMs >= maxSegmentMs) finalizeSegment();
-        return;
-      }
-      if (!sawSpeech) return;
-      trailingSilenceMs += ms;
-      segment.push(frame.slice());
-      segmentSamples += frame.length;
-      if (trailingSilenceMs >= silenceMs) finalizeSegment();
+      segmenter.push(frame, at);
     },
     reset() {
-      segment = [];
-      segmentSamples = 0;
-      speechMs = 0;
-      trailingSilenceMs = 0;
-      sawSpeech = false;
+      segmenter.reset();
       queue.length = 0;
       lastFrame = null;
       lastAt = -1;

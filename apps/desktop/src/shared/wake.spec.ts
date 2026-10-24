@@ -21,6 +21,8 @@ import {
   normalizeUtteranceQueue,
   normalizeWakeBinding,
   normalizeWakeSettings,
+  resolveWakeActivationMode,
+  wakeRaisesMainWindow,
   type QueuedUtterance,
 } from './wake.js';
 
@@ -294,6 +296,86 @@ describe('dictationTranscribesInCloud', () => {
   it('falls back to cloud when "local" is selected but nothing is installed', () => {
     expect(
       dictationTranscribesInCloud({ sttEngine: 'local', localSttAvailable: false, customSttEndpoint: false }),
+    ).toBe(true);
+  });
+});
+
+describe('resolveWakeActivationMode', () => {
+  it('lets companionOnWake win over everything', () => {
+    expect(
+      resolveWakeActivationMode({
+        activationMode: 'chat',
+        companionOnWake: true,
+        cloudTranscription: true,
+      }),
+    ).toBe('companion');
+  });
+
+  it('forces the visible widget when transcription is cloud', () => {
+    expect(
+      resolveWakeActivationMode({
+        activationMode: 'chat',
+        companionOnWake: false,
+        cloudTranscription: true,
+      }),
+    ).toBe('widget');
+  });
+
+  it('otherwise honours the configured mode', () => {
+    expect(
+      resolveWakeActivationMode({
+        activationMode: 'companion',
+        companionOnWake: false,
+        cloudTranscription: false,
+      }),
+    ).toBe('companion');
+    expect(
+      resolveWakeActivationMode({
+        activationMode: 'chat',
+        companionOnWake: false,
+        cloudTranscription: false,
+      }),
+    ).toBe('chat');
+  });
+});
+
+describe('wakeRaisesMainWindow', () => {
+  it('suppresses the main window for a companion-mode wake that has a live companion', () => {
+    expect(
+      wakeRaisesMainWindow({
+        settings: { activationMode: 'companion', companionOnWake: false },
+        companionOpen: true,
+      }),
+    ).toBe(false);
+    expect(
+      wakeRaisesMainWindow({
+        settings: { activationMode: 'chat', companionOnWake: true },
+        companionOpen: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('falls back to the main window when no companion is open', () => {
+    expect(
+      wakeRaisesMainWindow({
+        settings: { activationMode: 'companion', companionOnWake: true },
+        companionOpen: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('always raises the main window for chat/widget wakes', () => {
+    expect(
+      wakeRaisesMainWindow({
+        settings: { activationMode: 'chat', companionOnWake: false },
+        companionOpen: true,
+      }),
+    ).toBe(true);
+    expect(
+      wakeRaisesMainWindow({
+        settings: { activationMode: 'widget', companionOnWake: false },
+        companionOpen: true,
+      }),
     ).toBe(true);
   });
 });

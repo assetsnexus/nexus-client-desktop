@@ -182,6 +182,10 @@ export type WakeOverlayProps = {
   onEdit?: (text: string) => void;
   /** Open this agent in the companion window in voice mode right now. */
   onOpenCompanion?: () => void;
+  /** Engine feeding the live preview ("On-device" / "Region inference"), if known. */
+  engineLabel?: string | null;
+  /** Send the recorded audio batch as a normal voice message (cloud/custom STT). */
+  onSendAudio?: () => void;
 };
 
 export function WakeOverlay({
@@ -195,6 +199,8 @@ export function WakeOverlay({
   onToggleCompanion,
   onEdit,
   onOpenCompanion,
+  engineLabel = null,
+  onSendAudio,
 }: WakeOverlayProps) {
   const wake = useWakeState();
   const live = session.status === 'listening' || session.status === 'transcribing';
@@ -220,6 +226,12 @@ export function WakeOverlay({
     setTyped(next);
     onEdit?.(next);
   };
+  // Dual-mode: the audio batch runs in parallel with the live preview, so the
+  // user can always fall back to sending the audio itself. Shown when audio was
+  // recorded and while the turn has not finished.
+  const batchSeconds = Math.round(session.batchDurationMs / 100) / 10;
+  const canSendAudio = Boolean(onSendAudio) && session.batchAvailable && !done;
+  const showBatch = session.batchAvailable && !done;
 
   const style: CSSProperties = compact
     ? { ...cardBase, right: 16, bottom: 16, width: 420, maxWidth: 'calc(100% - 32px)' }
@@ -277,6 +289,48 @@ export function WakeOverlay({
         <span style={{ fontSize: 10, color: '#9aa7b5' }}>
           streaming live… press Send to send what you see
         </span>
+      ) : null}
+
+      {engineLabel ? (
+        <span style={{ fontSize: 10, color: '#6b7784' }} data-nexus-wake-engine={engineLabel}>
+          Live preview engine: {engineLabel}
+        </span>
+      ) : null}
+
+      {/* Dual-mode capture: the audio batch records in parallel with the live
+          preview, so the user can send the recording itself (cloud/custom STT)
+          instead of the on-device transcript. */}
+      {showBatch ? (
+        <div
+          data-nexus-wake-batch="true"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 11,
+            color: '#cbd5e1',
+            background: '#141b23',
+            border: '1px solid #2a333d',
+            borderRadius: 8,
+            padding: '6px 8px',
+          }}
+        >
+          <span>
+            Audio batch · {batchSeconds}s recorded
+            {session.batchChunks > 1 ? ` · ${session.batchChunks} parts` : ''}
+          </span>
+          <span style={{ flex: 1 }} />
+          {onSendAudio ? (
+            <button
+              type="button"
+              style={tinyGhostButton}
+              disabled={!canSendAudio || session.sendingAudio}
+              onClick={onSendAudio}
+            >
+              {session.sendingAudio ? 'Sending…' : 'Send as voice'}
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {session.message ? (

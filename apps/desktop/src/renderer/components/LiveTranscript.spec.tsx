@@ -36,6 +36,7 @@ function baseState(over: Partial<WakeListenState> = {}): WakeListenState {
     level: 0,
     transcript: null,
     lastDetection: null,
+    capturing: false,
     message: null,
     ...over,
   };

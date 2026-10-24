@@ -11,7 +11,8 @@
  * that could gate the microphone (opt-in lives in Settings).
  */
 
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { bridge } from '../bridge.js';
 import { useWakeState } from '../wake/director-host.js';
 import { MicToggleBar } from './MicToggleBar.js';
 import { LiveTranscript } from './LiveTranscript.js';
@@ -92,29 +93,94 @@ const chip: CSSProperties = {
   fontSize: 11,
 };
 
+/** Local-engine / cloud status chip (a small neutral pill). */
+const engineChip: CSSProperties = {
+  padding: '1px 8px',
+  borderRadius: 999,
+  border: '1px solid #2a333d',
+  background: '#0f1419',
+  color: '#9aa7b5',
+  fontSize: 11,
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
+};
+
+/** Human label for the wake STT engine the bar is reporting. */
+function engineLabel(status: {
+  ready: boolean;
+  backend: 'whisper_cpp' | 'faster_whisper' | 'custom';
+} | null): string | null {
+  if (!status) return null;
+  if (!status.ready) return 'STT: cloud';
+  if (status.backend === 'faster_whisper') return 'STT: GPU';
+  if (status.backend === 'custom') return 'STT: custom local';
+  return 'STT: CPU';
+}
+
 /** Keyframes for the pulsing dot, injected once. */
 const KEYFRAMES = '@keyframes nexus-wake-pulse{0%,100%{opacity:1}50%{opacity:.45}}';
 
 export function WakeBottomBar() {
   const state = useWakeState();
+  // Which on-device engine feeds the caption (GPU / CPU / custom) — probed when
+  // the caption is actually live and refreshed when listening toggles, so the bar
+  // can show a truthful engine chip instead of guessing.
+  const [stt, setStt] = useState<Awaited<ReturnType<typeof bridge.wakeSttStatus>> | null>(null);
+  useEffect(() => {
+    if (!state.enabled) return;
+    let cancelled = false;
+    void bridge
+      .wakeSttStatus()
+      .then((next) => {
+        if (!cancelled) setStt(next);
+      })
+      .catch(() => {
+        if (!cancelled) setStt(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.enabled, state.listening]);
   // Hidden entirely unless the user has wake words enabled.
   if (!state.enabled) return null;
   const live = state.listening;
+  // While capturing, detection is suppressed so the agent's own name spoken
+  // inside an instruction is not a new wake. Say so, instead of leaving the bar
+  // claiming to listen when detectors are intentionally paused.
+  const capturing = state.capturing;
 
   return (
-    <div style={bar} data-nexus-surface="wake-bar" data-wake-live={live ? 'true' : 'false'}>
+    <div
+      style={bar}
+      data-nexus-surface="wake-bar"
+      data-wake-live={live ? 'true' : 'false'}
+      data-wake-capturing={capturing ? 'true' : 'false'}
+    >
       <style>{KEYFRAMES}</style>
       <div style={statusRow}>
         {/* Microphone mute toggle + live soundwave, immediately left of the status. */}
         <MicToggleBar />
-        <span style={dot(live)} aria-hidden />
+        <span style={dot(live && !capturing)} aria-hidden />
         <span style={{ color: '#e8eef4', fontWeight: 600, flexShrink: 0 }}>
-          {live ? 'Listening for wake words' : 'Wake words idle'}
+          {capturing
+            ? `Paused — speaking to ${state.lastDetection?.phrase ? '“' + state.lastDetection.phrase + '”' : 'your agent'}`
+            : live
+              ? 'Listening for wake words'
+              : 'Wake words idle'}
         </span>
         <div style={meterTrack} aria-hidden title="Microphone level">
           <div style={meterFill(state.level)} />
         </div>
         <span style={{ flex: 1 }} />
+        {engineLabel(stt) ? (
+          <span
+            style={engineChip}
+            data-nexus-wake-engine={engineLabel(stt)}
+            title="Engine feeding the live wake caption"
+          >
+            {engineLabel(stt)}
+          </span>
+        ) : null}
         {state.lastDetection ? (
           <span style={{ color: '#6b7784', flexShrink: 0 }}>
             matched “{state.lastDetection.phrase}”

@@ -19,7 +19,10 @@ import {
   COMPANION_DEFAULT_SIZE,
   COMPANION_MIN_SIZE,
   type CompanionLaunch,
+  type CompanionPresent,
+  type CompanionSessionView,
 } from '../shared/companion.js';
+import { IPC } from '../shared/ipc.js';
 export type CompanionWindowOptions = {
   /** Resolve the renderer base URL (dev server or file:// index.html). */
   resolveRendererUrl: () => string;
@@ -120,6 +123,48 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     isAlwaysOnTop(contactId: string): boolean | null {
       if (!windows.has(contactId)) return null;
       return pinned.get(contactId) ?? false;
+    },
+
+    /**
+     * Deliver a live wake activation to an *open* companion without reloading it
+     * (a reload would restart the live voice session). Returns false when no
+     * companion is open for the contact, so the caller can fall back to opening
+     * one or foregrounding the main window.
+     */
+    present(contactId: string, payload: CompanionPresent): boolean {
+      const win = windows.get(contactId);
+      if (!win || win.isDestroyed()) return false;
+      win.webContents.send(IPC.companionPresent, payload);
+      return true;
+    },
+
+    /**
+     * Push a wake-dictation session view into an open companion so its STT
+     * preview + composer reflect the live turn. No-op (false) when the companion
+     * is not open.
+     */
+    pushSession(contactId: string, view: CompanionSessionView): boolean {
+      const win = windows.get(contactId);
+      if (!win || win.isDestroyed()) return false;
+      win.webContents.send(IPC.companionSession, view);
+      return true;
+    },
+
+    /**
+     * Raise + focus a companion without a reload. Used by the companion-first
+     * wake policy: a wake that resolves to companion mode foregrounds *only* the
+     * companion, never the main window.
+     */
+    raise(contactId: string): boolean {
+      const win = windows.get(contactId);
+      if (!win || win.isDestroyed()) return false;
+      if (win.isMinimized()) win.restore();
+      if (!win.isVisible()) win.show();
+      // The remembered pin is left untouched: a wake must not silently unpin (or
+      // newly pin) a companion the user configured.
+      win.setAlwaysOnTop(pinned.get(contactId) ?? false);
+      win.focus();
+      return true;
     },
 
     /** Close all companion windows (app shutdown). */

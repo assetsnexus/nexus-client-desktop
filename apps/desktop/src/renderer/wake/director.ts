@@ -134,6 +134,7 @@ const DEFAULT_STATE: WakeListenState = {
   level: 0,
   transcript: null,
   lastDetection: null,
+  capturing: false,
   message: null,
 };
 
@@ -164,6 +165,12 @@ export type WakeDirector = {
    * hub; local-only (drives the UI, never the IPC state report).
    */
   noteTranscript(text: string): void;
+  /**
+   * Suppress wake detection while a wake session is capturing the user's speech
+   * to an agent, so speaking the agent's name mid-utterance is not treated as a
+   * new activation. State changes are pushed to the UI and IPC.
+   */
+  setCapturing(active: boolean): void;
   getState(): WakeListenState;
 };
 
@@ -183,6 +190,8 @@ export function createWakeDirector(options: WakeDirectorOptions) {
   /** Latest on-device transcript, for the live caption. UI-only. */
   let transcript: string | null = null;
   let running = false;
+  /** True while a wake session is capturing the user's speech to an agent. */
+  let capturing = false;
   /**
    * Phrase → epoch-ms the phrase last fired. A phrase heard on two microphones
    * fires once because the second frame arrives within the cooldown, but the
@@ -257,6 +266,7 @@ export function createWakeDirector(options: WakeDirectorOptions) {
       activePhrases,
       level,
       transcript,
+      capturing,
       ...(message !== undefined ? { message } : {}),
     });
   }
@@ -269,6 +279,14 @@ export function createWakeDirector(options: WakeDirectorOptions) {
   function handleGroupFrame(group: MicGroup, frame: Float32Array): void {
     // Update the meter regardless of detections so the bottom bar stays alive.
     level = smoothLevel(level, frameRms(frame) * 3, smoothing);
+    // While a wake session is capturing the user's speech to an agent, do not run
+    // the detectors: saying the agent's own name (or another bound phrase) inside
+    // an instruction must not re-trigger a new activation. The level meter keeps
+    // running so the bottom bar still shows the microphone is live.
+    if (capturing) {
+      emitLocal({ level });
+      return;
+    }
     const at = Date.now();
     for (const entry of group.entries) {
       // Suppress a repeat only while the phrase is inside its short cooldown
@@ -472,6 +490,13 @@ export function createWakeDirector(options: WakeDirectorOptions) {
       if (!trimmed) return;
       // Local-only UI update: no IPC chatter for every recognized segment.
       emitLocal({ transcript: trimmed });
+    },
+    setCapturing(active: boolean) {
+      if (capturing === active) return;
+      capturing = active;
+      // A gate change is meaningful for the tray tooltip and the bottom bar, so
+      // push it over IPC (unlike the per-frame level updates).
+      emit({ capturing });
     },
     async saveSettings(next) {
       settings = await options.bridge.wakeSetSettings(next);

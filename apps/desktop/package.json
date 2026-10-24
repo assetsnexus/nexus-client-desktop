@@ -43,6 +43,7 @@
     "@nexus/node-core": "file:../../packages/node-core",
     "@nexus/scene-client": "file:../../../anx-npm-modules/packages/scene-client",
     "@nexus/storage-browser": "file:../../../anx-npm-modules/packages/storage-browser",
+    "@nexus/voice-capture": "file:../../../anx-npm-modules/packages/voice-capture",
     "@nexus/wake-word": "file:../../../anx-npm-modules/packages/wake-word",
     "@pixiv/three-vrm": "^3.5.5",
     "@pixiv/three-vrm-animation": "^3.5.5",

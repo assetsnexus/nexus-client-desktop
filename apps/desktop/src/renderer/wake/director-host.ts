@@ -20,6 +20,7 @@ import { createSttPhraseHub, type SttPhraseHub } from './stt-detector.js';
 import { createWakeMic } from './mic.js';
 import { audioWakeInputIds, isInputMuted } from '../audio/use-audio-store.js';
 import { createWakeDirector, type WakeDirector } from './director.js';
+import { primeWakePreRoll } from './pre-roll.js';
 
 /** React subscribers fed by the director's `onStateChange`. */
 const listeners = new Set<() => void>();
@@ -131,10 +132,23 @@ export function useWakeHost(): void {
     if (started) return;
     started = true;
     void wakeDirector().start();
+    // Fill the pre-roll buffer from the same shared stream, so a capture that
+    // starts on the wake trigger can prepend the audio just before it (the
+    // user is already mid-sentence when the phrase fires).
+    void primeWakePreRoll().catch(() => undefined);
   }, []);
 }
 
 /** Re-read settings and reconcile (called by the settings UI after a save). */
 export async function reloadWakeDirector(): Promise<void> {
   await wakeDirector().reload();
+}
+
+/**
+ * Suppress (or resume) wake detection while a wake session is capturing the
+ * user's speech to an agent. The chat host calls this around a dictation turn so
+ * the agent's own name spoken inside an instruction does not re-trigger a wake.
+ */
+export function setWakeCapturing(active: boolean): void {
+  wakeDirector().setCapturing(active);
 }

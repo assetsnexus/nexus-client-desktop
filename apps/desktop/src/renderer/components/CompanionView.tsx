@@ -43,8 +43,10 @@ import {
   type CompanionAvatarSettings,
   type CompanionDebugSettings,
   type CompanionLaunch,
+  type CompanionPresent,
   type DesktopConnectionConfig,
 } from '../bridge.js';
+import { CompanionComposer } from './CompanionComposer.js';
 import {
   buildAvatarChoices,
   createCompanionAvatarStore,
@@ -188,6 +190,14 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     status: 'idle',
   });
   const [onTop, setOnTop] = useState(launch.alwaysOnTop === true);
+  /**
+   * Wake present state. When a wake resolves here in dictation mode the companion
+   * becomes the STT surface (composer strip), and the realtime call is opt-in — so
+   * the strip shows unless the user has an active call. Defaults to dictation when
+   * the launch did not ask for an auto-started call.
+   */
+  const [present, setPresent] = useState<CompanionPresent | null>(null);
+  const [dictate, setDictate] = useState(launch.autoStart === false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [assets, setAssets] = useState<CompanionAvatarAsset[]>([]);
   const [choiceId, setChoiceId] = useState<string | null>(() => avatarStore.get(launch.contactId)?.choiceId ?? null);
@@ -392,6 +402,19 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       .catch(() => undefined);
   }, [launch.contactId]);
 
+  // A wake that resolves to this companion is handed over live (no reload). A
+  // `dictate` presentation makes this the STT surface; a voice presentation
+  // leaves the realtime call (already running) untouched.
+  useEffect(() => {
+    const off = bridge.onCompanionPresent((payload) => {
+      if (payload.contactId !== launch.contactId) return;
+      setPresent(payload);
+      setDictate(payload.dictate);
+      setError(null);
+    });
+    return () => off();
+  }, [launch.contactId]);
+
   const basePresence: ParticipantPresenceV1 | null = useMemo(() => {
     const fromContact = contact ? readPresenceFromProfile(contact) : null;
     const stored = presenceStore.get(launch.contactId) || null;
@@ -436,9 +459,21 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     });
   }, [onTop, launch.contactId]);
 
+  // A wake may resolve a different (latest active) conversation than the one this
+  // window opened with; follow it so the composer sends to the right thread.
+  useEffect(() => {
+    const conversationId = present?.conversationId ?? null;
+    if (!conversationId || !chat) return;
+    if (conversationId === chat.getState().conversationId) return;
+    void chat.reopenConversation(conversationId).catch(() => undefined);
+  }, [present?.conversationId, present?.token, chat]);
+
   const preview = latestTranscriptPreview(turns);
   const agentName = launch.title ?? contact?.name ?? 'Companion';
   const isImageAvatar = resolved?.choice.kind === 'image';
+  // The composer is the STT surface when a wake handed dictation here and the
+  // realtime call is not live (voice mode owns the capture).
+  const showComposer = dictate && !voiceStatus.active;
 
   const debugActive = debugEnabled.motionFeed || debugEnabled.gestureTest || debugEnabled.statusMotions;
 
@@ -687,6 +722,8 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
           </div>
         ) : null}
       </div>
+
+      {showComposer ? <CompanionComposer contactId={launch.contactId} /> : null}
 
       {!chatOpen && preview ? (
         <div

@@ -18,7 +18,11 @@
  * never authenticates, never approves, and never dispatches a privileged command.
  */
 
-import type { WakeActivationMode, WakeSettings } from '../../shared/wake.js';
+import {
+  resolveWakeActivationMode,
+  type WakeActivationMode,
+  type WakeSettings,
+} from '../../shared/wake.js';
 import type { QueuedUtterance, TranscriptAgent } from './transcript.js';
 import { createWakeSession, type SessionState } from './session.js';
 
@@ -44,6 +48,8 @@ export type WakeChatRouter = {
    * field), folding any live partial in first. A no-op when idle.
    */
   setBuffer(text: string): void;
+  /** Send the recorded audio as a normal voice message (the widget fallback). */
+  submitAudio(): Promise<void>;
   /** The inactivity timer fired; apply the unsent policy. */
   timeout(): Promise<void>;
   /** Current session state, or null when idle. */
@@ -69,6 +75,17 @@ export type WakeChatRouterOptions = {
   dictate: (onPartial: (text: string) => void) => Promise<string | null>;
   /** Deliver the transcript as the user's message to the open conversation. */
   send: (input: { contactId: string; text: string }) => Promise<void>;
+  /**
+   * Deliver the recorded audio batch as a normal voice message (cloud / custom
+   * STT applies). Optional; the widget hides "send as voice" without it.
+   */
+  sendAudio?: (input: { contactId: string }) => Promise<boolean>;
+  /**
+   * Current audio-batch progress for the active turn (ms + chunk count). Called
+   * by the capture as VAD segments accumulate, so the widget can show "Audio
+   * batch · Ns recorded" without polling.
+   */
+  batchProgress?: () => { durationMs: number; chunks: number };
   /** Keep an unsubmitted transcript for review (the `queue` unsent policy). */
   enqueue: (entry: QueuedUtterance) => void;
   /** Known agents for speak-led routing ("Bob, …"). */
@@ -105,11 +122,17 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
   let routing = false;
   let current: ReturnType<typeof createWakeSession> | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
+  /** Fast poll for the audio-batch progress the widget shows (250ms). */
+  let batchTimer: ReturnType<typeof setInterval> | null = null;
 
   function stopTimer(): void {
     if (timer) {
       clearInterval(timer);
       timer = null;
+    }
+    if (batchTimer) {
+      clearInterval(batchTimer);
+      batchTimer = null;
     }
   }
 
@@ -129,6 +152,19 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
     timer = setInterval(() => {
       void timeout();
     }, pollMs);
+  }
+
+  /**
+   * Poll the capture's audio-batch progress at a UI-friendly cadence so the
+   * widget can show "Audio batch · Ns recorded" while the user speaks. Kept
+   * separate from the (much slower) inactivity poll.
+   */
+  function startBatchTimer(): void {
+    if (!options.batchProgress || batchTimer) return;
+    batchTimer = setInterval(() => {
+      if (!current || current.state.status === 'submitted') return;
+      current.setBatch(options.batchProgress!());
+    }, 250);
   }
 
   async function timeout(): Promise<void> {
@@ -163,16 +199,14 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
           (await Promise.resolve()
             .then(() => options.transcriptionIsCloud?.())
             .catch(() => false)) === true;
-        // `companionOnWake` is the one-click "open the companion in voice mode"
-        // link (available in the widget and settings). It wins over the configured
-        // mode: a companion window runs its own realtime voice session, and it is
-        // the only surface that is *not* streaming dictation audio to the cloud,
-        // so it is safe even when the STT engine is cloud.
-        const mode: WakeActivationMode = settings.companionOnWake
-          ? 'companion'
-          : cloudTranscription
-            ? 'widget'
-            : settings.activationMode;
+        // Shared resolution (see `resolveWakeActivationMode`): `companionOnWake`
+        // wins, cloud transcription forces the visible widget, else the configured
+        // mode. Main resolves the *same* mode for its focus policy.
+        const mode: WakeActivationMode = resolveWakeActivationMode({
+          activationMode: settings.activationMode,
+          companionOnWake: settings.companionOnWake,
+          cloudTranscription,
+        });
         options.onStateChange?.('opening');
         const presented = await options.present(mode, target);
 
@@ -207,6 +241,12 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
               text: input.text,
             });
           },
+          ...(options.sendAudio
+            ? {
+                sendAudio: () =>
+                  options.sendAudio!({ contactId: target.contactId }),
+              }
+            : {}),
           enqueue: options.enqueue,
           now: options.now,
           newId: options.newId,
@@ -221,6 +261,7 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
         routing = false;
         session.start();
         startTimer();
+        startBatchTimer();
       } catch (err) {
         routing = false;
         const message = err instanceof Error ? err.message : 'The wake command could not start.';
@@ -230,6 +271,15 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
     },
     setBuffer(text: string) {
       current?.setBuffer(text);
+    },
+    async submitAudio() {
+      if (!current) return;
+      const session = current;
+      await session.submitAudio();
+      if (session.state.status === 'submitted' || session.state.status === 'discarded') {
+        stopTimer();
+        options.onStateChange?.('idle');
+      }
     },
     cancel() {
       current?.cancel();

@@ -380,6 +380,44 @@ describe('createWakeDirector', () => {
     director.stop();
     expect(director.getState().transcript).toBeNull();
   });
+
+  it('suppresses detection while capturing, so the agent name inside an instruction is not a wake', async () => {
+    const { director, mic, activated } = makeDirector({
+      settings: settings({ enabled: true, bindings: [binding('a')] }),
+    });
+    await director.start();
+    // A wake starts a capture; the user then says the agent's name again mid-turn.
+    director.setCapturing(true);
+    expect(director.getState().capturing).toBe(true);
+    mic.feed(0.9);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(activated).toEqual([]);
+    // The level meter still runs while capturing, so the bar stays alive.
+    expect(director.getState().level).toBeGreaterThan(0);
+    // Once the turn ends the same phrase wakes again.
+    director.setCapturing(false);
+    expect(director.getState().capturing).toBe(false);
+    mic.feed(0.9);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(activated).toHaveLength(1);
+  });
+
+  it('pushes the capturing gate over IPC so the tray + bar agree', async () => {
+    const { director, states } = makeDirector({
+      settings: settings({ enabled: true, bindings: [binding('a')] }),
+    });
+    await director.start();
+    states.length = 0;
+    director.setCapturing(true);
+    const reported = states[states.length - 1] as { capturing?: boolean };
+    expect(reported.capturing).toBe(true);
+    // A no-op set does not chatter over IPC.
+    states.length = 0;
+    director.setCapturing(true);
+    expect(states).toEqual([]);
+  });
 });
 
 describe('multiple wake microphones', () => {

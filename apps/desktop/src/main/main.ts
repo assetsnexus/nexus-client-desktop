@@ -73,7 +73,7 @@ import { createWakeStt } from './wake-stt.js';
 import { createVoiceBinaryManager } from './voice-binaries.js';
 import { createGpuSttEngine } from './gpu-stt-engine.js';
 import { FASTER_WHISPER_DEFAULT_PORT } from '@nexus/local-voice';
-import { normalizeWakeBinding } from '../shared/wake.js';
+import { normalizeWakeBinding, wakeRaisesMainWindow } from '../shared/wake.js';
 import { createWakeManager } from './wake-manager.js';
 import { createWakeAgentDirectory } from './wake-agents.js';
 import {
@@ -85,7 +85,10 @@ import {
   type CalendarListInput,
   type CertificatePromptInfo,
   type CertificateTrustEntry,
+  type CompanionAction,
   type CompanionLaunch,
+  type CompanionPresent,
+  type CompanionSessionView,
   type ConnectionConfigPatch,
   type LocalRunnerSettings,
   type LoginRequest,
@@ -508,8 +511,33 @@ const wakeManager = createWakeManager({
     return anyInstalledStt || Boolean(localVoiceManager.customSttEndpoint()?.baseUrl);
   },
   persist: (next) => next,
+  /**
+   * Companion-first focus policy. A wake that resolves to **companion** mode must
+   * NOT force the main window forward — only the addressed agent's companion
+   * should pop forward. Main resolves the mode from persisted settings (the same
+   * {@link resolveWakeActivationMode} the renderer router uses) and additionally
+   * checks whether the mapped agent already has an open companion: when it does,
+   * it raises that window; otherwise the renderer will open one via
+   * `present()`. For chat/widget modes (or an unknown agent) main still raises the
+   * main window.
+   *
+   * The renderer is always told, so it can run the session regardless of surface.
+   */
   onActivate: (activation) => {
-    showMainWindow();
+    const settings = wakeManager.getSettings();
+    const agentId = activation.agentId;
+    const companionOpen = Boolean(
+      agentId && companionWindows.openContactIds().includes(agentId),
+    );
+    // Companion-first: raise the companion for a companion-mode wake instead of
+    // forcing the main window forward (only pop the main window when there is no
+    // companion to own the surface). The renderer is always told, so it can run
+    // the session regardless of surface.
+    if (companionOpen && agentId && !wakeRaisesMainWindow({ settings, companionOpen })) {
+      companionWindows.raise(agentId);
+    } else {
+      showMainWindow();
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send(IPC.wakeActivated, activation);
     }
@@ -1459,6 +1487,31 @@ function registerIpc(): void {
   ipcMain.handle(IPC.companionIsAlwaysOnTop, (_e, contactId: string) =>
     companionWindows.isAlwaysOnTop(contactId),
   );
+  // Hand a live wake activation to an *open* companion without reloading it (a
+  // reload would restart its realtime voice call). Returns false when none is
+  // open so the caller can fall back to `companionOpen`.
+  ipcMain.handle(IPC.companionPresentRequest, (_e, payload: CompanionPresent) => {
+    if (!payload || typeof payload.contactId !== 'string') return false;
+    const delivered = companionWindows.present(payload.contactId, payload);
+    if (delivered) companionWindows.raise(payload.contactId);
+    return delivered;
+  });
+  // Session-owner (main renderer) → companion: mirror the live wake dictation
+  // turn into the companion's STT preview + composer.
+  ipcMain.handle(IPC.companionPushSession, (_e, view: CompanionSessionView) => {
+    if (!view || typeof view.contactId !== 'string') return false;
+    return companionWindows.pushSession(view.contactId, view);
+  });
+  // Companion → session owner: a composer control (submit/cancel/send-as-voice/
+  // edit) is relayed into the window that owns the session.
+  ipcMain.handle(IPC.companionAction, (_e, action: CompanionAction) => {
+    if (!action || typeof action.contactId !== 'string') return false;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC.companionActionRelay, action);
+      return true;
+    }
+    return false;
+  });
 
   // Desktop calendar (Phase 7b).
   ipcMain.handle(IPC.calendarListEvents, (_e, input?: CalendarListInput) =>

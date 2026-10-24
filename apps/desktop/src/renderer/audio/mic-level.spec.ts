@@ -1,4 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * The meter now rides the app's shared microphone stream graph (one
+ * `getUserMedia` per device, shared with the wake detector + dictation) instead
+ * of opening its own stream, so it is the *graph* — not `getUserMedia` — that is
+ * faked here. `acquire` captures the subscriber so the test can push frames.
+ */
+const acquire = vi.fn();
+vi.mock('../wake/mic-graph.js', () => ({
+  micGraph: () => ({ acquire }),
+}));
+
 import {
   WAVEFORM_BUCKETS,
   displayLevel,
@@ -38,43 +50,33 @@ describe('displayLevel', () => {
   });
 });
 
-/** Fake Web Audio: a stream, an analyser reporting a fixed level, and a timer. */
-function makeFakeGlobals(level = 0.1) {
-  const tracks = [{ stop: vi.fn() }];
-  const stream = { getTracks: () => tracks } as unknown as MediaStream;
-  const analyser = {
-    fftSize: 0,
-    getFloatTimeDomainData: (buf: Float32Array) => buf.fill(level),
-    disconnect: vi.fn(),
-  };
-  const context = {
-    createMediaStreamSource: () => ({ connect: vi.fn() }),
-    createAnalyser: () => analyser,
-    close: vi.fn(),
-  };
-  const getUserMedia = vi.fn(async () => stream);
+/** Fake the shared graph: capture the subscriber + the release spy. */
+function makeFakeGraph(level = 0.1, active = true) {
+  const release = vi.fn();
+  let onFrame: ((frame: Float32Array) => void) | null = null;
+  acquire.mockImplementation(async (opts: { onFrame: (frame: Float32Array) => void }) => {
+    onFrame = opts.onFrame;
+    return { sampleRate: 16_000, frameSamples: 512, active, release };
+  });
   return {
-    tracks,
-    globals: {
-      navigator: { mediaDevices: { getUserMedia } },
-      AudioContext: function AudioContextMock() {
-        return context;
-      } as unknown as new () => AudioContext,
-    } as unknown as import('./mic-level.js').MicLevelGlobals,
-    getUserMedia,
-    context,
+    release,
+    push: () => onFrame?.(new Float32Array(512).fill(level)),
+    acquire,
   };
 }
 
 describe('startMicLevel', () => {
+  beforeEach(() => {
+    acquire.mockReset();
+  });
+
   it('emits boosted levels on each tick and stops cleanly', async () => {
-    const fake = makeFakeGlobals(0.1);
+    const graph = makeFakeGraph(0.1);
     let tick: (() => void) | null = null;
     const levels: number[] = [];
     const handle = await startMicLevel(
       { onLevel: (l) => levels.push(l) },
       {
-        globals: fake.globals,
         setIntervalImpl: (fn) => {
           tick = fn;
           return 1 as unknown as ReturnType<typeof setInterval>;
@@ -83,34 +85,32 @@ describe('startMicLevel', () => {
       },
     );
     expect(handle.active).toBe(true);
+    graph.push();
     tick!();
     // 0.1 RMS boosted by displayLevel's 3.2 factor.
     expect(levels.at(-1)).toBeCloseTo(0.32);
     handle.stop();
     expect(handle.active).toBe(false);
-    expect(fake.tracks[0]!.stop).toHaveBeenCalled();
+    expect(graph.release).toHaveBeenCalled();
   });
 
-  it('requests a specific device when given one', async () => {
-    const fake = makeFakeGlobals();
-    await startMicLevel(
+  it('requests a specific device (shared graph) when given one', async () => {
+    const graph = makeFakeGraph();
+    const handle = await startMicLevel(
       { onLevel: vi.fn(), deviceId: 'mic-2' },
-      { globals: fake.globals, setIntervalImpl: () => 1 as never, clearIntervalImpl: vi.fn() },
+      { setIntervalImpl: () => 1 as never, clearIntervalImpl: vi.fn() },
     );
-    expect(fake.getUserMedia).toHaveBeenCalledWith({
-      audio: expect.objectContaining({ deviceId: { exact: 'mic-2' } }),
-    });
+    expect(graph.acquire).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceId: 'mic-2' }),
+    );
+    handle.stop();
   });
 
   it('degrades silently when the mic cannot open', async () => {
-    const globals = {
-      navigator: {
-        mediaDevices: { getUserMedia: vi.fn(async () => { throw new Error('denied'); }) },
-      },
-      AudioContext: function AudioContextMock() {} as unknown as new () => AudioContext,
-    } as unknown as import('./mic-level.js').MicLevelGlobals;
-    const handle = await startMicLevel({ onLevel: vi.fn() }, { globals });
+    const graph = makeFakeGraph(0.1, false);
+    const handle = await startMicLevel({ onLevel: vi.fn() });
     expect(handle.active).toBe(false);
     expect(() => handle.stop()).not.toThrow();
+    expect(graph.release).toHaveBeenCalled();
   });
 });

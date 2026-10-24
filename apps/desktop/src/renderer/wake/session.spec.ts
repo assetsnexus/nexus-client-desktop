@@ -252,4 +252,53 @@ describe('createWakeSession', () => {
     await h.session.submit();
     expect(h.sent).toHaveLength(1);
   });
+
+  it('tracks the parallel audio batch and exposes it as available', async () => {
+    const h = makeSession({}, ['one two']);
+    h.session.start();
+    await flush();
+    expect(h.last().batchAvailable).toBe(false);
+    h.session.setBatch({ durationMs: 1_480, chunks: 2 });
+    expect(h.last().batchDurationMs).toBe(1_480);
+    expect(h.last().batchChunks).toBe(2);
+    expect(h.last().batchAvailable).toBe(true);
+    // Empty progress is not offered as an audio message.
+    h.session.setBatch({ durationMs: 0, chunks: 0 });
+    expect(h.last().batchAvailable).toBe(false);
+  });
+
+  it('sends the recorded audio as a voice message and ends the session', async () => {
+    const sendAudio = vi.fn(async () => true);
+    const h = makeSession({ reviewBeforeSend: false, sendAudio }, ['one two']);
+    h.session.start();
+    await flush();
+    h.session.setBatch({ durationMs: 900, chunks: 1 });
+    await h.session.submitAudio();
+    expect(sendAudio).toHaveBeenCalledTimes(1);
+    expect(h.sent).toEqual([]);
+    expect(h.last().status).toBe('submitted');
+    expect(h.last().sendingAudio).toBe(false);
+  });
+
+  it('surfaces a no-audio send as a non-fatal message and keeps the turn open', async () => {
+    const sendAudio = vi.fn(async () => false);
+    const h = makeSession({ reviewBeforeSend: false, sendAudio }, ['one two']);
+    h.session.start();
+    await flush();
+    await h.session.submitAudio();
+    expect(h.last().status).not.toBe('submitted');
+    expect(h.last().message).toBe('There was no audio to send.');
+  });
+
+  it('surfaces a failed audio send without throwing away the transcript path', async () => {
+    const sendAudio = vi.fn(async () => {
+      throw new Error('upload failed');
+    });
+    const h = makeSession({ reviewBeforeSend: false, sendAudio }, ['one two']);
+    h.session.start();
+    await flush();
+    await h.session.submitAudio();
+    expect(h.last().status).not.toBe('submitted');
+    expect(h.last().message).toContain('upload failed');
+  });
 });

@@ -11,7 +11,8 @@
  * derives a level for display and holds the newest numbers in memory.
  */
 
-import { frameRms } from '../wake/mic.js';
+import { frameRms } from '@nexus/voice-capture';
+import { micGraph } from '../wake/mic-graph.js';
 
 /** Number of samples kept for the scrolling waveform. */
 export const WAVEFORM_BUCKETS = 32;
@@ -55,97 +56,54 @@ export type MicLevelOptions = {
   framesPerSecond?: number;
 };
 
-/** Minimal Web Audio surface used here (injectable for tests). */
-export type MicLevelGlobals = {
-  navigator?: { mediaDevices?: { getUserMedia?: (c: Record<string, unknown>) => Promise<MediaStream> } };
-  AudioContext?: new () => AudioContext;
-  webkitAudioContext?: new () => AudioContext;
-};
-
 export type MicLevelDeps = {
-  globals?: MicLevelGlobals;
-  /** Injectable analyser interval for tests. */
+  /** Injectable level interval for tests. */
   setIntervalImpl?: (fn: () => void, ms: number) => ReturnType<typeof setInterval>;
   clearIntervalImpl?: (handle: ReturnType<typeof setInterval>) => void;
 };
 
 /**
- * Open a short-lived microphone stream and report levels until stopped. Failure
- * is silent (levels simply stay at zero) so a missing mic never breaks the bar.
+ * Subscribe to a device's level and report it until stopped. Failure is silent
+ * (levels simply stay at zero) so a missing mic never breaks the bar.
+ *
+ * The audio comes from the app's shared microphone stream graph, so the meter
+ * piggybacks on the wake detector's stream (one `getUserMedia` per device)
+ * instead of opening its own. The meter only needs the newest level, so frames
+ * are consumed as they arrive and no ring buffer is kept here.
  */
 export async function startMicLevel(
   options: MicLevelOptions,
   deps: MicLevelDeps = {},
 ): Promise<MicLevelHandle> {
-  const g = (deps.globals ?? (globalThis as unknown as MicLevelGlobals));
-  const mediaDevices = g.navigator?.mediaDevices;
-  const getUserMedia = mediaDevices?.getUserMedia?.bind(mediaDevices);
-  const Ctor = g.AudioContext || g.webkitAudioContext;
-  const setIntervalImpl = deps.setIntervalImpl ?? ((fn, ms) => setInterval(fn, ms));
-  const clearIntervalImpl = deps.clearIntervalImpl ?? ((h) => clearInterval(h));
   const fps = options.framesPerSecond ?? 30;
   const intervalMs = Math.max(16, Math.round(1000 / fps));
+  const setIntervalImpl = deps.setIntervalImpl ?? ((fn, ms) => setInterval(fn, ms));
+  const clearIntervalImpl = deps.clearIntervalImpl ?? ((h) => clearInterval(h));
 
-  let stream: MediaStream | null = null;
-  let context: AudioContext | null = null;
-  let analyser: AnalyserNode | null = null;
-  let timer: ReturnType<typeof setInterval> | null = null;
   let active = false;
+  let latest = 0;
+  let timer: ReturnType<typeof setInterval> | null = null;
 
-  const stop = () => {
-    active = false;
-    if (timer) {
-      clearIntervalImpl(timer);
-      timer = null;
-    }
-    try {
-      analyser?.disconnect();
-    } catch {
-      /* ignore */
-    }
-    analyser = null;
-    try {
-      stream?.getTracks?.().forEach((track) => track.stop());
-    } catch {
-      /* ignore */
-    }
-    stream = null;
-    try {
-      void context?.close?.();
-    } catch {
-      /* ignore */
-    }
-    context = null;
-  };
-
-  if (!getUserMedia || !Ctor) return { stop, get active() { return false; } };
-  try {
-    stream = await getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        ...(options.deviceId ? { deviceId: { exact: options.deviceId } } : {}),
-      },
-    });
-    context = new Ctor();
-    const source = context.createMediaStreamSource(stream);
-    analyser = context.createAnalyser();
-    analyser.fftSize = 1024;
-    source.connect(analyser);
-    const buffer = new Float32Array(analyser.fftSize);
-    active = true;
-    timer = setIntervalImpl(() => {
-      if (!analyser) return;
-      analyser.getFloatTimeDomainData(buffer as Float32Array<ArrayBuffer>);
-      options.onLevel(displayLevel(frameRms(buffer)));
-    }, intervalMs);
-  } catch {
-    stop();
-    active = false;
+  const handle = await micGraph().acquire({
+    deviceId: options.deviceId ?? null,
+    onFrame: (frame) => {
+      latest = displayLevel(frameRms(frame));
+    },
+  });
+  active = handle.active;
+  if (active) {
+    timer = setIntervalImpl(() => options.onLevel(latest), intervalMs);
   }
 
   return {
-    stop,
+    stop() {
+      active = false;
+      if (timer) {
+        clearIntervalImpl(timer);
+        timer = null;
+      }
+      handle.release();
+    },
     get active() {
       return active;
     },

@@ -112,3 +112,75 @@ export function parseCompanionHash(hash: string): CompanionLaunch | null {
 export function isCompanionHash(hash: string): boolean {
   return parseCompanionHash(hash) != null;
 }
+
+/**
+ * Live activation pushed into an *already open* companion window (main →
+ * companion renderer). Sent over a channel rather than a reload, so a wake that
+ * addresses an agent whose companion is already up does not tear down its live
+ * voice session.
+ *
+ * Carries only routing addresses + a capture hint — never a token.
+ */
+export type CompanionPresent = {
+  contactId: string;
+  /** The conversation the wake resolved to, so the composer targets it. */
+  conversationId: string | null;
+  agentId: string | null;
+  /** The wake phrase that addressed this agent, for a "heard 'X'" caption. */
+  phrase: string | null;
+  /**
+   * True when this wake wants the companion to own dictation (the wake target
+   * surface): it shows the live STT preview + composer and keeps voice mode as a
+   * toggle. False leaves the companion's realtime call untouched.
+   */
+  dictate: boolean;
+  /** Bumped once per wake, so the companion can reset per-activation state. */
+  token: number;
+};
+
+/** Wake dictation lifecycle, mirrored into the companion strip. */
+export type CompanionSessionStatus =
+  | 'idle'
+  | 'listening'
+  | 'transcribing'
+  | 'review'
+  | 'submitted'
+  | 'discarded'
+  | 'queued'
+  | 'error';
+
+/**
+ * Renderer-safe projection of the main renderer's wake dictation session, pushed
+ * to the companion window so it can render the live STT preview + composer. The
+ * session itself keeps running in the main renderer (which owns the shared mic
+ * graph and the pre-roll), so both surfaces observe one capture, not two.
+ */
+export type CompanionSessionView = {
+  contactId: string;
+  status: CompanionSessionStatus;
+  /** `buffer` + live `partial`, ready to display. */
+  preview: string;
+  /** Committed text only (what a manual edit replaces). */
+  buffer: string;
+  /** True when this turn's dictation streams audio to the cloud. */
+  cloudTranscription: boolean;
+  /** Accumulated audio-batch length, ms (for the "send as voice" action). */
+  batchDurationMs: number;
+  batchAvailable: boolean;
+  sendingAudio: boolean;
+  /** Non-fatal reason copy (mic unavailable, send failed, …). */
+  message: string | null;
+  /** Which engine feeds the preview ("On-device" / "Region inference"). */
+  engineLabel: string | null;
+  /** The agent name, for the strip's caption. */
+  agentName: string | null;
+};
+
+/** A control the companion strip sends back to the main renderer's session. */
+export type CompanionAction = {
+  contactId: string;
+  /** `edit` replaces the buffer; `submit`/`cancel`/`sendAudio` drive the session. */
+  action: 'submit' | 'cancel' | 'sendAudio' | 'edit';
+  /** New text, for `edit` only. */
+  text?: string;
+};

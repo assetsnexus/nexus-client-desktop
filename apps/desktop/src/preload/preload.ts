@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import { IPC, type CertificatePromptInfo, type CompanionCursorCoords, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
+import { IPC, type CertificatePromptInfo, type CompanionAction, type CompanionCursorCoords, type CompanionPresent, type CompanionSessionView, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
 
 const bridge: NexusBridge = {
   getVersion: () => ipcRenderer.invoke(IPC.version),
@@ -173,6 +173,24 @@ const bridge: NexusBridge = {
     const handler = (_e: unknown, coords: CompanionCursorCoords) => listener(coords);
     ipcRenderer.on(IPC.companionGlobalCursor, handler);
     return () => ipcRenderer.removeListener(IPC.companionGlobalCursor, handler);
+  },
+  onCompanionPresent: (listener) => {
+    const handler = (_e: unknown, payload: CompanionPresent) => listener(payload);
+    ipcRenderer.on(IPC.companionPresent, handler);
+    return () => ipcRenderer.removeListener(IPC.companionPresent, handler);
+  },
+  companionPresent: (payload) => ipcRenderer.invoke(IPC.companionPresentRequest, payload),
+  companionPushSession: (view) => ipcRenderer.invoke(IPC.companionPushSession, view),
+  onCompanionSession: (listener) => {
+    const handler = (_e: unknown, view: CompanionSessionView) => listener(view);
+    ipcRenderer.on(IPC.companionSession, handler);
+    return () => ipcRenderer.removeListener(IPC.companionSession, handler);
+  },
+  companionAction: (action) => ipcRenderer.invoke(IPC.companionAction, action),
+  onCompanionActionRelay: (listener) => {
+    const handler = (_e: unknown, action: CompanionAction) => listener(action);
+    ipcRenderer.on(IPC.companionActionRelay, handler);
+    return () => ipcRenderer.removeListener(IPC.companionActionRelay, handler);
   },
   calendarListEvents: (input) => ipcRenderer.invoke(IPC.calendarListEvents, input),
   calendarUpcoming: () => ipcRenderer.invoke(IPC.calendarUpcoming),

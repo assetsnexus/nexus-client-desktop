@@ -57,6 +57,19 @@ export type SessionState = {
    * knows their speech is being streamed. On-device transcription is `false`.
    */
   cloudTranscription: boolean;
+  /**
+   * Accumulated length of the parallel audio batch recorded during this turn,
+   * ms. The widget offers "send as voice" when this is non-zero, so a user can
+   * fall back to a normal cloud/custom STT message when the on-device transcript
+   * is poor (or when no local engine is installed at all).
+   */
+  batchDurationMs: number;
+  /** Number of VAD bursts folded into the batch so far. */
+  batchChunks: number;
+  /** True once the batch holds audio that can be sent as a voice message. */
+  batchAvailable: boolean;
+  /** True while a "send the audio" submit is in flight. */
+  sendingAudio: boolean;
 };
 
 export type SessionOptions = {
@@ -82,6 +95,12 @@ export type SessionOptions = {
   dictate: (onPartial: (text: string) => void) => Promise<string | null>;
   /** Deliver the text as the user's message to the target conversation. */
   send: (input: { agentId: string | null; text: string }) => Promise<void>;
+  /**
+   * Deliver the recorded audio batch as a normal voice message (cloud / custom
+   * STT applies). Optional: without it the widget shows no "send as voice"
+   * action. Resolves false when there is nothing to send.
+   */
+  sendAudio?: () => Promise<boolean>;
   /** Keep an unsubmitted utterance for later review (queue policy). */
   enqueue: (entry: QueuedUtterance) => void;
   onStateChange?: (state: SessionState) => void;
@@ -99,6 +118,13 @@ export type WakeSession = {
   stopTurn(): void;
   /** Submit the buffer now (manual submit via click). */
   submit(): Promise<void>;
+  /**
+   * Send the recorded audio as a normal voice message (cloud/custom STT). A
+   * no-op when the session has no `sendAudio` or no audio was recorded.
+   */
+  submitAudio(): Promise<void>;
+  /** Update the recorded audio-batch progress shown by the widget. */
+  setBatch(info: { durationMs: number; chunks: number }): void;
   /**
    * Replace the committed buffer with user-edited text (the widget's input
    * field). Also folds the live partial into the buffer and clears it, so a
@@ -126,6 +152,10 @@ export function createWakeSession(options: SessionOptions): WakeSession {
     target: options.initialTarget ?? { agentId: null, agentName: null, phrase: null },
     message: null,
     cloudTranscription: options.cloudTranscription === true,
+    batchDurationMs: 0,
+    batchChunks: 0,
+    batchAvailable: false,
+    sendingAudio: false,
   };
   let lastActivityAt = now();
   /** True once the session should stop capturing further bursts. */
@@ -249,6 +279,32 @@ export function createWakeSession(options: SessionOptions): WakeSession {
     }
   }
 
+  /**
+   * Send the recorded audio as a voice message. The transcript buffer is left
+   * untouched (the user chose the audio path instead); a failure surfaces a
+   * non-fatal message so the widget can offer the text path again.
+   */
+  async function submitAudio(): Promise<void> {
+    if (sending || state.sendingAudio) return;
+    if (!options.sendAudio) return;
+    emit({ sendingAudio: true, message: null });
+    try {
+      const sent = await options.sendAudio();
+      if (!sent) {
+        emit({ sendingAudio: false, message: 'There was no audio to send.' });
+        return;
+      }
+      captureStopped = true;
+      terminal = true;
+      emit({ status: 'submitted', sendingAudio: false, partial: '' });
+    } catch (err) {
+      emit({
+        sendingAudio: false,
+        message: err instanceof Error ? err.message : 'Could not send the audio.',
+      });
+    }
+  }
+
   return {
     get state() {
       return state;
@@ -267,6 +323,18 @@ export function createWakeSession(options: SessionOptions): WakeSession {
     async submit() {
       if (terminal) return;
       await submit();
+    },
+    async submitAudio() {
+      if (terminal) return;
+      await submitAudio();
+    },
+    setBatch(info) {
+      if (terminal) return;
+      emit({
+        batchDurationMs: Math.max(0, Math.round(info.durationMs)),
+        batchChunks: Math.max(0, Math.round(info.chunks)),
+        batchAvailable: info.durationMs > 0 || info.chunks > 0,
+      });
     },
     setBuffer(text) {
       if (terminal) return;

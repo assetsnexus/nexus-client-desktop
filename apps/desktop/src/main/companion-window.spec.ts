@@ -7,7 +7,15 @@ class FakeWindow {
   focused = false;
   closed = false;
   alwaysOnTop: boolean | null = null;
+  visible = true;
+  minimized = false;
+  sent: Array<{ channel: string; payload: unknown }> = [];
   loadURL = vi.fn(async (_url: string) => undefined);
+  webContents = {
+    send: (channel: string, payload: unknown) => {
+      this.sent.push({ channel, payload });
+    },
+  };
   private listeners: Record<string, Array<() => void>> = {};
   constructor(public options: Record<string, unknown>) {
     created.push(this);
@@ -25,6 +33,18 @@ class FakeWindow {
   }
   isDestroyed() {
     return this.closed;
+  }
+  isVisible() {
+    return this.visible;
+  }
+  isMinimized() {
+    return this.minimized;
+  }
+  show() {
+    this.visible = true;
+  }
+  restore() {
+    this.minimized = false;
   }
   close() {
     this.closed = true;
@@ -148,6 +168,94 @@ describe('companion window manager', () => {
   it('rejects a launch without a contactId', () => {
     const m = manager();
     expect(() => m.open({ contactId: '' })).toThrow(/contactId/);
+  });
+
+  it('presents a live wake activation into an open companion without reloading', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    const loadCalls = created[0].loadURL.mock.calls.length;
+    const payload = {
+      contactId: 've-1',
+      conversationId: 'conv-9',
+      agentId: 'agent-3',
+      phrase: 'Aria',
+      dictate: true,
+      token: 7,
+    };
+    expect(m.present('ve-1', payload)).toBe(true);
+    // No reload (which would tear down a live call).
+    expect(created[0].loadURL.mock.calls.length).toBe(loadCalls);
+    expect(created[0].sent.at(-1)).toEqual({
+      channel: 'nexus:companion:present',
+      payload,
+    });
+  });
+
+  it('returns false from present for an unknown contact', () => {
+    const m = manager();
+    expect(m.present('nope', {
+      contactId: 'nope',
+      conversationId: null,
+      agentId: null,
+      phrase: null,
+      dictate: true,
+      token: 1,
+    })).toBe(false);
+  });
+
+  it('pushes a session view into an open companion (and false when none)', () => {
+    const m = manager();
+    expect(
+      m.pushSession('ve-1', {
+        contactId: 've-1',
+        status: 'listening',
+        preview: 'hello',
+        buffer: '',
+        cloudTranscription: false,
+        batchDurationMs: 0,
+        batchAvailable: false,
+        sendingAudio: false,
+        message: null,
+        engineLabel: 'On-device',
+        agentName: 'Aria',
+      }),
+    ).toBe(false);
+    m.open({ contactId: 've-1' });
+    expect(
+      m.pushSession('ve-1', {
+        contactId: 've-1',
+        status: 'listening',
+        preview: 'hello',
+        buffer: '',
+        cloudTranscription: false,
+        batchDurationMs: 0,
+        batchAvailable: false,
+        sendingAudio: false,
+        message: null,
+        engineLabel: 'On-device',
+        agentName: 'Aria',
+      }),
+    ).toBe(true);
+    expect(created[0].sent.at(-1)?.channel).toBe('nexus:companion:session');
+  });
+
+  it('raise shows + focuses a minimized companion and restores focus', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    created[0].visible = false;
+    created[0].minimized = true;
+    created[0].focused = false;
+    expect(m.raise('ve-1')).toBe(true);
+    expect(created[0].visible).toBe(true);
+    expect(created[0].minimized).toBe(false);
+    expect(created[0].focused).toBe(true);
+    // A wake must not silently (un)pin the companion.
+    expect(m.isAlwaysOnTop('ve-1')).toBe(false);
+  });
+
+  it('raise returns false for an unknown contact', () => {
+    const m = manager();
+    expect(m.raise('nope')).toBe(false);
   });
 });
 

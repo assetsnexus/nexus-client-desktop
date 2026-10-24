@@ -14,7 +14,12 @@ import type {
   PasswordlessChannel,
   RegionRow,
 } from '@nexus/node-core';
-import type { CompanionLaunch } from './companion.js';
+import type {
+  CompanionAction,
+  CompanionLaunch,
+  CompanionPresent,
+  CompanionSessionView,
+} from './companion.js';
 import type { RegionEnvironment } from './sandbox-environment.js';
 import type {
   WakeSettings,
@@ -58,12 +63,20 @@ export type {
   WakeAgentRow,
   QueuedUtterance,
   WakeActivationMode,
+  WakeCaptureMode,
   WakeUnsentPolicy,
   WakeAutoMapMode,
   WakeEngineKind,
 } from './wake.js';
 
-export type { CompanionLaunch, CompanionMode } from './companion.js';
+export type {
+  CompanionAction,
+  CompanionLaunch,
+  CompanionMode,
+  CompanionPresent,
+  CompanionSessionStatus,
+  CompanionSessionView,
+} from './companion.js';
 export type { CountryRow, RegionRow } from '@nexus/node-core';
 export type { CountryRegionResolution } from './login-region.js';
 
@@ -341,6 +354,13 @@ export type WakeListenState = {
   transcript: string | null;
   /** Last detection, so the UI can flash. */
   lastDetection: { phrase: string; agentId: string | null; at: number } | null;
+  /**
+   * True while a wake session is capturing the user's speech to an agent. Wake
+   * phrase detection is suppressed for the duration so the agent's own name is
+   * not treated as a new activation mid-utterance; the bottom bar shows a
+   * "paused — speaking to X" state instead of "listening".
+   */
+  capturing: boolean;
   /** Non-fatal reason when listening is desired but not possible. */
   message: string | null;
 };
@@ -1604,6 +1624,42 @@ export type NexusBridge = {
   onCompanionGlobalCursor(
     listener: (coords: CompanionCursorCoords) => void,
   ): () => void;
+  /**
+   * Subscribe to a live wake activation pushed into an *open* companion window
+   * (main → renderer), so a wake that resolves to companion mode hands the
+   * addressed agent + conversation to the already-running window without a reload
+   * (a reload would restart its live voice session). Returns an unsubscribe fn.
+   */
+  onCompanionPresent(listener: (payload: CompanionPresent) => void): () => void;
+  /**
+   * Hand a live wake activation to an *open* companion window (main hands it
+   * over without a reload, so its call is not torn down). Returns false when no
+   * companion is open for the contact, so the caller can fall back to
+   * `companionOpen`. Used by the companion-first wake policy and the widget's
+   * "open companion" link when the window already exists.
+   */
+  companionPresent(payload: CompanionPresent): Promise<boolean>;
+  /**
+   * Relay a wake-dictation session view (owner renderer → companion window) so
+   * the companion strip mirrors the live turn. Returns false when no companion is
+   * open for the contact.
+   */
+  companionPushSession(view: CompanionSessionView): Promise<boolean>;
+  /**
+   * Subscribe to the session view pushed for the companion strip (companion
+   * renderer side). Returns an unsubscribe fn.
+   */
+  onCompanionSession(listener: (view: CompanionSessionView) => void): () => void;
+  /**
+   * Send a composer control (submit / cancel / send-as-voice / edit) back to the
+   * window that owns the session. Returns false when no companion is open.
+   */
+  companionAction(action: CompanionAction): Promise<boolean>;
+  /**
+   * Subscribe to a companion composer control relayed from main into the
+   * session-owning window. Returns an unsubscribe fn.
+   */
+  onCompanionActionRelay(listener: (action: CompanionAction) => void): () => void;
   // Desktop calendar (Phase 7b).
   calendarListEvents(input?: CalendarListInput): Promise<CalendarEventRow[]>;
   calendarUpcoming(): Promise<CalendarEventRow[]>;
@@ -1760,6 +1816,37 @@ export const IPC = {
   companionList: 'nexus:companion:list',
   companionSetAlwaysOnTop: 'nexus:companion:set-always-on-top',
   companionIsAlwaysOnTop: 'nexus:companion:is-always-on-top',
+  /**
+   * Live wake activation pushed into an open companion (main → renderer) so a
+   * wake addressing an agent whose companion is already up foregrounds it and
+   * hands it the dictation surface without reloading (a reload would restart the
+   * live voice call).
+   */
+  companionPresent: 'nexus:companion:present',
+  /**
+   * Renderer → main request to deliver that activation to an open companion
+   * (distinct from the push channel above so an invoke and a broadcast never
+   * share a name). Resolves false when no companion is open for the contact.
+   */
+  companionPresentRequest: 'nexus:companion:present-request',
+  /**
+   * Wake-dictation session view pushed into a companion (main → companion
+   * renderer) so its STT preview + composer mirror the live turn owned by the
+   * main renderer.
+   */
+  companionSession: 'nexus:companion:session',
+  /**
+   * Renderer → main relay of a session view (main renderer → companion window),
+   * so the capture owner stays the single writer of the session.
+   */
+  companionPushSession: 'nexus:companion:push-session',
+  /**
+   * Companion → main relay of a composer control (submit / cancel / send-as-voice
+   * / edit). Main forwards it to the window that owns the session.
+   */
+  companionAction: 'nexus:companion:action',
+  /** Main → capture-owner relay of a companion composer control. */
+  companionActionRelay: 'nexus:companion:action-relay',
   /** Push OS-global cursor samples to a companion window (main → renderer). */
   companionGlobalCursor: 'nexus:companion:global-cursor',
   calendarListEvents: 'nexus:calendar:list-events',

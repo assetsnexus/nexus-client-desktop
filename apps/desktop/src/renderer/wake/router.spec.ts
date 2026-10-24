@@ -307,4 +307,58 @@ describe('createWakeChatRouter', () => {
     await h.router.route(target);
     expect(present).toHaveBeenCalledTimes(2);
   });
+
+  it('sends the recorded audio batch as a voice message and concludes the session', async () => {
+    const sentAudio: Array<{ contactId: string }> = [];
+    const h = makeRouter({
+      getSettings: () => settings({ reviewBeforeSend: false, submitPhrases: [] }),
+      dictate: scripted(['one two']),
+      sendAudio: async (input) => {
+        sentAudio.push(input);
+        return true;
+      },
+    });
+    await h.router.route(target);
+    await flush();
+    // The turn recorded audio in parallel with the transcript.
+    expect(h.router.getSession()?.batchAvailable).toBe(false);
+    await h.router.submitAudio();
+    expect(sentAudio).toEqual([{ contactId: 'contact-1' }]);
+    expect(h.sent).toEqual([]);
+    expect(h.states[h.states.length - 1]).toBe('idle');
+  });
+
+  it('keeps the review surface when there was no audio to send', async () => {
+    const h = makeRouter({
+      getSettings: () => settings({ reviewBeforeSend: true, submitPhrases: ['submit'] }),
+      dictate: scripted(['draft the reply submit']),
+      sendAudio: async () => false,
+    });
+    await h.router.route(target);
+    await flush();
+    await h.router.submitAudio();
+    expect(h.router.getSession()?.status).toBe('review');
+    expect(h.sent).toEqual([]);
+  });
+
+  it('mirrors the parallel audio-batch progress into the session while capturing', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = makeRouter({
+        getSettings: () => settings({ reviewBeforeSend: true, submitPhrases: [] }),
+        dictate: scripted(['still talking']),
+        batchProgress: () => ({ durationMs: 1_240, chunks: 2 }),
+      });
+      await h.router.route(target);
+      await vi.advanceTimersByTimeAsync(300);
+      // The router polls `batchProgress` on a 250ms timer, so the widget can show
+      // "Audio batch · 1.2s recorded" while the user is still speaking.
+      expect(h.router.getSession()?.batchDurationMs).toBe(1_240);
+      expect(h.router.getSession()?.batchChunks).toBe(2);
+      expect(h.router.getSession()?.batchAvailable).toBe(true);
+      h.router.cancel();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
