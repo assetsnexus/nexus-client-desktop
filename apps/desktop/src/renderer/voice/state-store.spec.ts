@@ -65,6 +65,7 @@ const wakeStt: WakeSttStatus = {
   modelLabel: 'Model 0',
   usingCustomEndpoint: false,
   runnerInstalled: true,
+  threads: 8,
 };
 
 function reader(over: Partial<VoiceStoreReader> = {}): VoiceStoreReader {

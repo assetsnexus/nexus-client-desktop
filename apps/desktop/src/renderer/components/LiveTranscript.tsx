@@ -17,18 +17,27 @@ import { useWakeState } from '../wake/director-host.js';
 import { annotateTranscriptTokens } from '../../shared/wake-phrase.js';
 
 const wrap: CSSProperties = {
-  display: 'inline-flex',
+  display: 'flex',
   alignItems: 'baseline',
   gap: 4,
-  maxWidth: 340,
-  overflow: 'hidden',
-  whiteSpace: 'nowrap',
-  fontSize: 12,
+  flex: 1,
+  minWidth: 0,
+  fontSize: 12.5,
+  lineHeight: 1.35,
 };
 
 const heardLabel: CSSProperties = {
   color: '#6b7784',
   flexShrink: 0,
+};
+
+/** The recognized words: may wrap to a second line instead of being clipped. */
+const words: CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
+  flexWrap: 'wrap',
+  gap: 4,
+  minWidth: 0,
 };
 
 const word: CSSProperties = {
@@ -66,11 +75,13 @@ export function LiveTranscript() {
     >
       <span style={heardLabel}>heard</span>
       {tokens.length ? (
-        tokens.map((token, index) => (
-          <span key={`${index}-${token.text}`} style={token.wake ? wakeWord : word}>
-            {token.text}
-          </span>
-        ))
+        <span style={words} data-nexus-transcript-words>
+          {tokens.map((token, index) => (
+            <span key={`${index}-${token.text}`} style={token.wake ? wakeWord : word}>
+              {token.text}
+            </span>
+          ))}
+        </span>
       ) : (
         <span style={empty}>…</span>
       )}

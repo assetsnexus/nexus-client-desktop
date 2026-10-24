@@ -18,10 +18,45 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { connect } from 'node:net';
+import { cpus } from 'node:os';
 import { join } from 'node:path';
 import { modelDirName, resolveEndpoint, type LocalVoiceModel } from '@nexus/local-voice';
 import type { LocalVoiceEndpoint } from '../shared/ipc.js';
 import { primaryModelFile } from './wake-host.js';
+
+/**
+ * Threads for the managed `whisper-server`.
+ *
+ * whisper.cpp defaults to **4** threads, which leaves most of a modern CPU idle
+ * and made a 3-second utterance take ~30s on a CPU-only build. Scaling to the
+ * machine's cores is the single biggest, zero-cost win (measured ~10x on an
+ * 8-core i9). Capped so a huge host does not oversubscribe, and floored at 4.
+ */
+export function defaultWhisperThreads(coreCount: number = cpus().length): number {
+  const cores = Number.isFinite(coreCount) && coreCount > 0 ? Math.floor(coreCount) : 4;
+  return Math.max(4, Math.min(16, cores));
+}
+
+/**
+ * Build the initial-prompt phrase bias. whisper.cpp conditions the decoder on
+ * `--prompt` / the `prompt` form field, which sharpens recognition of unusual
+ * proper nouns — exactly our case, since wake phrases are agent names ("Nox",
+ * "Razail"). Framing them as a vocabulary list keeps it a hint, not a transcript.
+ */
+export function buildPhraseBiasPrompt(phrases: readonly string[]): string | null {
+  const cleaned: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of phrases) {
+    const phrase = (raw ?? '').replace(/\s+/g, ' ').trim();
+    if (!phrase) continue;
+    const key = phrase.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push(phrase);
+  }
+  if (cleaned.length === 0) return null;
+  return `Vocabulary: ${cleaned.join(', ')}.`;
+}
 
 /** WAV container for one utterance. Kept pure and testable. */
 export function encodeWav(pcm: Float32Array, sampleRate: number): Uint8Array {
@@ -130,6 +165,11 @@ export type WakeSttStatus = {
   usingCustomEndpoint: boolean;
   /** True when a runnable `whisper-server` was found (managed copy or PATH). */
   runnerInstalled: boolean;
+  /**
+   * Threads the managed server would use. Exposed so the UI can explain speed:
+   * whisper.cpp defaults to 4, which is why an un-tuned CPU build felt unusable.
+   */
+  threads: number;
 };
 
 export type WakeSttDeps = {
@@ -149,10 +189,20 @@ export type WakeSttDeps = {
    * its own — it reuses whatever is installed).
    */
   listModels?: () => LocalVoiceModel[];
+  /**
+   * The live wake phrases to bias the decoder toward (agent names). Read at
+   * spawn time so the initial prompt matches the currently armed phrases.
+   */
+  wakePhrases?: () => string[];
   /** Port for the managed whisper.cpp server (default 8085). */
   port?: number;
   /** whisper.cpp binary name (default `whisper-server`). */
   command?: string;
+  /**
+   * Threads for the managed server. Defaults to {@link defaultWhisperThreads}
+   * (all cores, capped); whisper.cpp's own default of 4 is left most of a CPU idle.
+   */
+  threads?: number;
   /** Spawn override for tests. */
   spawnFn?: typeof spawn;
   /** Resolve a binary on PATH; overridable for tests. */
@@ -185,8 +235,12 @@ export type WakeSttDeps = {
 export type WakeStt = {
   /** Resolve the local target + honest readiness (never throws). */
   status: () => Promise<WakeSttStatus>;
-  /** Transcribe one utterance on-device; null when nothing was recognised. */
-  transcribe: (pcm: Float32Array, sampleRate: number) => Promise<string | null>;
+  /**
+   * Transcribe one utterance on-device; null when nothing was recognised.
+   * `phrases` overrides the configured wake phrases for this call (the renderer
+   * knows the armed phrases, including auto-mapped ones main never persists).
+   */
+  transcribe: (pcm: Float32Array, sampleRate: number, phrases?: string[]) => Promise<string | null>;
   /** Stop the managed server process, if one is running. */
   dispose: () => void;
 };
@@ -199,6 +253,7 @@ export type WakeStt = {
 export function createWakeStt(deps: WakeSttDeps): WakeStt {
   const port = deps.port ?? 8085;
   const command = deps.command ?? 'whisper-server';
+  const threads = deps.threads ?? defaultWhisperThreads();
   const spawnFn = deps.spawnFn ?? spawn;
   const doFetch = deps.fetchFn ?? fetch;
   const fileExists = deps.fileExists ?? existsSync;
@@ -220,24 +275,35 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
   }
 
   /**
-   * The installed STT model to serve. Honours the user's explicit choice, then
-   * falls back to ANY installed STT model — the wake settings panel has no model
-   * picker of its own (a binding points at the model, or the user simply
-   * installed one under "Local speech models"), so requiring an explicit
-   * `sttModelId` here produced a false "cannot listen yet" even with Whisper
-   * installed. Picking the first installed speech model matches what the user
-   * expects: "I installed a speech model, so wake should work".
+   * The installed STT model to serve the *wake* path.
+   *
+   * Wake gating only needs to spot a short phrase, so a small model is strictly
+   * better: recognizing "Nox" with a 574 MB `large-v3-turbo` on a CPU build took
+   * ~30s per utterance, while a `tiny`/`base` model does the same clip in well
+   * under a second — the difference between "feels broken" and near-realtime.
+   *
+   * Policy (deliberately independent of the dictation selection, which may legitimately
+   * want a large model): prefer the **smallest installed** STT model. That way
+   * installing one fast model is enough for wake, and a big dictation model does
+   * not silently make the wake unusable. Falls back to the user's choice, then to
+   * any installed speech model, so a single installed model is always used.
    */
   function installedSttModel(): LocalVoiceModel | null {
+    const all = (deps.listModels?.() ?? []).filter(
+      (m) => m.kind === 'stt' && m.files.length > 0 && deps.isInstalled(m.id),
+    );
+    if (all.length > 0) {
+      // Smallest by declared size (unknown sizes sort last, never win).
+      return [...all].sort(
+        (a, b) => (a.sizeBytes ?? Number.POSITIVE_INFINITY) - (b.sizeBytes ?? Number.POSITIVE_INFINITY),
+      )[0]!;
+    }
     const selected = deps.selectedModelId();
     if (selected) {
       const model = deps.findModel(selected);
       if (model && model.kind === 'stt' && deps.isInstalled(model.id)) return model;
     }
-    const all = deps.listModels?.() ?? [];
-    return (
-      all.find((m) => m.kind === 'stt' && m.files.length > 0 && deps.isInstalled(m.id)) ?? null
-    );
+    return null;
   }
 
   /** The absolute path of the primary model file, or null when missing. */
@@ -289,20 +355,25 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
       if (!starting) {
         starting = new Promise<void>((resolve) => {
           try {
-            proc = spawnFn(
-              binary,
-              [
-                '-m',
-                filePath,
-                '--host',
-                '127.0.0.1',
-                '--port',
-                String(port),
-                '--inference-path',
-                '/inference',
-              ],
-              { stdio: 'ignore', detached: false },
-            );
+            // `-t`: whisper.cpp defaults to 4 threads, which idles most of a CPU
+            // and was the dominant cause of ~30s transcripts. `--prompt`: bias the
+            // decoder toward the armed wake phrases (agent names) so unusual proper
+            // nouns are recognized, not guessed into similar-sounding words.
+            const args = [
+              '-m',
+              filePath,
+              '--host',
+              '127.0.0.1',
+              '--port',
+              String(port),
+              '--inference-path',
+              '/inference',
+              '-t',
+              String(threads),
+            ];
+            const phrasePrompt = buildPhraseBiasPrompt(deps.wakePhrases?.() ?? []);
+            if (phrasePrompt) args.push('--prompt', phrasePrompt);
+            proc = spawnFn(binary, args, { stdio: 'ignore', detached: false });
             proc.on('exit', () => {
               proc = null;
             });
@@ -447,9 +518,10 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
         modelLabel: r.model?.label ?? null,
         usingCustomEndpoint: r.usingCustomEndpoint,
         runnerInstalled: r.usingCustomEndpoint ? true : runnerIsInstalled(),
+        threads,
       };
     },
-    async transcribe(pcm, sampleRate) {
+    async transcribe(pcm, sampleRate, phrases) {
       if (!pcm.length) return null;
       const { target } = await resolveTarget(true);
       if (!target) return null;
@@ -460,6 +532,12 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
         form.append('file', new Blob([wav], { type: 'audio/wav' }), 'wake.wav');
         form.append('response_format', 'json');
         if (target.model) form.append('model', target.model);
+        // Per-request phrase bias: covers a server we did not spawn (a reused
+        // local-voice lifecycle server, or a custom loopback endpoint) whose
+        // initial prompt predates the currently armed phrases. Caller-supplied
+        // phrases win; they include auto-mapped names main never persists.
+        const phrasePrompt = buildPhraseBiasPrompt(phrases ?? deps.wakePhrases?.() ?? []);
+        if (phrasePrompt) form.append('prompt', phrasePrompt);
         const res = await doFetch(target.url, { method: 'POST', body: form });
         if (!res.ok) return null;
         const text = await res.text();

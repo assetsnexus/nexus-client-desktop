@@ -43,6 +43,57 @@ function ghRawFile(repo: string, ref: string, filePath: string): string {
 
 export const BUILTIN_VOICE_MODELS: LocalVoiceModel[] = [
   {
+    // Fast wake/dictation model. Wake gating only spots a short phrase, and a
+    // 574 MB `large-v3-turbo` on a CPU-only build took ~30s per utterance while
+    // this runs the same clip in well under a second — the difference between
+    // "feels broken" and near-realtime. Kept first so the wake resolver (smallest
+    // installed) prefers it when several models are present.
+    id: 'catalog:desktop/whisper-tiny-q5',
+    kind: 'stt',
+    source: 'region',
+    label: 'Whisper Tiny (q5_1) — fastest',
+    modelRef: 'edge/whisper-tiny',
+    downloadUrl: whisperCpp('ggerganov/whisper.cpp', 'ggml-tiny-q5_1.bin'),
+    sourceUrl: hfPage('ggerganov/whisper.cpp'),
+    sizeBytes: 32_152_673,
+    vramGiB: 0,
+    runtime: 'ggml-q5_1',
+    files: [
+      {
+        name: 'ggml-tiny-q5_1.bin',
+        url: whisperCpp('ggerganov/whisper.cpp', 'ggml-tiny-q5_1.bin'),
+        sizeBytes: 32_152_673,
+        sha256: null,
+      },
+    ],
+    licenseKeys: ['mit'],
+    sha256: null,
+  },
+  {
+    // Balanced fast model: noticeably better accuracy than tiny while still
+    // realtime on CPU (measured ~0.7s for a 3s clip). The recommended wake model.
+    id: 'catalog:desktop/whisper-base-q5',
+    kind: 'stt',
+    source: 'region',
+    label: 'Whisper Base (q5_1) — fast',
+    modelRef: 'edge/whisper-base',
+    downloadUrl: whisperCpp('ggerganov/whisper.cpp', 'ggml-base-q5_1.bin'),
+    sourceUrl: hfPage('ggerganov/whisper.cpp'),
+    sizeBytes: 59_707_625,
+    vramGiB: 1,
+    runtime: 'ggml-q5_1',
+    files: [
+      {
+        name: 'ggml-base-q5_1.bin',
+        url: whisperCpp('ggerganov/whisper.cpp', 'ggml-base-q5_1.bin'),
+        sizeBytes: 59_707_625,
+        sha256: null,
+      },
+    ],
+    licenseKeys: ['mit'],
+    sha256: null,
+  },
+  {
     id: 'catalog:desktop/whisper-large-v3-turbo-q5',
     kind: 'stt',
     source: 'region',

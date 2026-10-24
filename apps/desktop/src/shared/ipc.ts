@@ -362,6 +362,12 @@ export type WakeSttStatus = {
   usingCustomEndpoint: boolean;
   /** True when a runnable `whisper-server` was found (managed copy or PATH). */
   runnerInstalled: boolean;
+  /**
+   * Threads the managed server would use. whisper.cpp defaults to 4, which idles
+   * most of a CPU and made on-device transcripts feel realtime-less; surfaced so
+   * the settings UI can explain the speed.
+   */
+  threads: number;
 };
 
 export type AuthState =
@@ -1332,10 +1338,15 @@ export type NexusBridge = {
   /**
    * Transcribe one wake utterance **on this machine**. Returns null when nothing
    * was recognised. Audio never leaves the device; a non-local target is refused.
+   *
+   * `phrases` (optional) are the currently armed wake phrases (agent names). They
+   * bias the decoder so unusual proper nouns are recognized; the renderer sends
+   * them because auto-mapped phrases exist only there, not in persisted settings.
    */
   wakeTranscribeLocal(input: {
     pcm: Float32Array;
     sampleRate: number;
+    phrases?: string[];
   }): Promise<string | null>;
   getAuthState(): Promise<AuthState>;
   login(req: LoginRequest): Promise<AuthState>;

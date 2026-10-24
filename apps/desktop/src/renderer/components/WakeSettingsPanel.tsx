@@ -47,6 +47,7 @@ import {
   SUGGESTED_SUBMIT_PHRASES,
   WAKE_TIMEOUT_MAX_SECONDS,
   WAKE_TIMEOUT_MIN_SECONDS,
+  isLargeWakeModel,
 } from '../../shared/wake.js';
 import { isAutoBinding } from '../../shared/wake-automap.js';
 import { reloadWakeDirector } from '../wake/director-host.js';
@@ -277,7 +278,11 @@ function SpeechModelReadiness({ status }: { status: WakeSttStatus | null }) {
         <span style={{ color: '#4ade80' }}>✓</span>
         <span>
           Speech-model wakes are ready
-          {status.modelLabel ? ` — using ${status.modelLabel}` : ''}.
+          {status.modelLabel ? ` — using ${status.modelLabel}` : ''}
+          {status.threads ? ` on ${status.threads} CPU threads` : ''}.{' '}
+          {isLargeWakeModel(status.modelLabel)
+            ? 'This model is large, so on-device recognition lags speech; install “Whisper Base/Tiny” for near-realtime wakes.'
+            : 'Near-realtime on-device recognition.'}
         </span>
       </div>
     );

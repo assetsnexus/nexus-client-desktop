@@ -54,7 +54,14 @@ function getSttHub(sampleRate: number, groupKey: string): SttPhraseHub {
   if (!hub || hub.size === 0) {
     hub = createSttPhraseHub({
       sampleRate,
-      transcribe: (pcm, rate) => bridge.wakeTranscribeLocal({ pcm, sampleRate: rate }),
+      transcribe: (pcm, rate) =>
+        bridge.wakeTranscribeLocal({
+          pcm,
+          sampleRate: rate,
+          // Passage of the currently armed phrases (incl. auto-mapped agent names
+          // that main never persists) so the decoder is biased toward them.
+          phrases: singleton?.getState().activePhrases ?? [],
+        }),
       // Stream what was actually heard into the bottom bar (UI-only).
       onTranscript: (text) => singleton?.noteTranscript(text),
     });

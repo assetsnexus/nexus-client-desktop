@@ -433,6 +433,18 @@ const wakeStt = createWakeStt({
   // Fall back to any installed speech model when the user never picked one, so
   // "I installed Whisper" is enough for wake to work.
   listModels: () => localVoiceManager.listModels(),
+  // Bias the decoder toward the currently armed phrases (agent names) so unusual
+  // proper nouns are recognized rather than guessed into similar-sounding words.
+  wakePhrases: () => {
+    try {
+      return wakeManager
+        .getSettings()
+        .bindings.filter((b) => b.enabled)
+        .map((b) => b.phrase);
+    } catch {
+      return [];
+    }
+  },
   // Spawn the runner the app installed into its data folder when present; fall
   // back to PATH resolution otherwise.
   binaryResolver: (command) => voiceBinaries.resolveBinary(command),
@@ -1105,7 +1117,10 @@ function registerIpc(): void {
   ipcMain.handle(IPC.wakeSttStatus, () => wakeStt.status());
   ipcMain.handle(
     IPC.wakeTranscribeLocal,
-    async (_e, payload: { pcm?: ArrayBuffer | Uint8Array; sampleRate?: number }) => {
+    async (
+      _e,
+      payload: { pcm?: ArrayBuffer | Uint8Array; sampleRate?: number; phrases?: string[] },
+    ) => {
       const raw = payload?.pcm;
       if (!raw) return null;
       const pcm =
@@ -1115,7 +1130,12 @@ function registerIpc(): void {
             ? new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4))
             : new Float32Array(raw as ArrayBuffer);
       const sampleRate = Number(payload?.sampleRate) || 16_000;
-      return wakeStt.transcribe(pcm, sampleRate);
+      // The renderer sends the armed phrases (incl. auto-mapped ones that never
+      // reach persisted settings) so phrase biasing always matches what is armed.
+      const phrases = Array.isArray(payload?.phrases)
+        ? payload.phrases.filter((p): p is string => typeof p === 'string')
+        : [];
+      return wakeStt.transcribe(pcm, sampleRate, phrases);
     },
   );
   ipcMain.handle(

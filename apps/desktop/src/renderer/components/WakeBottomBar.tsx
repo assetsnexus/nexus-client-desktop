@@ -18,14 +18,44 @@ import { LiveTranscript } from './LiveTranscript.js';
 
 const bar: CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
-  gap: 12,
+  flexDirection: 'column',
+  gap: 6,
   padding: '6px 14px',
   borderTop: '1px solid #2a333d',
   background: '#12171c',
   color: '#9aa7b5',
   fontSize: 12,
   flexShrink: 0,
+};
+
+/** Top line: mic toggle, live status, level meter, and any transient message. */
+const statusRow: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  minWidth: 0,
+};
+
+/** Second line: the live caption, full width so the words are always readable. */
+const captionRow: CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: 8,
+  minWidth: 0,
+};
+
+/**
+ * Third line: the armed phrases. A single horizontal strip that scrolls rather
+ * than wrapping — with dozens of agents, wrapping would push the bar very tall.
+ */
+const chipsRow: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  minWidth: 0,
+  overflowX: 'auto',
+  overflowY: 'hidden',
+  scrollbarWidth: 'thin',
 };
 
 const dot = (live: boolean): CSSProperties => ({
@@ -74,43 +104,45 @@ export function WakeBottomBar() {
   return (
     <div style={bar} data-nexus-surface="wake-bar" data-wake-live={live ? 'true' : 'false'}>
       <style>{KEYFRAMES}</style>
-      {/* Microphone mute toggle + live soundwave, immediately left of the status. */}
-      <MicToggleBar />
-      <span style={dot(live)} aria-hidden />
-      <span style={{ color: '#e8eef4', fontWeight: 600 }}>
-        {live ? 'Listening for wake words' : 'Wake words idle'}
-      </span>
-
-      {/* Live on-device STT caption, immediately right of the status: streams the
-          words the wake engine heard and highlights any armed wake word. */}
-      <LiveTranscript />
-
-      <div style={meterTrack} aria-hidden title="Microphone level">
-        <div style={meterFill(state.level)} />
+      <div style={statusRow}>
+        {/* Microphone mute toggle + live soundwave, immediately left of the status. */}
+        <MicToggleBar />
+        <span style={dot(live)} aria-hidden />
+        <span style={{ color: '#e8eef4', fontWeight: 600, flexShrink: 0 }}>
+          {live ? 'Listening for wake words' : 'Wake words idle'}
+        </span>
+        <div style={meterTrack} aria-hidden title="Microphone level">
+          <div style={meterFill(state.level)} />
+        </div>
+        <span style={{ flex: 1 }} />
+        {state.lastDetection ? (
+          <span style={{ color: '#6b7784', flexShrink: 0 }}>
+            matched “{state.lastDetection.phrase}”
+          </span>
+        ) : null}
+        {state.message ? (
+          <span style={{ color: '#fbbf24', maxWidth: 380 }} title={state.message}>
+            {state.message}
+          </span>
+        ) : null}
       </div>
 
-      <span style={{ flex: 1 }} />
+      {/* The caption gets its own full-width line: sharing a row with the phrase
+          chips collapsed it to a few clipped characters (the unreadable "heard…"). */}
+      <div style={captionRow}>
+        {/* Live on-device STT caption: streams the words the wake engine heard and
+            highlights any armed wake word. */}
+        <LiveTranscript />
+      </div>
 
       {state.activePhrases.length ? (
-        <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={chipsRow} aria-label="Armed wake phrases">
           {state.activePhrases.map((phrase) => (
-            <span key={phrase} style={chip}>
+            <span key={phrase} style={{ ...chip, flexShrink: 0 }}>
               “{phrase}”
             </span>
           ))}
-        </span>
-      ) : null}
-
-      {state.message ? (
-        <span style={{ color: '#fbbf24', maxWidth: 320 }} title={state.message}>
-          {state.message}
-        </span>
-      ) : null}
-
-      {state.lastDetection ? (
-        <span style={{ color: '#6b7784' }}>
-          heard “{state.lastDetection.phrase}”
-        </span>
+        </div>
       ) : null}
     </div>
   );

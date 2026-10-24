@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LocalVoiceModel } from '@nexus/local-voice';
-import { encodeWav, isLocalWakeHost, createWakeStt } from './wake-stt.js';
+import {
+  encodeWav,
+  isLocalWakeHost,
+  createWakeStt,
+  buildPhraseBiasPrompt,
+  defaultWhisperThreads,
+} from './wake-stt.js';
 
 /** Minimal local-voice model row for the resolver. */
 function sttModel(over: Partial<LocalVoiceModel> = {}): LocalVoiceModel {
@@ -41,6 +47,38 @@ describe('encodeWav', () => {
     const view = new DataView(wav.buffer);
     expect(view.getInt16(44, true)).toBe(32767);
     expect(view.getInt16(46, true)).toBe(-32767);
+  });
+});
+
+describe('defaultWhisperThreads', () => {
+  it('scales to the core count (whisper.cpp would default to 4)', () => {
+    expect(defaultWhisperThreads(8)).toBe(8);
+    expect(defaultWhisperThreads(16)).toBe(16);
+  });
+
+  it('floors at 4 and caps at 16 so it never undersubscribes or floods', () => {
+    expect(defaultWhisperThreads(2)).toBe(4);
+    expect(defaultWhisperThreads(1)).toBe(4);
+    expect(defaultWhisperThreads(64)).toBe(16);
+    expect(defaultWhisperThreads(0)).toBe(4);
+    expect(defaultWhisperThreads(Number.NaN)).toBe(4);
+  });
+});
+
+describe('buildPhraseBiasPrompt', () => {
+  it('builds a vocabulary hint from the armed phrases', () => {
+    expect(buildPhraseBiasPrompt(['Nox', 'Razail'])).toBe('Vocabulary: Nox, Razail.');
+  });
+
+  it('de-duplicates case-insensitively and trims/collapses whitespace', () => {
+    expect(buildPhraseBiasPrompt(['  Nox ', 'nox', 'B2B   Services'])).toBe(
+      'Vocabulary: Nox, B2B Services.',
+    );
+  });
+
+  it('returns null when there is nothing to bias toward', () => {
+    expect(buildPhraseBiasPrompt([])).toBeNull();
+    expect(buildPhraseBiasPrompt(['', '   '])).toBeNull();
   });
 });
 
@@ -196,6 +234,36 @@ describe('createWakeStt', () => {
     expect(status.modelLabel).toBe('Whisper Turbo');
   });
 
+  it('prefers the smallest installed STT model so the wake stays near-realtime', async () => {
+    const turbo = sttModel({
+      id: 'catalog:desktop/whisper-large-v3-turbo-q5',
+      label: 'Whisper Turbo',
+      sizeBytes: 574_041_195,
+    });
+    const tiny = sttModel({
+      id: 'catalog:desktop/whisper-tiny-q5',
+      label: 'Whisper Tiny',
+      sizeBytes: 32_152_673,
+    });
+    const installed = new Set([turbo.id, tiny.id]);
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => [turbo, tiny].find((m) => m.id === id) ?? null,
+      isInstalled: (id) => installed.has(id),
+      // The user picked the big dictation model explicitly — wake must NOT honour
+      // it, or a CPU-only box waits ~30s per phrase.
+      selectedModelId: () => turbo.id,
+      listModels: () => [turbo, tiny],
+      resolveBinary: () => 'whisper-server',
+      fileExists: () => true,
+      portInUse: async () => false,
+    });
+    const status = await stt.status();
+    expect(status.modelId).toBe(tiny.id);
+    expect(status.modelLabel).toBe('Whisper Tiny');
+  });
+
   it('spawns the app-managed runner resolved through binaryResolver (no PATH install)', async () => {
     const spawnFn = vi.fn((_command: string, _args: string[]) => ({
       on: vi.fn(),
@@ -232,6 +300,84 @@ describe('createWakeStt', () => {
     // The concrete managed path is what got spawned — not the bare name.
     expect(spawnFn.mock.calls[0]![0]).toBe(managed);
     stt.dispose();
+  });
+
+  it('spawns with tuned threads and a wake-phrase bias prompt', async () => {
+    const spawnFn = vi.fn((_command: string, _args: string[]) => ({
+      on: vi.fn(),
+      kill: vi.fn(),
+    }));
+    const fetchFn = vi.fn(async () => ({
+      ok: true,
+      text: async () => JSON.stringify({ text: 'biased' }),
+    })) as unknown as typeof fetch;
+    const model = sttModel();
+    let bound = false;
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      threads: 12,
+      wakePhrases: () => ['Nox', 'Razail'],
+      spawnFn: spawnFn as unknown as typeof import('node:child_process').spawn,
+      resolveBinary: () => 'whisper-server',
+      fileExists: () => true,
+      startDelayMs: 0,
+      portInUse: async () => bound,
+      fetchFn,
+    });
+    setTimeout(() => {
+      bound = true;
+    }, 0);
+    expect(await stt.transcribe(new Float32Array([0.2]), 16_000)).toBe('biased');
+    const args = spawnFn.mock.calls[0]![1] as string[];
+    // Whisper's 4-thread default idled most of the CPU; we scale it up.
+    expect(args).toContain('-t');
+    expect(args[args.indexOf('-t') + 1]).toBe('12');
+    // The armed phrases become the decoder's vocabulary hint.
+    expect(args).toContain('--prompt');
+    expect(args[args.indexOf('--prompt') + 1]).toContain('Nox');
+    stt.dispose();
+  });
+
+  it('reports the tuned thread count in status', async () => {
+    const model = sttModel();
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      threads: 6,
+    });
+    expect((await stt.status()).threads).toBe(6);
+  });
+
+  it('bias-tunes each request too, covering a server we did not spawn', async () => {
+    const model = sttModel();
+    let captured: FormData | null = null;
+    const fetchFn = vi.fn(async (_url: string, init: { body: FormData }) => {
+      captured = init.body;
+      return { ok: true, text: async () => JSON.stringify({ text: 'biased' }) };
+    }) as unknown as typeof fetch;
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      wakePhrases: () => ['Selene'],
+      // Already serving (e.g. the local-voice lifecycle started it): no spawn.
+      spawnFn: vi.fn() as unknown as typeof import('node:child_process').spawn,
+      fileExists: () => true,
+      portInUse: async () => true,
+      fetchFn,
+    });
+    await stt.transcribe(new Float32Array([0.2]), 16_000);
+    expect(captured).not.toBeNull();
+    expect((captured as unknown as FormData).get('prompt')).toContain('Selene');
   });
 
   it('reuses a server already listening on the port instead of spawning a second', async () => {

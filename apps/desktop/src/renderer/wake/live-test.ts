@@ -81,9 +81,15 @@ export function createWakeLiveTest(options: WakeLiveTestOptions): WakeLiveTest {
             (sttHubRef.hub ??= createSttPhraseHub({
               sampleRate,
               transcribe: (pcm, rate) => {
-                // Local-only via main; never the region (see wake-stt.ts).
+                // Local-only via main; never the region (see wake-stt.ts). The
+                // tested phrase biases the decoder, so the test measures the
+                // phrase the user typed rather than an un-tuned model's guess.
                 return import('../bridge.js').then(({ bridge }) =>
-                  bridge.wakeTranscribeLocal({ pcm, sampleRate: rate }),
+                  bridge.wakeTranscribeLocal({
+                    pcm,
+                    sampleRate: rate,
+                    phrases: [options.phrase],
+                  }),
                 );
               },
             })),

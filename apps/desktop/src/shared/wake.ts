@@ -391,3 +391,15 @@ export function bindingUnavailableReason(
   if (!binding.modelId) return 'Choose a wake-word model first.';
   return null;
 }
+
+/**
+ * True when a model label names one of the heavy Whisper builds (`large`,
+ * `turbo`, `medium`). Wake gating only spots a short phrase, so a large model
+ * makes on-device recognition lag speech (a 574 MB turbo build took ~30s per
+ * utterance on a CPU-only box); the settings UI uses this to point the user at a
+ * small model instead of leaving "it's slow" unexplained.
+ */
+export function isLargeWakeModel(label: string | null | undefined): boolean {
+  const text = (label ?? '').toLowerCase();
+  return /large|turbo|medium/.test(text);
+}
