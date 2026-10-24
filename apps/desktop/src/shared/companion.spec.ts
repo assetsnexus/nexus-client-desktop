@@ -3,6 +3,8 @@ import {
   buildCompanionHash,
   parseCompanionHash,
   isCompanionHash,
+  electSttOwner,
+  sttOwnerMessage,
   COMPANION_HASH_PREFIX,
 } from './companion.js';
 
@@ -15,11 +17,19 @@ describe('buildCompanionHash / parseCompanionHash', () => {
       virtualEmployeeId: 've-1',
       title: 'Aria',
       avatarUrl: 'https://x/avatar.png',
+      roomId: 'room-7',
       autoStart: true,
       mode: 'split' as const,
       alwaysOnTop: true,
     };
     expect(parseCompanionHash(buildCompanionHash(launch))).toEqual(launch);
+  });
+
+  it('round-trips a room launch so the companion can render the shared scene', () => {
+    const parsed = parseCompanionHash(
+      buildCompanionHash({ contactId: 've-1', roomId: 'room-7' }),
+    );
+    expect(parsed?.roomId).toBe('room-7');
   });
 
   it('keeps only the required field and defaults autoStart to true', () => {
@@ -31,6 +41,7 @@ describe('buildCompanionHash / parseCompanionHash', () => {
       virtualEmployeeId: null,
       title: null,
       avatarUrl: null,
+      roomId: null,
       autoStart: true,
       mode: 'fullscreen',
       alwaysOnTop: false,
@@ -82,5 +93,47 @@ describe('parseCompanionHash rejection', () => {
   it('isCompanionHash mirrors parse', () => {
     expect(isCompanionHash(buildCompanionHash({ contactId: 'x' }))).toBe(true);
     expect(isCompanionHash('#chat')).toBe(false);
+  });
+});
+
+describe('electSttOwner (single-owner speech-to-text)', () => {
+  it('promotes a wake target and demotes the previous owner', () => {
+    expect(electSttOwner({ current: 've-1', next: 've-2', reason: 'wake' })).toEqual({
+      primaryContactId: 've-2',
+      previousContactId: 've-1',
+      reason: 'wake',
+    });
+  });
+
+  it('picks the first owner when none held the mic', () => {
+    expect(electSttOwner({ current: null, next: 've-1', reason: 'opened' })).toEqual({
+      primaryContactId: 've-1',
+      previousContactId: null,
+      reason: 'opened',
+    });
+  });
+
+  it('returns null for a redundant switch (no IPC, no call restart)', () => {
+    expect(electSttOwner({ current: 've-1', next: 've-1', reason: 'focus' })).toBeNull();
+    expect(electSttOwner({ current: null, next: null, reason: 'closed' })).toBeNull();
+  });
+
+  it('releases the mic when the owner closes', () => {
+    expect(electSttOwner({ current: 've-1', next: null, reason: 'closed' })).toEqual({
+      primaryContactId: null,
+      previousContactId: 've-1',
+      reason: 'closed',
+    });
+  });
+
+  it('builds a per-window message that only the primary reads as true', () => {
+    const election = { primaryContactId: 've-2', previousContactId: 've-1', reason: 'wake' as const };
+    expect(sttOwnerMessage('ve-2', election, 4)).toEqual({
+      contactId: 've-2',
+      primary: true,
+      reason: 'wake',
+      token: 4,
+    });
+    expect(sttOwnerMessage('ve-1', election, 4).primary).toBe(false);
   });
 });

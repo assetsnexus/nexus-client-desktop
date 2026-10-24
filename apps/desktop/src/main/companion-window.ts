@@ -18,9 +18,13 @@ import {
   buildCompanionHash,
   COMPANION_DEFAULT_SIZE,
   COMPANION_MIN_SIZE,
+  electSttOwner,
+  sttOwnerMessage,
   type CompanionLaunch,
   type CompanionPresent,
   type CompanionSessionView,
+  type CompanionSttOwner,
+  type SttOwnerElection,
 } from '../shared/companion.js';
 import { IPC } from '../shared/ipc.js';
 export type CompanionWindowOptions = {
@@ -44,6 +48,55 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
   const windows = new Map<string, BrowserWindow>();
   /** Pin state per contact, so a reopen preserves the user's choice. */
   const pinned = new Map<string, boolean>();
+  /**
+   * The single companion that currently owns speech-to-text (the mic). At most
+   * one window may capture at a time; a new primary demotes the previous one.
+   */
+  let sttOwner: string | null = null;
+  /** Bumped on every election change so a repeat switch still re-applies. */
+  let sttToken = 0;
+
+  /**
+   * Send the **current** election to every open companion, unconditionally.
+   *
+   * A window that mounts *after* a push (a fresh `loadURL`, or a renderer that
+   * finished loading later) never saw it. Until it hears otherwise it would
+   * default to "primary" and open its own capture, competing with the elected
+   * owner. Re-sending on `did-finish-load` closes that race: the late window
+   * learns it is demoted before the user can touch the mic.
+   */
+  function broadcastElection(reason: SttOwnerElection['reason']): void {
+    const election: SttOwnerElection = {
+      primaryContactId: sttOwner,
+      previousContactId: null,
+      reason,
+    };
+    for (const contactId of windows.keys()) {
+      const win = windows.get(contactId);
+      if (!win || win.isDestroyed()) continue;
+      const message: CompanionSttOwner = sttOwnerMessage(contactId, election, sttToken);
+      win.webContents.send(IPC.companionSttOwner, message);
+    }
+  }
+
+  /**
+   * Apply an election: remember the new primary and tell **every** open
+   * companion its role (the promoted one becomes primary, the demoted one
+   * relinquishes the mic). Broadcasting to all keeps windows that missed an
+   * earlier push (e.g. opened later) correct.
+   */
+  function applyElection(next: string | null, reason: SttOwnerElection['reason']): void {
+    const election = electSttOwner({ current: sttOwner, next, reason });
+    if (!election) return;
+    sttOwner = election.primaryContactId;
+    sttToken += 1;
+    for (const contactId of windows.keys()) {
+      const win = windows.get(contactId);
+      if (!win || win.isDestroyed()) continue;
+      const message: CompanionSttOwner = sttOwnerMessage(contactId, election, sttToken);
+      win.webContents.send(IPC.companionSttOwner, message);
+    }
+  }
 
   function open(launch: CompanionLaunch): { opened: boolean; contactId: string } {
     if (!launch?.contactId) throw new Error('companion launch requires a contactId');
@@ -57,6 +110,10 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
       pinned.set(launch.contactId, alwaysOnTop);
       if (typeof existing.setAlwaysOnTop === 'function') existing.setAlwaysOnTop(alwaysOnTop);
       existing.focus();
+      // Re-focusing an open companion makes it the active STT surface; the mic
+      // follows the window the user brought forward (unless a wake later moves
+      // it), so two windows never capture at once.
+      applyElection(launch.contactId, 'focus');
       return { opened: false, contactId: launch.contactId };
     }
 
@@ -82,17 +139,32 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
 
     windows.set(launch.contactId, win);
     pinned.set(launch.contactId, alwaysOnTop);
+    // Bringing a companion to the front (or opening it) makes it the active STT
+    // owner, so the mic follows the window the user is looking at.
+    win.on('focus', () => applyElection(launch.contactId, 'focus'));
+    // A renderer that (re)loads subscribes to the ownership channel *after* the
+    // open-time push, so re-state the current election once it is listening.
+    win.webContents.on('did-finish-load', () => broadcastElection('opened'));
     // The companion runs the same preload bridge, so it needs the same guards.
     options.harden?.(win.webContents);
     win.on('closed', () => {
       windows.delete(launch.contactId);
       pinned.delete(launch.contactId);
+      // The closed window may have owned the mic: release ownership (or hand it
+      // to the next open companion) so a survivor is not left display-only.
+      if (sttOwner === launch.contactId) {
+        applyElection([...windows.keys()][0] ?? null, 'closed');
+      }
       options.onClosed?.(launch.contactId);
     });
 
     const base = options.resolveRendererUrl();
     // `loadURL` accepts a hash on both file:// and http:// renderer URLs.
     void win.loadURL(`${base}${buildCompanionHash(launch)}`);
+    // The freshly opened companion becomes the active STT surface (a wake that
+    // opened it, or the user popping it out); any previously-primary window is
+    // told to relinquish the mic.
+    applyElection(launch.contactId, 'opened');
     return { opened: true, contactId: launch.contactId };
   }
 
@@ -134,8 +206,27 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     present(contactId: string, payload: CompanionPresent): boolean {
       const win = windows.get(contactId);
       if (!win || win.isDestroyed()) return false;
+      // A wake addressed to this companion is the *switcher*: it makes this
+      // window the one STT owner and demotes whichever window held it before.
+      applyElection(contactId, 'wake');
       win.webContents.send(IPC.companionPresent, payload);
       return true;
+    },
+
+    /**
+     * Make an open companion the active STT owner (e.g. the user focused it).
+     * Returns false when no companion is open for the contact.
+     */
+    claimStt(contactId: string): boolean {
+      const win = windows.get(contactId);
+      if (!win || win.isDestroyed()) return false;
+      applyElection(contactId, 'focus');
+      return true;
+    },
+
+    /** The companion that currently owns STT (`null` when none is open). */
+    sttOwnerId(): string | null {
+      return sttOwner;
     },
 
     /**
@@ -174,6 +265,7 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
       }
       windows.clear();
       pinned.clear();
+      sttOwner = null;
     },
 
     /** Contact ids with an open companion. */

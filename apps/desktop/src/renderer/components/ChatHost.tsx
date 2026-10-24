@@ -79,6 +79,12 @@ export function ChatHost({
     agentId: string | null;
     virtualEmployeeId: string | null;
     conversationId: string | null;
+    /**
+     * The group room the conversation lives in, when it is a room panel. Popping
+     * a room's agent into a companion passes this through so the companion
+     * renders the room's **shared** multi-agent scene, not a lone avatar.
+     */
+    roomId: string | null;
     isAgent: boolean;
   } | null>(null);
 
@@ -135,6 +141,9 @@ export function ChatHost({
         agentId: contact.agentId ?? null,
         virtualEmployeeId: contact.virtualEmployeeId ?? null,
         conversationId: panel?.conversationId ?? state.conversationId ?? null,
+        // A panel bound to a group room carries the room id; the companion uses
+        // it to render every agent of the room in one shared scene.
+        roomId: panel?.roomId ?? null,
         isAgent: true,
       });
     };
@@ -663,6 +672,9 @@ export function ChatHost({
                 virtualEmployeeId: activeContact.virtualEmployeeId,
                 title: activeContact.title,
                 avatarUrl: activeContact.avatarUrl,
+                // Room panels open the shared multi-agent scene; 1:1 DMs leave
+                // this null for the single-avatar stage.
+                roomId: activeContact.roomId,
               }
             : null;
       if (!target) return;

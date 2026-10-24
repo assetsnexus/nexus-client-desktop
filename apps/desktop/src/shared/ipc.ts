@@ -19,6 +19,7 @@ import type {
   CompanionLaunch,
   CompanionPresent,
   CompanionSessionView,
+  CompanionSttOwner,
 } from './companion.js';
 import type { RegionEnvironment } from './sandbox-environment.js';
 import type {
@@ -76,6 +77,8 @@ export type {
   CompanionPresent,
   CompanionSessionStatus,
   CompanionSessionView,
+  CompanionSttOwner,
+  SttOwnerElection,
 } from './companion.js';
 export type { CountryRow, RegionRow } from '@nexus/node-core';
 export type { CountryRegionResolution } from './login-region.js';
@@ -1651,6 +1654,13 @@ export type NexusBridge = {
    */
   onCompanionSession(listener: (view: CompanionSessionView) => void): () => void;
   /**
+   * Subscribe to the single-owner STT election (companion renderer side): tells
+   * this window whether it currently owns the microphone. Only the primary
+   * companion runs the live dictation preview / auto-answers a wake; a demoted
+   * window stays in display-only mode. Returns an unsubscribe fn.
+   */
+  onCompanionSttOwner(listener: (message: CompanionSttOwner) => void): () => void;
+  /**
    * Send a composer control (submit / cancel / send-as-voice / edit) back to the
    * window that owns the session. Returns false when no companion is open.
    */
@@ -1840,6 +1850,13 @@ export const IPC = {
    * so the capture owner stays the single writer of the session.
    */
   companionPushSession: 'nexus:companion:push-session',
+  /**
+   * Single-owner STT election pushed into a companion (main → companion
+   * renderer). Exactly one surface may capture the mic; when a wake or a focus
+   * change moves ownership, every open companion is told whether it is primary,
+   * so a demoted window can relinquish the mic instead of competing.
+   */
+  companionSttOwner: 'nexus:companion:stt-owner',
   /**
    * Companion → main relay of a composer control (submit / cancel / send-as-voice
    * / edit). Main forwards it to the window that owns the session.

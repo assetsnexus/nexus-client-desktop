@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import { IPC, type CertificatePromptInfo, type CompanionAction, type CompanionCursorCoords, type CompanionPresent, type CompanionSessionView, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
+import { IPC, type CertificatePromptInfo, type CompanionAction, type CompanionCursorCoords, type CompanionPresent, type CompanionSessionView, type CompanionSttOwner, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
 
 const bridge: NexusBridge = {
   getVersion: () => ipcRenderer.invoke(IPC.version),
@@ -185,6 +185,11 @@ const bridge: NexusBridge = {
     const handler = (_e: unknown, view: CompanionSessionView) => listener(view);
     ipcRenderer.on(IPC.companionSession, handler);
     return () => ipcRenderer.removeListener(IPC.companionSession, handler);
+  },
+  onCompanionSttOwner: (listener) => {
+    const handler = (_e: unknown, message: CompanionSttOwner) => listener(message);
+    ipcRenderer.on(IPC.companionSttOwner, handler);
+    return () => ipcRenderer.removeListener(IPC.companionSttOwner, handler);
   },
   companionAction: (action) => ipcRenderer.invoke(IPC.companionAction, action),
   onCompanionActionRelay: (listener) => {

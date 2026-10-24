@@ -16,7 +16,7 @@ import '@nexus/chat-react/style.css';
 // Reuse the character library's cached avatar image (same avatar-asset cache the
 // chat surface uses). Imported from `@nexus/character-react` because the
 // published `@nexus/chat-react` type entry does not re-export it.
-import { CachedAvatarImage } from '@nexus/character-react';
+import { CachedAvatarImage, createCompanionSceneHost } from '@nexus/character-react';
 // Motion-feed / gesture-config debug surfaces (re-exported from
 // `@nexus/character-ui-kit`). Stylesheet imported once for the panel chrome.
 import {
@@ -45,9 +45,11 @@ import {
   type CompanionDebugSettings,
   type CompanionLaunch,
   type CompanionPresent,
+  type CompanionSttOwner,
   type DesktopConnectionConfig,
 } from '../bridge.js';
 import { CompanionComposer } from './CompanionComposer.js';
+import { CompanionRoomStage } from './CompanionRoomStage.js';
 import {
   buildAvatarChoices,
   createCompanionAvatarStore,
@@ -199,6 +201,20 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
    */
   const [present, setPresent] = useState<CompanionPresent | null>(null);
   const [dictate, setDictate] = useState(launch.autoStart === false);
+  /**
+   * Single-owner STT election. Exactly one companion may capture the mic; main
+   * pushes each window's role here. A window that is *not* primary keeps its
+   * avatar(s) rendering (all windows work in parallel) but must not run the
+   * dictation composer or auto-answer, so two windows never compete for speech.
+   */
+  const [sttPrimary, setSttPrimary] = useState(true);
+  /**
+   * Shared room scene host, when this companion was opened for a group/meeting
+   * room. Every agent of the room renders together here (no companion-only
+   * path); the host is a single-agent façade over the shared `SceneRoom`, bound
+   * to this companion's agent occupant.
+   */
+  const [roomHost, setRoomHost] = useState<CompanionStageHost | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [assets, setAssets] = useState<CompanionAvatarAsset[]>([]);
   const [choiceId, setChoiceId] = useState<string | null>(() => avatarStore.get(launch.contactId)?.choiceId ?? null);
@@ -241,8 +257,13 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   // Register the 3D scene client tools (character_* / locomotion / scene) so the
   // agent can walk, gesture, change mood, and move scene objects. Registered once
   // per session; handlers close over a getter so they always hit the live host.
+  //
+  // In room mode the flat stage is not mounted; the shared-scene façade
+  // (`roomHost`) is the live host, so tools target this companion's occupant
+  // inside the multi-agent room.
+  const stageHost = roomHost ?? avatarHost;
   const hostGetterRef = useRef<CompanionStageHost | null>(null);
-  hostGetterRef.current = avatarHost;
+  hostGetterRef.current = stageHost;
   useEffect(() => {
     if (!chat) return;
     const names = registerCharacterTools(
@@ -264,7 +285,7 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   // screen. Bound to the live 3D host; re-runs on host swap so a scene/flat swap
   // re-enables the external pointer on the new controller.
   useEffect(() => {
-    const host = avatarHost;
+    const host = stageHost;
     if (!host) return;
     host.setExternalPointerEnabled?.(true);
     const unsubscribe = bridge.onCompanionGlobalCursor((coords) => {
@@ -276,34 +297,34 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       unsubscribe();
       host.setExternalPointerEnabled?.(false);
     };
-  }, [avatarHost, launch.contactId]);
+  }, [stageHost, launch.contactId]);
 
   // Wider, configurable gaze cone: the companion tracks the cursor across the
   // whole screen, so the tight library default (head ~8° of actual turn) reads as
   // "barely moves". Bound to the live host so a scene/flat swap re-applies it.
   useEffect(() => {
-    const host = avatarHost;
+    const host = stageHost;
     if (!host?.setGazeLimits) return;
     host.setGazeLimits({
       headYawMaxDeg: avatarSettings?.gazeYawMaxDeg,
       headPitchMaxDeg: avatarSettings?.gazePitchMaxDeg,
     });
-  }, [avatarHost, avatarSettings?.gazeYawMaxDeg, avatarSettings?.gazePitchMaxDeg]);
+  }, [stageHost, avatarSettings?.gazeYawMaxDeg, avatarSettings?.gazePitchMaxDeg]);
 
   // Click nod: the avatar nods (configurable gesture) when the user clicks the
   // companion. Bound to the live host so a scene/flat swap re-applies it.
   useEffect(() => {
-    const host = avatarHost;
+    const host = stageHost;
     if (!host?.setClickAck) return;
     host.setClickAck({
       enabled: avatarSettings?.clickNod !== false,
       gesture: avatarSettings?.clickNodGesture,
     });
-  }, [avatarHost, avatarSettings?.clickNod, avatarSettings?.clickNodGesture]);
+  }, [stageHost, avatarSettings?.clickNod, avatarSettings?.clickNodGesture]);
 
   // Cycle status gestures while the agent is working (only when the editor is on).
   useAgentStatusMotions({
-    host: avatarHost as CompanionStageHost | null,
+    host: stageHost as CompanionStageHost | null,
     agentStatus: streaming ? { state: 'thinking' } : null,
     motions: statusMotions,
     enabled: debugEnabled.statusMotions,
@@ -418,6 +439,26 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     return () => off();
   }, [launch.contactId]);
 
+  // Single-owner STT election: main broadcasts whether *this* window owns the
+  // microphone. A demoted window stops its own capture (ends the realtime call,
+  // hides the composer) so several companions never capture at once, while all
+  // of them keep rendering their avatars in parallel.
+  useEffect(() => {
+    const off = onBridge<CompanionSttOwner>(bridge, 'onCompanionSttOwner', (message) => {
+      if (message.contactId !== launch.contactId) return;
+      setSttPrimary(message.primary);
+    });
+    return () => off();
+  }, [launch.contactId]);
+
+  // A demotion releases the mic: drop the dictation composer and let
+  // `VoiceLayout` end any live call (it owns the surface), so this window cannot
+  // compete with the new primary while still rendering its avatar.
+  useEffect(() => {
+    if (sttPrimary) return;
+    setDictate(false);
+  }, [sttPrimary]);
+
   const basePresence: ParticipantPresenceV1 | null = useMemo(() => {
     const fromContact = contact ? readPresenceFromProfile(contact) : null;
     const stored = presenceStore.get(launch.contactId) || null;
@@ -475,13 +516,14 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   const agentName = launch.title ?? contact?.name ?? 'Companion';
   const isImageAvatar = resolved?.choice.kind === 'image';
   // The composer is the STT surface when a wake handed dictation here and the
-  // realtime call is not live (voice mode owns the capture).
-  const showComposer = dictate && !voiceStatus.active;
+  // realtime call is not live (voice mode owns the capture). A window that does
+  // not own the mic never shows the composer, so captures never compete.
+  const showComposer = dictate && !voiceStatus.active && sttPrimary;
 
   const debugActive = debugEnabled.motionFeed || debugEnabled.gestureTest || debugEnabled.statusMotions;
 
   return (
-    <MotionFeedProvider host={avatarHost}>
+    <MotionFeedProvider host={stageHost}>
     <div style={shell}>
       <header style={bar}>
         <strong style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -491,6 +533,21 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
           <span aria-hidden>{voiceStatus.active ? '🎙' : '🔈'}</span>
           {voiceStatus.active ? 'voice live' : 'voice mode'}
         </span>
+        {launch.roomId ? (
+          <span style={voiceBadge} title="This room shows every agent together in one shared scene">
+            <span aria-hidden>👥</span>
+            shared scene
+          </span>
+        ) : null}
+        {!sttPrimary ? (
+          <span
+            style={{ ...voiceBadge, borderColor: '#6b5a2a', color: '#ffd479' }}
+            title="Another companion window owns the microphone. Focus it or say its wake word to take over."
+          >
+            <span aria-hidden>🎙</span>
+            mic elsewhere
+          </span>
+        ) : null}
         <span style={{ flex: 1 }} />
         <button
           type="button"
@@ -677,10 +734,30 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
               turns={turns}
               streaming={streaming}
               presence={selectionPresence}
-              // A gallery image selection overrides the 3D canvas with the
-              // profile image; a VRM selection lets VoiceAvatarCanvas render it.
+              // A group/meeting room renders the shared multi-agent scene as the
+              // stage; otherwise a gallery image selection overrides the 3D
+              // canvas with the profile image and a VRM selection lets
+              // VoiceAvatarCanvas render it.
               avatarSlot={
-                isImageAvatar && resolved?.imageUrl ? (
+                launch.roomId && identity && chat && contact ? (
+                  <CompanionRoomStage
+                    roomId={launch.roomId}
+                    // The room roster keys occupants by participant id, which may
+                    // be the agent id or the VE id rather than the contact id.
+                    focusIds={[launch.contactId, launch.agentId, launch.virtualEmployeeId]}
+                    onRoomReady={(room, occupantId) => {
+                      // `CompanionSceneHost` satisfies the stage-host contract at
+                      // runtime (the tool pack only calls these methods); its
+                      // `setMood` narrows `source` to `CharacterActionSource`,
+                      // which is a strict subset of the host's `string`.
+                      setRoomHost(
+                        room && occupantId
+                          ? (createCompanionSceneHost(room, occupantId) as unknown as CompanionStageHost)
+                          : null,
+                      );
+                    }}
+                  />
+                ) : isImageAvatar && resolved?.imageUrl ? (
                   <CachedAvatarImage
                     src={resolved.imageUrl}
                     alt={agentName}
@@ -692,7 +769,14 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
               initialLayout="avatar"
               splitAxis="vertical"
               autoStart={launch.autoStart !== false}
-              sceneMode={debugEnabled.sceneMode}
+              // A group room is a shared scene (below), not the flat walkable
+              // stage; the room viewer owns its own 3D stage.
+              sceneMode={!launch.roomId && debugEnabled.sceneMode}
+              // The wake engine is owned by the main window; the companion never
+              // shows the (always "off") wake chip, and only the elected window
+              // may capture the microphone.
+              hideWakeIndicator
+              captureEnabled={sttPrimary}
               onAvatarHost={(host: CompanionStageHost | null) => setAvatarHost(host)}
               onVoiceState={(state: { active: boolean; muted: boolean; status: string; errorMessage: string | null }) =>
                 setVoiceStatus({ active: state.active, status: state.status })
@@ -753,8 +837,8 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       {debugEnabled.gestureTest ? (
         <GestureTestPanel
           open={gestureTestOpen}
-          getCatalog={() => avatarHost?.listLoadedGestures?.() ?? []}
-          onPlay={(id, loop) => avatarHost?.playGesture?.(id, loop, 'user', 'debug')}
+          getCatalog={() => stageHost?.listLoadedGestures?.() ?? []}
+          onPlay={(id, loop) => stageHost?.playGesture?.(id, loop, 'user', 'debug')}
           onClose={() => setGestureTestOpen(false)}
         />
       ) : null}

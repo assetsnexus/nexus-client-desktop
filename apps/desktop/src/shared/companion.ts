@@ -42,6 +42,16 @@ export type CompanionLaunch = {
   virtualEmployeeId?: string | null;
   title?: string | null;
   avatarUrl?: string | null;
+  /**
+   * Room context, when the companion was popped out of a group/meeting room.
+   *
+   * A room holds several agents; passing the room id makes the companion render
+   * the **shared** scene (`ClusterRoomViewer` with every agent occupant) instead
+   * of a single flattened avatar stage, so all agents of the room appear in one
+   * scene exactly as the main window's Scene tab shows them. Omitted for a 1:1
+   * agent companion (the default single-avatar stage).
+   */
+  roomId?: string | null;
   /** Auto-start the live voice session on open (default true). */
   autoStart?: boolean;
   /** Stage layout; defaults to `fullscreen`. */
@@ -77,6 +87,8 @@ export function buildCompanionHash(launch: CompanionLaunch): string {
   if (title) params.set('title', title);
   const avatarUrl = clean(launch.avatarUrl);
   if (avatarUrl) params.set('avatarUrl', avatarUrl);
+  const roomId = clean(launch.roomId);
+  if (roomId) params.set('roomId', roomId);
   if (launch.autoStart === false) params.set('autoStart', '0');
   if (launch.mode === 'split') params.set('mode', 'split');
   if (launch.alwaysOnTop === true) params.set('onTop', '1');
@@ -102,6 +114,7 @@ export function parseCompanionHash(hash: string): CompanionLaunch | null {
     virtualEmployeeId: clean(params.get('virtualEmployeeId')),
     title: clean(params.get('title')),
     avatarUrl: clean(params.get('avatarUrl')),
+    roomId: clean(params.get('roomId')),
     autoStart: params.get('autoStart') !== '0',
     mode: params.get('mode') === 'split' ? 'split' : 'fullscreen',
     alwaysOnTop: params.get('onTop') === '1',
@@ -137,6 +150,83 @@ export type CompanionPresent = {
   /** Bumped once per wake, so the companion can reset per-activation state. */
   token: number;
 };
+
+/**
+ * Single-owner STT primacy.
+ *
+ * Several companion windows can be open at once, but exactly **one** surface may
+ * own speech-to-text at any moment: the microphone is a single shared resource,
+ * and two windows capturing at the same time produce doubled/competing audio
+ * rather than two working assistants. Main elects one *primary* surface and
+ * pushes this contract to every companion whenever the election changes, so a
+ * demoted window can relinquish the mic (end its realtime call, hide its live
+ * dictation strip) instead of silently competing.
+ *
+ * The wake word is the main switcher: a wake addressed to agent B makes B's
+ * companion primary and demotes whichever window held it before.
+ */
+export type CompanionSttOwner = {
+  /** The companion this message is for (windows ignore someone else's). */
+  contactId: string;
+  /** True when THIS companion currently owns speech-to-text. */
+  primary: boolean;
+  /** Why the election changed, for the (brief) UI explanation. */
+  reason: 'opened' | 'wake' | 'focus' | 'released' | 'closed';
+  /** Bumped on every election change so a repeat wake still re-applies. */
+  token: number;
+};
+
+/**
+ * One election change to broadcast: the newly primary companion (if any) and
+ * the window (if any) being demoted. Kept pure so the switching policy is
+ * unit-testable without Electron.
+ */
+export type SttOwnerElection = {
+  /** The companion that now owns STT, or `null` when nobody does. */
+  primaryContactId: string | null;
+  /** The window that lost STT, or `null` when none was primary. */
+  previousContactId: string | null;
+  /** Why the election changed. */
+  reason: CompanionSttOwner['reason'];
+};
+
+/**
+ * Decide the next STT owner. The microphone is a single shared resource, so at
+ * most one companion may capture at a time; a new primary always displaces the
+ * previous one. Passing `next: null` releases the mic entirely (last companion
+ * closed / the user hung up).
+ *
+ * Returns `null` when nothing changed, so a redundant wake (same window already
+ * primary) pushes no IPC and does not restart a live call.
+ */
+export function electSttOwner(input: {
+  current: string | null;
+  next: string | null;
+  reason: CompanionSttOwner['reason'];
+}): SttOwnerElection | null {
+  const current = clean(input.current);
+  const next = clean(input.next);
+  if (current === next) return null;
+  return {
+    primaryContactId: next,
+    previousContactId: current,
+    reason: input.reason,
+  };
+}
+
+/** Build the per-window ownership message from an election. */
+export function sttOwnerMessage(
+  contactId: string,
+  election: SttOwnerElection,
+  token: number,
+): CompanionSttOwner {
+  return {
+    contactId,
+    primary: election.primaryContactId === contactId,
+    reason: election.reason,
+    token,
+  };
+}
 
 /** Wake dictation lifecycle, mirrored into the companion strip. */
 export type CompanionSessionStatus =

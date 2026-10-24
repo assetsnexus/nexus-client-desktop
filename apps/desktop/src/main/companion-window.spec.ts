@@ -15,8 +15,13 @@ class FakeWindow {
     send: (channel: string, payload: unknown) => {
       this.sent.push({ channel, payload });
     },
+    on: (event: string, listener: () => void) => {
+      (this.contentsListeners[event] ??= []).push(listener);
+    },
   };
   private listeners: Record<string, Array<() => void>> = {};
+  /** Mirrors `BrowserWindow#webContents`' own emitter (e.g. did-finish-load). */
+  private contentsListeners: Record<string, Array<() => void>> = {};
   constructor(public options: Record<string, unknown>) {
     created.push(this);
     this.alwaysOnTop = (options.alwaysOnTop as boolean) ?? false;
@@ -50,6 +55,10 @@ class FakeWindow {
     this.closed = true;
     FakeWindow.destroyCount += 1;
     for (const l of this.listeners['closed'] ?? []) l();
+  }
+  /** Test hook: drive a `webContents` event the manager listens to. */
+  emitContents(event: string) {
+    for (const l of this.contentsListeners[event] ?? []) l();
   }
 }
 
@@ -256,6 +265,94 @@ describe('companion window manager', () => {
   it('raise returns false for an unknown contact', () => {
     const m = manager();
     expect(m.raise('nope')).toBe(false);
+  });
+
+  it('makes the newest companion the single STT owner and demotes the rest', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    expect(m.sttOwnerId()).toBe('ve-1');
+    m.open({ contactId: 've-2' });
+    expect(m.sttOwnerId()).toBe('ve-2');
+    // Both windows were told their role; only ve-2 is primary.
+    const lastFor = (index: number) =>
+      created[index].sent.filter((s) => s.channel === 'nexus:companion:stt-owner').at(-1);
+    expect(lastFor(0)?.payload).toMatchObject({ contactId: 've-1', primary: false });
+    expect(lastFor(1)?.payload).toMatchObject({ contactId: 've-2', primary: true });
+  });
+
+  it('a wake switches STT ownership to the addressed companion', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.open({ contactId: 've-2' });
+    expect(m.sttOwnerId()).toBe('ve-2');
+    m.present('ve-1', {
+      contactId: 've-1',
+      conversationId: null,
+      agentId: null,
+      phrase: 'Aria',
+      dictate: true,
+      token: 1,
+    });
+    expect(m.sttOwnerId()).toBe('ve-1');
+    const owner = created[0].sent.filter((s) => s.channel === 'nexus:companion:stt-owner').at(-1);
+    expect(owner?.payload).toMatchObject({ primary: true, reason: 'wake' });
+  });
+
+  it('hands STT ownership to a survivor when the owner closes', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.open({ contactId: 've-2' });
+    expect(m.sttOwnerId()).toBe('ve-2');
+    m.close('ve-2');
+    expect(m.sttOwnerId()).toBe('ve-1');
+    const survivor = created[0].sent.filter((s) => s.channel === 'nexus:companion:stt-owner').at(-1);
+    expect(survivor?.payload).toMatchObject({ contactId: 've-1', primary: true });
+  });
+
+  it('never re-broadcasts for a redundant switch (no call restart)', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    const before = created[0].sent.filter((s) => s.channel === 'nexus:companion:stt-owner').length;
+    m.present('ve-1', {
+      contactId: 've-1',
+      conversationId: null,
+      agentId: null,
+      phrase: 'Aria',
+      dictate: true,
+      token: 2,
+    });
+    const after = created[0].sent.filter((s) => s.channel === 'nexus:companion:stt-owner').length;
+    expect(after).toBe(before);
+  });
+
+  it('claimStt refocuses ownership and reports unknown contacts', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.open({ contactId: 've-2' });
+    expect(m.claimStt('ve-1')).toBe(true);
+    expect(m.sttOwnerId()).toBe('ve-1');
+    expect(m.claimStt('nope')).toBe(false);
+  });
+
+  it('re-states the election when a window finishes loading late', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.open({ contactId: 've-2' });
+    // A (re)load of the already-open, now-demoted window would leave it believing
+    // it owns the mic — the did-finish-load push must correct it.
+    const sttMessages = () =>
+      created[0].sent.filter((s) => s.channel === 'nexus:companion:stt-owner').length;
+    const before = sttMessages();
+    created[0].emitContents('did-finish-load');
+    expect(sttMessages()).toBeGreaterThan(before);
+    const latest = created[0].sent
+      .filter((s) => s.channel === 'nexus:companion:stt-owner')
+      .at(-1);
+    expect(latest?.payload).toMatchObject({ contactId: 've-1', primary: false });
+    const ownerLatest = created[1].sent
+      .filter((s) => s.channel === 'nexus:companion:stt-owner')
+      .at(-1);
+    expect(ownerLatest?.payload).toMatchObject({ contactId: 've-2', primary: true });
   });
 });
 
