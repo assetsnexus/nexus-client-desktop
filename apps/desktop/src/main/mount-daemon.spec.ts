@@ -136,6 +136,23 @@ describe('mount daemon — materialize', () => {
   });
 });
 
+describe('mount daemon — dispose', () => {
+  it('removes a populated mirror dir without throwing EISDIR', async () => {
+    const sender = fakeSender([{ id: 'f1', name: 'brief.txt', folderId: null, bytes: 'hello' }]);
+    const snapDir = tmpDir('nexus-mount-');
+    const mountpoint = join(tmpDir('nexus-mp-'), 'clients');
+    const d = daemon(sender, join(snapDir, 'sessions.json'), join(snapDir, 'mounts'));
+    await d.addSession({ workspaceId: 'w1', mountpoint, mode: 'read-only' });
+    await d.startSession('m1');
+
+    // The mount root is a *non-empty directory* — exactly what a non-recursive
+    // rmSync rejects with EISDIR on the app's before-quit path.
+    expect(existsSync(join(mountpoint, 'brief.txt'))).toBe(true);
+    expect(() => d.dispose()).not.toThrow();
+    expect(existsSync(mountpoint)).toBe(false);
+  });
+});
+
 describe('mount daemon — native helper contract', () => {
   it('writes a snake_case config + a 0600 token file when a helper is present', async () => {
     const sender = fakeSender([]);
