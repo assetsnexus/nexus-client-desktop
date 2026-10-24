@@ -22,7 +22,7 @@ import type { SceneRoom } from '@nexus/character-kit';
 import type { MeetingPresenceMap } from '@nexus/meetings-core';
 import { bridge, type MeetingRoomRow } from '../bridge.js';
 import { projectRoomSession } from '../meetings/room-session.js';
-import { sceneRoomOccupants } from '../meetings/scene-occupants.js';
+import { resolveFocusOccupantId, sceneRoomOccupants } from '../meetings/scene-occupants.js';
 
 /** Presence projection: room presence rows → the meetings-core presence map. */
 function presenceMap(row: MeetingRoomRow): MeetingPresenceMap {
@@ -123,20 +123,11 @@ export function CompanionRoomStage({
     [roomId],
   );
 
-  // Which occupant belongs to this companion's agent. The room roster keys
-  // occupants by participant id (agent / VE id), so try every known alias and
-  // fall back to the first agent seat.
-  const focusOccupantId = useMemo(() => {
-    if (occupancy.length === 0) return null;
-    const aliases = new Set(
-      (focusIds ?? []).filter((id): id is string => typeof id === 'string' && id.length > 0),
-    );
-    if (aliases.size > 0) {
-      const match = occupancy.find((o) => aliases.has(o.id));
-      if (match) return match.id;
-    }
-    return occupancy[0]?.id ?? null;
-  }, [occupancy, focusIds]);
+  // Which occupant belongs to this companion's agent (see resolver doc).
+  const focusOccupantId = useMemo(
+    () => resolveFocusOccupantId(occupancy, focusIds),
+    [occupancy, focusIds],
+  );
 
   if (error) return <p style={hint}>{error}</p>;
   if (!room || !session) return <p style={hint}>Loading the room scene…</p>;
