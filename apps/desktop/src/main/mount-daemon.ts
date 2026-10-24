@@ -368,9 +368,19 @@ export function createMountDaemon(options: MountDaemonOptions) {
       }
     }
     children.clear();
-    // Best-effort: release any materialized mirror dirs we created.
+    // Best-effort: release any materialized mirror dirs we created. Mirror
+    // sessions are plain directories whose contents we copied, so removal must be
+    // recursive — a non-recursive `rmSync` throws EISDIR on any non-empty mount
+    // and, because this runs from the app's `before-quit`/dispose path, that
+    // rejection surfaced as "A JavaScript error occurred in the main process"
+    // during shutdown. Never let cleanup failure escape here.
     for (const s of readSessions()) {
-      if (s.state === 'mounted') void rmSync(s.mountpoint, { recursive: false, force: true });
+      if (s.state !== 'mounted') continue;
+      try {
+        rmSync(s.mountpoint, { recursive: true, force: true, maxRetries: 3 });
+      } catch {
+        /* best effort — the mount root is re-materialized on next start */
+      }
     }
   }
 

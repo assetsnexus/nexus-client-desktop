@@ -184,11 +184,12 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   const [contact, setContact] = useState<ChatContact | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   /**
    * A conversation link failure (e.g. the agent is not ours to resume) must not
    * blank the stage — the companion still renders the agent's avatar and voice
-   * surface; only the transcript/composer binding is degraded.
+   * surface; only the transcript/composer binding is degraded. The same holds for
+   * a contact-list failure during a region outage: the launch payload already
+   * carries the agent, so the stage mounts and the notice lands in the transcript.
    */
   const [conversationError, setConversationError] = useState<string | null>(null);
   // Compact chat strip by default; expands to the full pane without leaving.
@@ -369,24 +370,39 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       setStreaming(Boolean(state.streaming));
     });
 
+    // The launch already carries everything the stage needs (id, title, avatar),
+    // so a contact-list failure must never blank the window. Build the fallback
+    // contact from the launch and keep the 3D/voice stage mounted; only the
+    // transcript binding degrades. A region outage used to unmount the avatar
+    // stage for *every* companion window, which read as "all avatars are broken".
+    const fallbackContact: ChatContact = {
+      id: launch.contactId,
+      name: launch.title ?? launch.contactId,
+      type: 'agent',
+      virtualEmployeeId: launch.virtualEmployeeId ?? undefined,
+      agentId: launch.agentId ?? undefined,
+      avatarUrl: launch.avatarUrl ?? undefined,
+    };
+    // Mount the stage immediately from the launch payload; the contact list only
+    // enriches it. Waiting on `loadContacts()` meant a slow or failing region left
+    // the window on "Starting companion…" with no avatar for as long as the
+    // request hung — the dominant "avatars are not spawning" symptom.
+    setContact((current) => current ?? fallbackContact);
+
     void (async () => {
       try {
         await nextChat.loadContacts();
         if (cancelled) return;
         const fromState = findChatContact(nextChat.getState().contacts, launch.contactId);
-        setContact(
-          fromState ?? {
-            id: launch.contactId,
-            name: launch.title ?? launch.contactId,
-            type: 'agent',
-            virtualEmployeeId: launch.virtualEmployeeId ?? undefined,
-            agentId: launch.agentId ?? undefined,
-            avatarUrl: launch.avatarUrl ?? undefined,
-          },
-        );
+        setContact(fromState ?? fallbackContact);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'could not load contacts');
-        return;
+        if (cancelled) return;
+        // Degrade instead of unmounting the stage: render the agent from the
+        // launch payload and surface the failure in the transcript pane.
+        setContact(fallbackContact);
+        setConversationError(
+          err instanceof Error ? err.message : 'could not load contacts',
+        );
       }
       if (cancelled) return;
       // Link to the *same* thread the main chat view shows. `openContact` now
@@ -484,7 +500,7 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       if (payload.contactId !== launch.contactId) return;
       setPresent(payload);
       setDictate(payload.dictate);
-      setError(null);
+      setConversationError(null);
     });
     return () => off();
   }, [launch.contactId]);
@@ -765,9 +781,7 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
             height: '100%',
           }}
         >
-          {error ? (
-            <p style={{ padding: 24, color: '#f2a1a1' }}>{error}</p>
-          ) : !identity ? (
+          {!identity ? (
             <p style={{ padding: 24, color: '#9aa7b5' }}>Sign in from the main window.</p>
           ) : !chat || !contact ? (
             <p style={{ padding: 24, color: '#9aa7b5' }}>Starting companion…</p>
