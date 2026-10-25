@@ -142,8 +142,12 @@ export function CompanionComposer({ contactId, getTurnContext }: CompanionCompos
   const canSend = fieldValue.trim().length > 0 && !done;
   const batchSeconds = Math.round(view.batchDurationMs / 100) / 10;
   const canSendAudio = view.batchAvailable && !done;
+  // Recovery path: re-run STT over the retained audio in the cloud. Blocked while
+  // still recording, after the turn is done, or while a redo/send is in flight.
+  const canRetranscribe =
+    view.batchAvailable && !done && !live && !view.retranscribing && !view.sendingAudio;
 
-  const send = (action: 'submit' | 'cancel' | 'sendAudio') => {
+  const send = (action: 'submit' | 'cancel' | 'sendAudio' | 'retranscribe') => {
     // Deliverable 4: attach the live pose for the actions that submit a turn, so
     // the session owner sends "where the avatar stood" with the message. `cancel`
     // discards the turn, so it carries no context.
@@ -204,6 +208,18 @@ export function CompanionComposer({ contactId, getTurnContext }: CompanionCompos
         <button type="button" style={ghost} onClick={() => send('cancel')}>
           {done ? 'Close' : 'Cancel'}
         </button>
+        {view.batchAvailable && !done ? (
+          <button
+            type="button"
+            data-nexus-wake-retranscribe="true"
+            style={ghost}
+            disabled={!canRetranscribe}
+            onClick={() => send('retranscribe')}
+            title="Re-run speech recognition over the recording using region inference"
+          >
+            {view.retranscribing ? 'Re-transcribing…' : 'Re-transcribe'}
+          </button>
+        ) : null}
         {view.batchAvailable && !done ? (
           <button
             type="button"

@@ -341,6 +341,34 @@ describe('createWakeChatRouter', () => {
     expect(h.sent).toEqual([]);
   });
 
+  it('re-transcribes the retained audio and replaces the buffer for review', async () => {
+    const retranscribe = vi.fn(async () => 'cloud heard this');
+    const h = makeRouter({
+      getSettings: () => settings({ reviewBeforeSend: true, submitPhrases: ['submit'] }),
+      dictate: scripted(['bad local words submit']),
+      retranscribe,
+    });
+    await h.router.route(target);
+    await flush();
+    expect(h.router.getSession()?.buffer).toBe('bad local words');
+    await h.router.retranscribe();
+    expect(retranscribe).toHaveBeenCalledTimes(1);
+    expect(h.router.getSession()?.buffer).toBe('cloud heard this');
+    await h.router.submit();
+    expect(h.sent).toEqual([{ contactId: 'contact-1', text: 'cloud heard this' }]);
+  });
+
+  it('is a harmless no-op when retranscribe is not wired up', async () => {
+    const h = makeRouter({
+      getSettings: () => settings({ reviewBeforeSend: true, submitPhrases: ['submit'] }),
+      dictate: scripted(['keep me submit']),
+    });
+    await h.router.route(target);
+    await flush();
+    await expect(h.router.retranscribe()).resolves.toBeUndefined();
+    expect(h.router.getSession()?.buffer).toBe('keep me');
+  });
+
   it('mirrors the parallel audio-batch progress into the session while capturing', async () => {
     vi.useFakeTimers();
     try {

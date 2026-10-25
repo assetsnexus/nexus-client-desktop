@@ -50,6 +50,11 @@ export type WakeChatRouter = {
   setBuffer(text: string): void;
   /** Send the recorded audio as a normal voice message (the widget fallback). */
   submitAudio(): Promise<void>;
+  /**
+   * Re-run STT over the retained audio batch (cloud) and replace the committed
+   * buffer, so a poor on-device transcript can be redone. A no-op when idle.
+   */
+  retranscribe(): Promise<void>;
   /** The inactivity timer fired; apply the unsent policy. */
   timeout(): Promise<void>;
   /** Current session state, or null when idle. */
@@ -88,6 +93,12 @@ export type WakeChatRouterOptions = {
     contactId: string;
     browserContext?: Record<string, unknown>;
   }) => Promise<boolean>;
+  /**
+   * Re-run STT over the retained audio batch (cloud) and return the new text, so
+   * a poor on-device transcript can be redone. Optional; the widget hides
+   * "Re-transcribe" without it.
+   */
+  retranscribe?: () => Promise<string | null>;
   /**
    * Current audio-batch progress for the active turn (ms + chunk count). Called
    * by the capture as VAD segments accumulate, so the widget can show "Audio
@@ -267,6 +278,7 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
                   }),
               }
             : {}),
+          ...(options.retranscribe ? { retranscribe: options.retranscribe } : {}),
           enqueue: options.enqueue,
           now: options.now,
           newId: options.newId,
@@ -300,6 +312,10 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
         stopTimer();
         options.onStateChange?.('idle');
       }
+    },
+    async retranscribe() {
+      if (!current) return;
+      await current.retranscribe();
     },
     cancel() {
       current?.cancel();

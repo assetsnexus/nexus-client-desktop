@@ -186,6 +186,11 @@ export type WakeOverlayProps = {
   engineLabel?: string | null;
   /** Send the recorded audio batch as a normal voice message (cloud/custom STT). */
   onSendAudio?: () => void;
+  /**
+   * Re-run STT over the retained audio batch (cloud) to recover from a poor
+   * on-device transcript; replaces the committed buffer with the new text.
+   */
+  onRetranscribe?: () => void;
 };
 
 export function WakeOverlay({
@@ -201,6 +206,7 @@ export function WakeOverlay({
   onOpenCompanion,
   engineLabel = null,
   onSendAudio,
+  onRetranscribe,
 }: WakeOverlayProps) {
   const wake = useWakeState();
   const live = session.status === 'listening' || session.status === 'transcribing';
@@ -231,6 +237,15 @@ export function WakeOverlay({
   // recorded and while the turn has not finished.
   const batchSeconds = Math.round(session.batchDurationMs / 100) / 10;
   const canSendAudio = Boolean(onSendAudio) && session.batchAvailable && !done;
+  // The recovery path is offered whenever audio was retained and the turn is still
+  // open; it is blocked while a redo (or an audio send) is already in flight.
+  const canRetranscribe =
+    Boolean(onRetranscribe) &&
+    session.batchAvailable &&
+    !done &&
+    !live &&
+    !session.retranscribing &&
+    !session.sendingAudio;
   const showBatch = session.batchAvailable && !done;
 
   const style: CSSProperties = compact
@@ -320,6 +335,18 @@ export function WakeOverlay({
             {session.batchChunks > 1 ? ` · ${session.batchChunks} parts` : ''}
           </span>
           <span style={{ flex: 1 }} />
+          {onRetranscribe ? (
+            <button
+              type="button"
+              data-nexus-wake-retranscribe="true"
+              style={tinyGhostButton}
+              disabled={!canRetranscribe}
+              title="Re-run speech recognition over the recording using region inference"
+              onClick={onRetranscribe}
+            >
+              {session.retranscribing ? 'Re-transcribing…' : 'Re-transcribe'}
+            </button>
+          ) : null}
           {onSendAudio ? (
             <button
               type="button"

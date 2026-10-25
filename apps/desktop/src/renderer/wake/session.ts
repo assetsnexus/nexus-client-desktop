@@ -70,6 +70,12 @@ export type SessionState = {
   batchAvailable: boolean;
   /** True while a "send the audio" submit is in flight. */
   sendingAudio: boolean;
+  /**
+   * True while a "re-transcribe the retained audio in the cloud" request is in
+   * flight (the recovery path for a poor on-device transcript). The committed
+   * buffer is left untouched until the redo resolves.
+   */
+  retranscribing: boolean;
 };
 
 export type SessionOptions = {
@@ -101,6 +107,14 @@ export type SessionOptions = {
    * action. Resolves false when there is nothing to send.
    */
   sendAudio?: () => Promise<boolean>;
+  /**
+   * Re-run STT over the retained audio batch (the *cloud* transcriber) and return
+   * the new text, so a poor on-device result can be redone. Optional: without it
+   * the widget shows no "Re-transcribe" action. Resolves null when there is
+   * nothing to re-transcribe or nothing was recognised (the original buffer is
+   * then left intact).
+   */
+  retranscribe?: () => Promise<string | null>;
   /** Keep an unsubmitted utterance for later review (queue policy). */
   enqueue: (entry: QueuedUtterance) => void;
   onStateChange?: (state: SessionState) => void;
@@ -123,6 +137,13 @@ export type WakeSession = {
    * no-op when the session has no `sendAudio` or no audio was recorded.
    */
   submitAudio(): Promise<void>;
+  /**
+   * Re-run STT over the retained audio batch (cloud) and replace the committed
+   * buffer with the new text, leaving the user able to edit then send. A no-op
+   * when the session has no `retranscribe` or no audio was recorded; a failure
+   * leaves the original buffer intact.
+   */
+  retranscribe(): Promise<void>;
   /** Update the recorded audio-batch progress shown by the widget. */
   setBatch(info: { durationMs: number; chunks: number }): void;
   /**
@@ -156,6 +177,7 @@ export function createWakeSession(options: SessionOptions): WakeSession {
     batchChunks: 0,
     batchAvailable: false,
     sendingAudio: false,
+    retranscribing: false,
   };
   let lastActivityAt = now();
   /** True once the session should stop capturing further bursts. */
@@ -305,6 +327,42 @@ export function createWakeSession(options: SessionOptions): WakeSession {
     }
   }
 
+  /**
+   * Re-run STT over the retained audio batch using the cloud transcriber and
+   * replace the committed buffer with the new text. The recovery path for a poor
+   * local result: the user's audio is kept until the turn is sent/discarded, so
+   * this is always available while the turn is open. A failure (or an empty
+   * result) leaves the original text intact — it never blanks the field.
+   */
+  async function redoTranscript(): Promise<void> {
+    if (sending || state.sendingAudio || state.retranscribing) return;
+    // Never redo while a capture is in flight: the live preview is still
+    // streaming and the turn recorder is still appending, so a fresh transcript
+    // would race both. The recovery path is for a paused/review turn.
+    if (turnInFlight || state.status === 'listening' || state.status === 'transcribing') return;
+    if (!options.retranscribe) return;
+    // A redo is user activity: reset the inactivity clock so the unsent policy
+    // does not fire while the cloud pass is running.
+    lastActivityAt = now();
+    emit({ retranscribing: true, message: null });
+    try {
+      const text = (await options.retranscribe())?.trim();
+      if (!text) {
+        // Nothing recognised: keep what the user already has rather than blanking it.
+        emit({ retranscribing: false, message: 'Could not re-transcribe the audio — keeping the transcript.' });
+        return;
+      }
+      // The batch spans the whole turn, so the fresh cloud text *replaces* the
+      // committed buffer (and the live partial, which the batch already covers).
+      emit({ retranscribing: false, buffer: text, partial: '' });
+    } catch (err) {
+      emit({
+        retranscribing: false,
+        message: err instanceof Error ? err.message : 'Could not re-transcribe the audio.',
+      });
+    }
+  }
+
   return {
     get state() {
       return state;
@@ -327,6 +385,10 @@ export function createWakeSession(options: SessionOptions): WakeSession {
     async submitAudio() {
       if (terminal) return;
       await submitAudio();
+    },
+    async retranscribe() {
+      if (terminal) return;
+      await redoTranscript();
     },
     setBatch(info) {
       if (terminal) return;

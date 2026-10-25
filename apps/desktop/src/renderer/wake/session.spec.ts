@@ -301,4 +301,90 @@ describe('createWakeSession', () => {
     expect(h.last().status).not.toBe('submitted');
     expect(h.last().message).toContain('upload failed');
   });
+
+  it('re-transcribes over the retained audio and replaces the committed buffer', async () => {
+    const retranscribe = vi.fn(async () => 'cloud heard this');
+    const h = makeSession({ reviewBeforeSend: true, retranscribe }, ['bad local words submit']);
+    h.session.start();
+    await flush();
+    expect(h.last().buffer).toBe('bad local words');
+    await h.session.retranscribe();
+    expect(retranscribe).toHaveBeenCalledTimes(1);
+    expect(h.last().buffer).toBe('cloud heard this');
+    expect(h.last().retranscribing).toBe(false);
+    // Still editable then sendable.
+    await h.session.submit();
+    expect(h.sent).toEqual([{ agentId: null, text: 'cloud heard this' }]);
+  });
+
+  it('exposes a pending re-transcribe state while the cloud pass runs', async () => {
+    let resolveText: (v: string | null) => void = () => {};
+    const retranscribe = vi.fn(() => new Promise<string | null>((r) => (resolveText = r)));
+    const h = makeSession({ reviewBeforeSend: true, retranscribe }, ['words submit']);
+    h.session.start();
+    await flush();
+    const pending = h.session.retranscribe();
+    expect(h.last().retranscribing).toBe(true);
+    resolveText('done');
+    await pending;
+    expect(h.last().retranscribing).toBe(false);
+    expect(h.last().buffer).toBe('done');
+  });
+
+  it('keeps the original text when the re-transcribe recognises nothing', async () => {
+    const retranscribe = vi.fn(async () => null);
+    const h = makeSession({ reviewBeforeSend: true, retranscribe }, ['keep me submit']);
+    h.session.start();
+    await flush();
+    await h.session.retranscribe();
+    expect(h.last().buffer).toBe('keep me');
+    expect(h.last().message).toContain('keeping the transcript');
+    expect(h.last().retranscribing).toBe(false);
+  });
+
+  it('keeps the original text when the re-transcribe fails', async () => {
+    const retranscribe = vi.fn(async () => {
+      throw new Error('region unreachable');
+    });
+    const h = makeSession({ reviewBeforeSend: true, retranscribe }, ['keep me submit']);
+    h.session.start();
+    await flush();
+    await h.session.retranscribe();
+    expect(h.last().buffer).toBe('keep me');
+    expect(h.last().message).toContain('region unreachable');
+    expect(h.last().retranscribing).toBe(false);
+  });
+
+  it('is a no-op when the session has no retranscribe hook', async () => {
+    const h = makeSession({ reviewBeforeSend: true }, ['words submit']);
+    h.session.start();
+    await flush();
+    await h.session.retranscribe();
+    expect(h.last().buffer).toBe('words');
+    expect(h.last().retranscribing).toBe(false);
+  });
+
+  it('does not re-transcribe while a capture turn is still in flight', async () => {
+    const retranscribe = vi.fn(async () => 'nope');
+    // A dictation turn that never resolves keeps the session in `listening`.
+    const dictate = vi.fn(
+      (onPartial: (text: string) => void) => new Promise<string | null>(() => onPartial('live')),
+    );
+    const h = makeSession({ reviewBeforeSend: false, dictate, retranscribe }, []);
+    h.session.start();
+    await flush();
+    expect(h.last().status).toBe('listening');
+    await h.session.retranscribe();
+    expect(retranscribe).not.toHaveBeenCalled();
+    expect(h.last().retranscribing).toBe(false);
+  });
+
+  it('ignores a re-transcribe on an already-completed session', async () => {
+    const retranscribe = vi.fn(async () => 'nope');
+    const h = makeSession({ reviewBeforeSend: false, retranscribe }, ['go submit']);
+    h.session.start();
+    await flush();
+    await h.session.retranscribe();
+    expect(retranscribe).not.toHaveBeenCalled();
+  });
 });

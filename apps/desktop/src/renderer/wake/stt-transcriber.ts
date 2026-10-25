@@ -11,13 +11,18 @@
  *    `@nexus/chat-core`'s `transcribeOrNull` (the same path a manual dictation
  *    uses, under the user's own token).
  *
- * `pickTranscriber` prefers the local engine when it reports ready, so a user with
- * a GPU engine installed gets the fast/private path automatically.
+ * `pickWakeTranscriber`/`resolveWakeTranscriber` honour the user's configured
+ * `sttEngine` ({@link WakeEngineSetting}) using the *same* policy the "streaming to
+ * the cloud" banner uses (`dictationTranscribesInCloud`), so the engine that runs
+ * and the surface the user sees can never disagree. When the configured engine is
+ * not ready it falls back to whichever engine *is*, and reports that in the label.
+ * A caller that passes no settings keeps the legacy "local first" preference.
  */
 
 import type { Transcriber } from '@nexus/voice-capture';
 import { rankSttModels } from './transcribe.js';
 import { bridge } from '../bridge.js';
+import { dictationTranscribesInCloud } from '../../shared/wake.js';
 
 /** Phrases to bias the local decoder toward (agent names, aliases). */
 export type PhraseSource = () => string[];
@@ -141,23 +146,111 @@ export function createCloudTranscriber(deps: CloudDeps): Transcriber {
   };
 }
 
+/** The user's configured wake-dictation engine (mirrors `LocalVoiceSettings.sttEngine`). */
+export type WakeEngineSetting = 'cloud' | 'local';
+
 /**
- * Choose the transcriber for a wake dictation: prefer the on-device engine when
- * it is ready, else the region cloud. Returns the local one even when not ready
- * if no cloud model exists, so the caller surfaces a real error rather than
- * silently doing nothing.
+ * The engine capability inputs the picker needs. Kept as plain data (rather than
+ * reading the bridge inside the picker) so the resolution stays unit-testable and
+ * so the *same* value feeds {@link dictationTranscribesInCloud} that decides the
+ * "streaming to the cloud" banner — the engine that runs and the surface the user
+ * sees can never disagree.
+ */
+export type WakeEngineInput = {
+  sttEngine: WakeEngineSetting;
+  /** True when a local STT model is installed. */
+  localSttAvailable: boolean;
+  /** True when a custom (self-hosted) STT endpoint is configured. */
+  customSttEndpoint: boolean;
+};
+
+/** The picker's result: the transcriber plus enough to label the UI honestly. */
+export type WakeTranscriberPick = {
+  transcriber: Transcriber;
+  /** True when the configured engine was not usable and the other one was chosen. */
+  fallback: boolean;
+  /** Human label reflecting the *actual* engine used ("On-device" / "Region inference"). */
+  label: string;
+};
+
+/** The display label for a chosen engine id (matches the existing UI copy). */
+export function engineLabelFor(id: string): string {
+  return id === 'local' ? 'On-device' : 'Region inference';
+}
+
+/**
+ * Resolve the engine a wake dictation should use.
+ *
+ * Precedence is driven by {@link dictationTranscribesInCloud} (the single source
+ * of truth also used for the cloud-streaming banner):
+ *  - `sttEngine: 'cloud'` ⇒ cloud (the user's explicit choice);
+ *  - `sttEngine: 'local'` ⇒ local when a model is installed or a custom endpoint
+ *    is configured, else cloud (an un-installed local engine can only fall back).
+ *
+ * The chosen engine is then checked for readiness; if it is not ready but the
+ * other engine is, the other is used and `fallback` is set (the label reflects
+ * it). "Fallback" also covers the case where the effective engine already
+ * differs from the user's literal `sttEngine` choice (e.g. `local` selected but
+ * no model installed ⇒ cloud). When neither is ready the chosen engine is
+ * returned, so the caller surfaces a real error rather than silently doing
+ * nothing.
+ */
+export async function resolveWakeTranscriber(input: {
+  phrases: PhraseSource;
+  cloud: CloudDeps;
+  /** Omit to keep the legacy "local first, else cloud" preference. */
+  engine?: WakeEngineInput;
+}): Promise<WakeTranscriberPick> {
+  const local = createLocalTranscriber(input.phrases);
+  const cloud = createCloudTranscriber(input.cloud);
+  const ready = async (t: Transcriber): Promise<boolean> =>
+    (await t.status?.().catch(() => ({ ready: false })))?.ready === true;
+
+  if (!input.engine) {
+    // Legacy callers: prefer the on-device engine when it reports ready.
+    if (await ready(local)) return { transcriber: local, fallback: false, label: engineLabelFor('local') };
+    if (await ready(cloud)) return { transcriber: cloud, fallback: false, label: engineLabelFor('cloud') };
+    return { transcriber: local, fallback: false, label: engineLabelFor('local') };
+  }
+
+  // `dictationTranscribesInCloud` is the single source of truth: it folds
+  // "local selected" together with "a local engine actually exists" (model or
+  // custom endpoint), so the engine we attempt matches the streaming banner.
+  const wantsCloud = dictationTranscribesInCloud({
+    sttEngine: input.engine.sttEngine,
+    localSttAvailable: input.engine.localSttAvailable,
+    customSttEndpoint: input.engine.customSttEndpoint,
+  });
+  let chosen = wantsCloud ? cloud : local;
+  // The effective engine already differs from the user's literal choice (local
+  // selected but nothing local installed ⇒ cloud): that is a fallback too.
+  let fallback = chosen.id !== input.engine.sttEngine;
+
+  if (!(await ready(chosen))) {
+    const other = chosen.id === 'local' ? cloud : local;
+    if (await ready(other)) {
+      // The chosen engine was not ready; the other one is. Say so in the label.
+      chosen = other;
+      fallback = true;
+    }
+    // Neither ready: keep `chosen` so a real failure is reported.
+  }
+
+  return {
+    transcriber: chosen,
+    fallback,
+    label: fallback ? `${engineLabelFor(chosen.id)} (fallback)` : engineLabelFor(chosen.id),
+  };
+}
+
+/**
+ * Backward-compatible wrapper: the transcriber only. Prefer
+ * {@link resolveWakeTranscriber} when the caller needs the fallback label.
  */
 export async function pickWakeTranscriber(input: {
   phrases: PhraseSource;
   cloud: CloudDeps;
+  engine?: WakeEngineInput;
 }): Promise<Transcriber> {
-  const local = createLocalTranscriber(input.phrases);
-  const cloud = createCloudTranscriber(input.cloud);
-  const localStatus = await local.status?.().catch(() => ({ ready: false, label: 'On-device' }));
-  if (localStatus?.ready) return local;
-  const cloudStatus = await cloud.status?.().catch(() => ({ ready: false, label: 'Region inference' }));
-  if (cloudStatus?.ready) return cloud;
-  // Nothing ready: return local so a real failure is reported (and no audio is
-  // streamed to the cloud without the user having a working, entitled path).
-  return local;
+  return (await resolveWakeTranscriber(input)).transcriber;
 }

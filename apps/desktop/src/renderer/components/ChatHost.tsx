@@ -30,7 +30,7 @@ import { resolveCompanionLabelOrNull } from '../../shared/companion-label.js';
 import { createWakeChatRouter } from '../wake/router.js';
 import type { SessionState } from '../wake/session.js';
 import { createPreviewUtteranceSource } from '../wake/utterance.js';
-import { pickWakeTranscriber } from '../wake/stt-transcriber.js';
+import { createCloudTranscriber, resolveWakeTranscriber } from '../wake/stt-transcriber.js';
 import { drainWakePreRoll } from '../wake/pre-roll.js';
 import { startWakeTurnRecording } from '../wake/turn-recorder.js';
 import { setWakeCapturing, wakeDirector } from '../wake/director-host.js';
@@ -306,6 +306,11 @@ export function ChatHost({
    */
   const activeRecorderRef = useRef<Awaited<ReturnType<typeof startWakeTurnRecording>> | null>(null);
   const activeBatchBlobRef = useRef<Blob | null>(null);
+  /**
+   * The cloud transcriber for the active turn, kept so "Re-transcribe" can redo
+   * the retained audio regardless of which engine produced the live preview.
+   */
+  const activeCloudTranscriberRef = useRef<Transcriber | null>(null);
   /** The conversation id resolved for the active wake (for the companion payload). */
   const conversationIdRef = useRef<string | null>(null);
 
@@ -340,12 +345,18 @@ export function ChatHost({
 
   /**
    * Capture one wake utterance with dual-mode capture: a live STT preview from
-   * the preferred engine (local GPU first, then region cloud) streamed into the
-   * field, plus a parallel audio batch recorded for the whole turn. The wake-turn
-   * recorder is stored in a ref so `sendAudio` can deliver it as a voice message.
+   * the engine the user configured (honouring `sttEngine`, with a visible
+   * fallback) streamed into the field, plus a parallel audio batch recorded for
+   * the whole turn. The wake-turn recorder is stored in a ref so `sendAudio` can
+   * deliver it as a voice message, and the cloud transcriber is kept so
+   * "Re-transcribe" can redo the retained audio even when the preview was local.
    */
   const captureOneUtterance = useCallback(
     async (chatInstance: NexusChat, clientInstance: unknown, onPartial: (text: string) => void) => {
+      const cloudDeps = {
+        client: clientInstance,
+        listModels: () => chatInstance.listAvailableModels(),
+      };
       // The capture mode is read fresh each turn so a settings change applies to
       // the next wake without a reload. Defaults to `both` (never crash on a
       // settings read failure).
@@ -370,14 +381,27 @@ export function ChatHost({
       const source = createPreviewUtteranceSource({ recordBatch: false });
 
       const phrases = () => wakeDirector().getState().activePhrases;
-      const transcriber: Transcriber = await pickWakeTranscriber({
-        phrases,
-        cloud: {
-          client: clientInstance,
-          listModels: () => chatInstance.listAvailableModels(),
-        },
-      });
-      setWakeEngineLabel(wantLive ? (transcriber.id === 'local' ? 'On-device' : 'Region inference') : null);
+      // Read the engine setting + local availability so the picker follows the
+      // user's configured `sttEngine`. On a read failure fall back to the app's
+      // own default (`cloud`), so an error can never silently pick an on-device
+      // engine the user did not choose.
+      const engine = await bridge
+        .localVoiceGetState()
+        .then((s) => ({
+          sttEngine: s.settings.sttEngine,
+          localSttAvailable: s.models.some(
+            (m) => m.kind === 'stt' && m.installState === 'installed',
+          ),
+          customSttEndpoint: Boolean(s.settings.customSttEndpoint?.baseUrl),
+        }))
+        .catch(() => ({ sttEngine: 'cloud' as const, localSttAvailable: false, customSttEndpoint: false }));
+      const picked = await resolveWakeTranscriber({ phrases, cloud: cloudDeps, engine });
+      const transcriber = picked.transcriber;
+      // Keep the cloud transcriber for the recovery path (re-transcribe), even
+      // when the live preview itself ran on-device.
+      activeCloudTranscriberRef.current = createCloudTranscriber(cloudDeps);
+      // The label reflects the ACTUAL engine used, including a fallback.
+      setWakeEngineLabel(wantLive ? picked.label : null);
 
       // Gate wake detection for the whole capture (listening → transcribing) so
       // the agent's own name spoken inside the instruction is not a new wake.
@@ -504,6 +528,20 @@ export function ChatHost({
         });
         return result.ok;
       },
+      /**
+       * Recovery path: re-run STT over the *retained* audio batch using the cloud
+       * transcriber and return the new text, so a poor on-device result can be
+       * redone. The blob is kept until the turn is sent/discarded, so this works
+       * in review. Returns null when there is no audio (the session then keeps the
+       * existing transcript rather than blanking it).
+       */
+      retranscribe: async () => {
+        const blob = activeBatchBlobRef.current;
+        if (!blob || blob.size === 0) return null;
+        const cloud = activeCloudTranscriberRef.current;
+        if (!cloud) return null;
+        return cloud.transcribe({ blob, phrases: wakeDirector().getState().activePhrases });
+      },
       batchProgress: () =>
         activeRecorderRef.current?.progress() ?? { durationMs: 0, chunks: 0 },
       companionTurnContext,
@@ -608,6 +646,7 @@ export function ChatHost({
       batchDurationMs: wakeSession?.batchDurationMs ?? 0,
       batchAvailable: wakeSession?.batchAvailable ?? false,
       sendingAudio: wakeSession?.sendingAudio ?? false,
+      retranscribing: wakeSession?.retranscribing ?? false,
       message: wakeSession?.message ?? null,
       engineLabel: wakeEngineLabel,
       agentName: wakeTarget.agentName,
@@ -636,6 +675,7 @@ export function ChatHost({
       if (action.action === 'submit') void wakeRouterRef.current?.submit();
       else if (action.action === 'cancel') wakeRouterRef.current?.cancel();
       else if (action.action === 'sendAudio') void wakeRouterRef.current?.submitAudio();
+      else if (action.action === 'retranscribe') void wakeRouterRef.current?.retranscribe();
       else if (action.action === 'edit') wakeRouterRef.current?.setBuffer(action.text ?? '');
     });
     return () => off();
@@ -895,6 +935,7 @@ export function ChatHost({
           onCancel={() => wakeRouterRef.current?.cancel()}
           engineLabel={wakeEngineLabel}
           onSendAudio={() => void wakeRouterRef.current?.submitAudio()}
+          onRetranscribe={() => void wakeRouterRef.current?.retranscribe()}
         />
       ) : null}
     </div>

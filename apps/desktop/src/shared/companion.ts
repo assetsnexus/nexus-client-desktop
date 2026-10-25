@@ -402,6 +402,8 @@ export type CompanionSessionView = {
   batchDurationMs: number;
   batchAvailable: boolean;
   sendingAudio: boolean;
+  /** True while the retained audio is being re-transcribed in the cloud. */
+  retranscribing: boolean;
   /** Non-fatal reason copy (mic unavailable, send failed, …). */
   message: string | null;
   /** Which engine feeds the preview ("On-device" / "Region inference"). */
@@ -413,8 +415,11 @@ export type CompanionSessionView = {
 /** A control the companion strip sends back to the main renderer's session. */
 export type CompanionAction = {
   contactId: string;
-  /** `edit` replaces the buffer; `submit`/`cancel`/`sendAudio` drive the session. */
-  action: 'submit' | 'cancel' | 'sendAudio' | 'edit';
+  /**
+   * `edit` replaces the buffer; `submit`/`cancel`/`sendAudio` drive the session;
+   * `retranscribe` re-runs STT over the retained audio (cloud recovery path).
+   */
+  action: 'submit' | 'cancel' | 'sendAudio' | 'retranscribe' | 'edit';
   /** New text, for `edit` only. */
   text?: string;
   /**

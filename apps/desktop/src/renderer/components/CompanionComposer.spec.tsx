@@ -49,6 +49,7 @@ function view(over: Partial<CompanionSessionView> = {}): CompanionSessionView {
     batchDurationMs: 0,
     batchAvailable: false,
     sendingAudio: false,
+    retranscribing: false,
     message: null,
     engineLabel: null,
     agentName: 'Aria',
@@ -155,5 +156,44 @@ describe('CompanionComposer', () => {
     render();
     emit(view({ buffer: 'text only', preview: 'text only' }));
     expect(button('Send voice')).toBeUndefined();
+  });
+
+  it('relays Re-transcribe over the retained audio', () => {
+    render();
+    emit(
+      view({
+        status: 'review',
+        buffer: 'bad words',
+        preview: 'bad words',
+        batchAvailable: true,
+        batchDurationMs: 1400,
+      }),
+    );
+    const redo = button('Re-transcribe');
+    expect(redo).toBeTruthy();
+    act(() => redo.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(companionAction).toHaveBeenCalledWith({ contactId: 've-1', action: 'retranscribe' });
+  });
+
+  it('blocks Re-transcribe while a redo is in flight', () => {
+    render();
+    emit(
+      view({
+        status: 'review',
+        buffer: 'words',
+        preview: 'words',
+        batchAvailable: true,
+        batchDurationMs: 1400,
+        retranscribing: true,
+      }),
+    );
+    const redo = button('Re-transcribing');
+    expect(redo.disabled).toBe(true);
+  });
+
+  it('hides Re-transcribe when no audio batch exists', () => {
+    render();
+    emit(view({ buffer: 'text only', preview: 'text only' }));
+    expect(button('Re-transcribe')).toBeUndefined();
   });
 });

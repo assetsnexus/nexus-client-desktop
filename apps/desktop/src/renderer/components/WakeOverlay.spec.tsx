@@ -48,6 +48,7 @@ function session(over: Partial<SessionState> = {}): SessionState {
     batchChunks: 0,
     batchAvailable: false,
     sendingAudio: false,
+    retranscribing: false,
     ...over,
     preview,
   };
@@ -202,5 +203,47 @@ describe('WakeOverlay widget', () => {
       /Sending…/.test(b.textContent ?? ''),
     ) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
+  });
+
+  it('offers "re-transcribe" whenever audio was retained and the turn is open', () => {
+    const onRetranscribe = vi.fn();
+    render({
+      session: session({ status: 'review', buffer: 'bad words', batchDurationMs: 1_200, batchAvailable: true }),
+      onRetranscribe,
+    });
+    const redo = container.querySelector('[data-nexus-wake-retranscribe="true"]') as HTMLButtonElement;
+    expect(redo).toBeTruthy();
+    expect(redo.disabled).toBe(false);
+    act(() => redo.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(onRetranscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides re-transcribe until audio exists', () => {
+    render({ session: session({ buffer: 'text only' }), onRetranscribe: () => {} });
+    expect(container.querySelector('[data-nexus-wake-retranscribe="true"]')).toBeNull();
+  });
+
+  it('blocks re-transcribe after the turn is done or while a redo is in flight', () => {
+    render({
+      session: session({ status: 'submitted', buffer: 'sent', batchAvailable: true, batchDurationMs: 900 }),
+      onRetranscribe: () => {},
+    });
+    expect(
+      (container.querySelector('[data-nexus-wake-retranscribe="true"]') as HTMLButtonElement | null),
+    ).toBeNull();
+
+    render({
+      session: session({
+        status: 'review',
+        buffer: 'words',
+        batchAvailable: true,
+        batchDurationMs: 900,
+        retranscribing: true,
+      }),
+      onRetranscribe: () => {},
+    });
+    const redo = container.querySelector('[data-nexus-wake-retranscribe="true"]') as HTMLButtonElement;
+    expect(redo.disabled).toBe(true);
+    expect(redo.textContent).toContain('Re-transcribing');
   });
 });
