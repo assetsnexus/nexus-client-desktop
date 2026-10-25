@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSttPhraseDetector, createSttPhraseHub } from './stt-detector.js';
+import {
+  createSttPhraseDetector,
+  createSttPhraseHub,
+  type SttTranscribeFn,
+} from './stt-detector.js';
 
 /** Feed `frames` of a constant amplitude through the hub/one detector. */
 function feed(
@@ -50,6 +54,74 @@ describe('createSttPhraseHub', () => {
     await Promise.resolve();
 
     expect(onTranscript).toHaveBeenCalledWith('Hey Jarvis open the door');
+  });
+
+  it('suppresses a silence hallucination so it is neither shown nor matched', async () => {
+    // The exact failure mode: on silence the local model emitted filler / stray
+    // letters, which must not reach the caption or fire a wake.
+    for (const garbage of ['ok', 'Ok', 'Q', 'F', 'uh', 'ok, ok, ok']) {
+      const onTranscript = vi.fn();
+      const transcribe = vi.fn(async () => garbage);
+      const hub = createSttPhraseHub({ transcribe, sampleRate: 16_000, onTranscript });
+      const det = createSttPhraseDetector({ phrase: 'ok', hub });
+
+      // A short blip then silence — a noise-driven segment, not real speech.
+      feed((f, at) => det.push({ frame: f, at }), { frames: 12, amplitude: 0.2 });
+      feed((f, at) => det.push({ frame: f, at }), { frames: 30, amplitude: 0, startAt: 1000 });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(onTranscript).not.toHaveBeenCalled();
+      // And even a phrase equal to the garbage must not fire.
+      expect(feed((f, at) => det.push({ frame: f, at }), { frames: 1, amplitude: 0, startAt: 5000 }).fired).toBe(
+        false,
+      );
+    }
+  });
+
+  it('still accepts a genuine one-word wake name', async () => {
+    const onTranscript = vi.fn();
+    const transcribe = vi.fn(async () => 'Xeni');
+    const hub = createSttPhraseHub({ transcribe, sampleRate: 16_000, onTranscript });
+    const det = createSttPhraseDetector({ phrase: 'xeni', hub });
+
+    // A real word's worth of speech (>300 ms min segment) then trailing silence.
+    feed((f, at) => det.push({ frame: f, at }), { frames: 30, amplitude: 0.2 });
+    feed((f, at) => det.push({ frame: f, at }), { frames: 30, amplitude: 0, startAt: 1000 });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onTranscript).toHaveBeenCalledWith('Xeni');
+    expect(feed((f, at) => det.push({ frame: f, at }), { frames: 1, amplitude: 0, startAt: 5000 }).fired).toBe(
+      true,
+    );
+  });
+
+  it('signals an empty segment boundary so the caption can reset', async () => {
+    const onEmptySegment = vi.fn();
+    const onTranscript = vi.fn();
+    // First segment is a genuine utterance, second is a rejected hallucination.
+    const transcribe = vi
+      .fn<SttTranscribeFn>()
+      .mockResolvedValueOnce('Hey Xeni')
+      .mockResolvedValueOnce('ok');
+    const hub = createSttPhraseHub({ transcribe, sampleRate: 16_000, onTranscript, onEmptySegment });
+    const det = createSttPhraseDetector({ phrase: 'xeni', hub });
+
+    // Segment 1: speech + trailing silence.
+    feed((f, at) => det.push({ frame: f, at }), { frames: 30, amplitude: 0.2 });
+    feed((f, at) => det.push({ frame: f, at }), { frames: 30, amplitude: 0, startAt: 1000 });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onTranscript).toHaveBeenCalledWith('Hey Xeni');
+    expect(onEmptySegment).not.toHaveBeenCalled();
+
+    // Segment 2: another speech blip + silence → hallucination → boundary reset.
+    feed((f, at) => det.push({ frame: f, at }), { frames: 30, amplitude: 0.2, startAt: 3000 });
+    feed((f, at) => det.push({ frame: f, at }), { frames: 30, amplitude: 0, startAt: 4000 });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onEmptySegment).toHaveBeenCalledTimes(1);
   });
 
   it('does not report a transcript for silence-only audio', async () => {

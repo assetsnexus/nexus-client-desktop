@@ -365,9 +365,45 @@ describe('createWakeDirector', () => {
     expect(director.getState().transcript).toBeNull();
     director.noteTranscript('  hey jarvis open the door  ');
     expect(director.getState().transcript).toBe('hey jarvis open the door');
-    // Blank updates are ignored so the caption is not wiped by noise.
-    director.noteTranscript('   ');
+    // The caption is "what was just heard": a new utterance replaces the old.
+    director.noteTranscript('a different utterance');
+    expect(director.getState().transcript).toBe('a different utterance');
+  });
+
+  it('clears the caption on an empty segment boundary instead of wedging', async () => {
+    const { director } = makeDirector({
+      settings: settings({ enabled: true, bindings: [binding('a')] }),
+    });
+    await director.start();
+    director.noteTranscript('hey jarvis open the door');
     expect(director.getState().transcript).toBe('hey jarvis open the door');
+    // A segment that produced nothing usable (silence / rejected hallucination)
+    // must reset the caption rather than leave stale words on screen.
+    director.noteTranscript('');
+    expect(director.getState().transcript).toBeNull();
+    director.noteTranscript('   ');
+    expect(director.getState().transcript).toBeNull();
+  });
+
+  it('expires a committed caption after a bounded quiet period (no wedge)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { director, mic } = makeDirector({
+        settings: settings({ enabled: true, bindings: [binding('a')] }),
+      });
+      await director.start();
+      // A real utterance commits the caption (the detectors here never fire, so
+      // this stands in for the STT hub's onTranscript callback).
+      director.noteTranscript('open the door');
+      expect(director.getState().transcript).toBe('open the door');
+      // No voice frames arrive at all — the silent-room case: the caption must
+      // still expire rather than wedge, because nothing else will reset it.
+      vi.advanceTimersByTime(6_000);
+      mic.feed(0);
+      expect(director.getState().transcript).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('clears the transcript when listening stops', async () => {

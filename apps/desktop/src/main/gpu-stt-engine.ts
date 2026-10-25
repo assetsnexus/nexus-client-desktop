@@ -31,6 +31,7 @@ import {
   composeLibraryPath,
   fasterWhisperEnvPlan,
   fasterWhisperModelFor,
+  fasterWhisperServerArgs,
   parseGpuInfo,
   pipInstallArgs,
   requirementSpecs,
@@ -358,26 +359,22 @@ export function createGpuSttEngine(options: GpuSttEngineOptions): GpuSttEngine {
     // status/readiness before spawning, so the cache is warm by spawn time.
     const useGpu = shouldUseGpu(cachedGpu ?? null);
     const computeType = resolveComputeType(computePreference, useGpu);
-    const args = [
-      '-u',
-      script,
-      '--model',
+    // Build the command line from the pure, unit-tested builder so the exact
+    // decode policy — model mapping, hotwords bias, and the no-speech /
+    // VAD gating that stops a silent source from being decoded into phantom
+    // wake names — lives in one place and cannot drift.
+    const args = fasterWhisperServerArgs({
+      scriptPath: script,
       model,
-      '--host',
-      '127.0.0.1',
-      '--port',
-      String(input.port),
-      '--inference-path',
-      '/inference',
-      '--device',
-      useGpu ? 'cuda' : 'cpu',
-      '--compute-type',
+      host: '127.0.0.1',
+      port: input.port,
+      inferencePath: '/inference',
+      device: useGpu ? 'cuda' : 'cpu',
       computeType,
-      '--beam-size',
-      '1',
-    ];
-    if (input.language) args.push('--language', input.language);
-    if (hotwords) args.push('--hotwords', hotwords);
+      beamSize: 1,
+      language: input.language ?? null,
+      hotwords,
+    });
     // CTranslate2 loads CUDA via `dlopen`, and the pip `nvidia-*` wheels live
     // outside the default search path, so prepend them for the child only.
     const env: NodeJS.ProcessEnv = { ...process.env };

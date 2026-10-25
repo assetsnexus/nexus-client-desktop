@@ -127,6 +127,19 @@ type MicGroup = {
  */
 const FIRE_COOLDOWN_MS = 2_500;
 
+/**
+ * How long a committed caption may stay on screen without a *new* segment. The
+ * caption is "what was just heard", so once the input falls quiet the last words
+ * must fade: otherwise a single utterance wedges on screen forever (a silent
+ * room produces no further segment to reset it). Measured from the last frame
+ * that actually carried speech, not from the last transcript, so trailing
+ * silence does not extend it.
+ */
+const CAPTION_IDLE_CLEAR_MS = 5_000;
+
+/** RMS above which a frame counts as "still speaking" for the caption keep-alive. */
+const CAPTION_ACTIVITY_RMS = 0.02;
+
 const DEFAULT_STATE: WakeListenState = {
   enabled: false,
   listening: false,
@@ -189,6 +202,8 @@ export function createWakeDirector(options: WakeDirectorOptions) {
   let level = 0;
   /** Latest on-device transcript, for the live caption. UI-only. */
   let transcript: string | null = null;
+  /** Wall-clock of the last frame that carried speech (for the caption keep-alive). */
+  let lastVoiceAt = 0;
   let running = false;
   /** True while a wake session is capturing the user's speech to an agent. */
   let capturing = false;
@@ -278,7 +293,18 @@ export function createWakeDirector(options: WakeDirectorOptions) {
    */
   function handleGroupFrame(group: MicGroup, frame: Float32Array): void {
     // Update the meter regardless of detections so the bottom bar stays alive.
-    level = smoothLevel(level, frameRms(frame) * 3, smoothing);
+    const rms = frameRms(frame);
+    level = smoothLevel(level, rms * 3, smoothing);
+    const at = Date.now();
+    // Keep-alive + expiry for the committed caption. `lastVoiceAt` tracks *actual*
+    // voice, not just "a frame arrived": a silent room keeps delivering frames, so
+    // using frame arrival would never expire a caption. It is set on voice frames
+    // and, importantly, whenever a fresh transcript commits (a real utterance).
+    if (rms >= CAPTION_ACTIVITY_RMS) lastVoiceAt = at;
+    if (transcript && lastVoiceAt && at - lastVoiceAt > CAPTION_IDLE_CLEAR_MS) {
+      lastVoiceAt = at;
+      emitLocal({ transcript: (transcript = null), level });
+    }
     // While a wake session is capturing the user's speech to an agent, do not run
     // the detectors: saying the agent's own name (or another bound phrase) inside
     // an instruction must not re-trigger a new activation. The level meter keeps
@@ -287,7 +313,6 @@ export function createWakeDirector(options: WakeDirectorOptions) {
       emitLocal({ level });
       return;
     }
-    const at = Date.now();
     for (const entry of group.entries) {
       // Suppress a repeat only while the phrase is inside its short cooldown
       // (a phrase heard on a second microphone must not fire twice), then let it
@@ -487,9 +512,20 @@ export function createWakeDirector(options: WakeDirectorOptions) {
     },
     noteTranscript(text: string) {
       const trimmed = (text ?? '').trim();
-      if (!trimmed) return;
-      // Local-only UI update: no IPC chatter for every recognized segment.
-      emitLocal({ transcript: trimmed });
+      // Keep the local mirror in sync with the emitted state: `refreshDerived`
+      // rebuilds from these locals, so a divergence would let a later IPC-level
+      // emit revert the caption to a stale value.
+      transcript = trimmed || null;
+      // A committed utterance restarts the keep-alive clock, so the caption lives
+      // a full window from the words themselves even if the mic goes quiet
+      // mid-sentence.
+      if (transcript) lastVoiceAt = Date.now();
+      // Local-only UI update, no IPC chatter for every recognized segment. An
+      // empty update *clears* the caption: at a segment boundary where nothing
+      // usable was heard (silence, or a rejected hallucination) the caption is
+      // "what was just heard", so a fresh empty segment must reset it rather than
+      // leave stale words on screen.
+      emitLocal({ transcript });
     },
     setCapturing(active: boolean) {
       if (capturing === active) return;

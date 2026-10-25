@@ -25,7 +25,11 @@
  * Pure of Electron/React so the segmentation + match policy is unit-testable.
  */
 
-import { createSegmenter, transcriptAddressesPhrase } from '@nexus/voice-capture';
+import {
+  createSegmenter,
+  isPlausibleSpeechTranscript,
+  transcriptAddressesPhrase,
+} from '@nexus/voice-capture';
 
 export type SttTranscribeFn = (pcm: Float32Array, sampleRate: number) => Promise<string | null>;
 
@@ -53,8 +57,20 @@ export type SttPhraseHubOptions = {
   cooldownMs?: number;
   /** Live transcript of an accepted segment, for UI feedback (optional). */
   onTranscript?: (text: string) => void;
+  /**
+   * A finalized segment produced no usable text (silence, or a transcript the
+   * no-speech gate rejected). Lets the UI clear a stale caption at the segment
+   * boundary instead of letting old words linger — the caption is "what was just
+   * heard", so a fresh empty segment must reset it (optional).
+   */
+  onEmptySegment?: () => void;
   /** A transcription failure (non-fatal), for logging (optional). */
   onError?: (err: unknown) => void;
+  /**
+   * Allow single-word utterances (default true). A wake phrase is often one
+   * word ("Xeni"), so the hub keeps them unless the caller opts out.
+   */
+  allowSingleWord?: boolean;
 };
 
 export type SttPhraseHub = {
@@ -87,8 +103,12 @@ type Entry = {
 export function createSttPhraseHub(options: SttPhraseHubOptions): SttPhraseHub {
   const cooldownMs = options.cooldownMs ?? 1_500;
   const entries: Entry[] = [];
-  /** A finalized segment waiting to be transcribed (kept tiny + serial). */
-  const queue: Float32Array[] = [];
+  /**
+   * A finalized segment waiting to be transcribed (kept tiny + serial). The
+   * segment's speech duration rides along so the no-speech gate can tell a real
+   * short utterance from noise the model rendered a few words from.
+   */
+  const queue: Array<{ pcm: Float32Array; speechMs: number }> = [];
   let inFlight = false;
   /** De-dup so the same frame fed to many detectors is segmented once. */
   let lastFrame: Float32Array | null = null;
@@ -107,7 +127,7 @@ export function createSttPhraseHub(options: SttPhraseHubOptions): SttPhraseHub {
     minSpeechMs: options.minSpeechMs,
     maxSegmentMs: options.maxSegmentMs,
     onSegment: (segment) => {
-      queue.push(segment.pcm);
+      queue.push({ pcm: segment.pcm, speechMs: segment.speechMs });
       void drain();
     },
   });
@@ -131,14 +151,30 @@ export function createSttPhraseHub(options: SttPhraseHubOptions): SttPhraseHub {
     inFlight = true;
     try {
       while (queue.length > 0) {
-        const pcm = queue.shift()!;
+        const { pcm, speechMs } = queue.shift()!;
         let transcript: string | null = null;
         try {
           transcript = await options.transcribe(pcm, currentRate);
         } catch (err) {
           options.onError?.(err);
         }
-        if (transcript) dispatch(transcript);
+        // Engine-agnostic no-speech gate: a local engine may be whisper.cpp (no
+        // `no_speech_threshold`) or an older spawn, so the wake path must still
+        // refuse filler/single-letter/repetition decodes of silence — otherwise a
+        // phantom transcript is (a) shown as if heard and (b) matched as a wake.
+        const usable =
+          transcript !== null &&
+          isPlausibleSpeechTranscript(transcript, {
+            speechMs,
+            allowSingleWord: options.allowSingleWord ?? true,
+          });
+        if (!usable || transcript === null) {
+          // A segment that yielded nothing is still a boundary: clear any stale
+          // caption so it never lingers as if it were just heard.
+          options.onEmptySegment?.();
+          continue;
+        }
+        dispatch(transcript);
       }
     } finally {
       inFlight = false;

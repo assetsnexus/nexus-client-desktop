@@ -231,7 +231,46 @@ describe('fasterWhisperServerArgs', () => {
       'en',
       '--hotwords',
       'Nox, Razail',
+      '--no-speech-threshold',
+      '0.4',
+      '--temperature',
+      '0',
     ]);
+  });
+
+  it('always passes the anti-hallucination decode policy', () => {
+    const args = fasterWhisperServerArgs({
+      scriptPath: 's.py',
+      model: 'tiny',
+      host: '127.0.0.1',
+      port: 9000,
+      inferencePath: '/inference',
+      device: 'cpu',
+      computeType: 'int8',
+      beamSize: 1,
+    });
+    // Silence must not be decoded into filler/phantom wake names: gate no-speech
+    // and keep the temperature deterministic. VAD filtering is on by default.
+    expect(args[args.indexOf('--no-speech-threshold') + 1]).toBe('0.4');
+    expect(args[args.indexOf('--temperature') + 1]).toBe('0');
+    expect(args).not.toContain('--no-vad-filter');
+  });
+
+  it('honours an explicit no-speech threshold and can disable the VAD filter', () => {
+    const args = fasterWhisperServerArgs({
+      scriptPath: 's.py',
+      model: 'tiny',
+      host: '127.0.0.1',
+      port: 9000,
+      inferencePath: '/inference',
+      device: 'cpu',
+      computeType: 'int8',
+      beamSize: 1,
+      noSpeechThreshold: 0.35,
+      vadFilter: false,
+    });
+    expect(args[args.indexOf('--no-speech-threshold') + 1]).toBe('0.35');
+    expect(args).toContain('--no-vad-filter');
   });
 
   it('omits the optional hotwords/language when absent', () => {

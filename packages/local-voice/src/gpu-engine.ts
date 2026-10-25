@@ -266,6 +266,16 @@ export function composeLibraryPath(
  */
 export const FASTER_WHISPER_DEFAULT_PORT = 18085;
 
+/**
+ * Default no-speech gate for the wake path. faster-whisper's own default (0.6)
+ * is too permissive once the decoder is biased toward the armed wake phrases:
+ * on silence it still produced a phantom name (`Vylaar.`) that would fire a
+ * wake. Real speech scores ~0.01 and silence >0.4, so 0.4 clears the
+ * hallucination with a wide margin. Kept here (not only in the Python server) so
+ * the exact spawn command line is unit-tested.
+ */
+export const DEFAULT_NO_SPEECH_THRESHOLD = 0.4;
+
 /** How the server is launched (matches whisper.cpp's `/inference` contract). */
 export type FasterWhisperServerArgsInput = {
   /** Path to the shipped server script (`.py`). */
@@ -288,6 +298,19 @@ export type FasterWhisperServerArgsInput = {
    */
   hotwords?: string | null;
   language?: string | null;
+  /**
+   * No-speech gate for the decoder (faster-whisper `no_speech_threshold`).
+   * faster-whisper defaults to 0.6, which is too permissive for the wake path:
+   * with hotwords bias, silence still decoded into a phantom agent name (a real
+   * room/monitor source that goes silent produces exactly this). Real speech
+   * scores ~0.01, silence >0.4, so 0.4 drops the hallucination without touching
+   * real utterances. Omitted = the server default (see `local-stt-server.py`).
+   */
+  noSpeechThreshold?: number;
+  /** Skip the decoder's temperature-fallback sampling (default: 0, deterministic). */
+  temperature?: number;
+  /** Enable the silero VAD filter (default: true) for the wake path. */
+  vadFilter?: boolean;
 };
 
 /**
@@ -317,6 +340,15 @@ export function fasterWhisperServerArgs(input: FasterWhisperServerArgsInput): st
   // `--hotwords` (not `--initial-prompt`): biases toward the agent names without
   // priming the decoder's transcript context. See `FasterWhisperServerArgsInput`.
   if (input.hotwords) args.push('--hotwords', input.hotwords);
+  // No-speech gating for the wake path. Passed explicitly (not left to the
+  // Python default) so the anti-hallucination policy is visible in the exact
+  // command line and covered by `fasterWhisperServerArgs` unit tests.
+  const noSpeech = input.noSpeechThreshold ?? DEFAULT_NO_SPEECH_THRESHOLD;
+  args.push('--no-speech-threshold', String(noSpeech));
+  args.push('--temperature', String(input.temperature ?? 0));
+  // Never let a silent span reach the decoder: silero VAD drops it. On by default
+  // for the wake path; a caller must opt out explicitly.
+  if ((input.vadFilter ?? true) === false) args.push('--no-vad-filter');
   return args;
 }
 

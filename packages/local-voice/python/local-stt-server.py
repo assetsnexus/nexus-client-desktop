@@ -151,8 +151,20 @@ class _Engine:
             language=self.args.language or None,
             beam_size=self.args.beam_size,
             hotwords=hotwords,
-            vad_filter=False,
+            # No-speech gating is THE defence against whisper's classic
+            # hallucination: on silence (or a near-silent room/monitor source) a
+            # tiny model confidently emits filler ("ok", "Ok"), single letters
+            # ("Q", "F"), or — worse, with hotwords bias — phantom wake names
+            # ("Vylaar."), which would then spuriously fire a wake. `no_speech`
+            # is ~0.01 for real speech and >0.4 for silence, so the 0.4 gate
+            # drops hallucinated segments while leaving real speech untouched.
+            # A deterministic temperature (no fallback sampling) and the VAD
+            # filter remove the remaining noise-driven loop/stray-token decodes.
+            vad_filter=self.args.vad_filter,
             condition_on_previous_text=False,
+            no_speech_threshold=self.args.no_speech_threshold,
+            log_prob_threshold=self.args.log_prob_threshold,
+            temperature=self.args.temperature,
         )
         return "".join(seg.text for seg in segments).strip()
 
@@ -256,6 +268,18 @@ def main(argv=None) -> int:
     # compatibility with older spawns, but both feed the same hotwords path.
     parser.add_argument("--hotwords", default="")
     parser.add_argument("--initial-prompt", dest="hotwords", default="")
+    # No-speech / hallucination gating. faster-whisper's own default
+    # `no_speech_threshold` is 0.6, which is too permissive for a *wake* path
+    # that is biased toward the armed phrases: silence scored 0.46-0.58 and was
+    # still decoded into a phantom wake name. `--vad-filter` is accepted as
+    # `store_true`/`--no-vad-filter` so a caller can turn it off, but it defaults
+    # on (silero VAD drops the silent spans outright).
+    parser.add_argument("--no-speech-threshold", type=float, default=0.4)
+    parser.add_argument("--log-prob-threshold", type=float, default=-1.0)
+    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--vad-filter", dest="vad_filter", action="store_true")
+    parser.add_argument("--no-vad-filter", dest="vad_filter", action="store_false")
+    parser.set_defaults(vad_filter=True)
     args = parser.parse_args(argv)
 
     engine = _Engine(args)

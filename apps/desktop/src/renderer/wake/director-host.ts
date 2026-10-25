@@ -65,6 +65,9 @@ function getSttHub(sampleRate: number, groupKey: string): SttPhraseHub {
         }),
       // Stream what was actually heard into the bottom bar (UI-only).
       onTranscript: (text) => singleton?.noteTranscript(text),
+      // A segment that produced nothing usable is still a boundary: clear the
+      // caption so a stale transcript cannot wedge on screen.
+      onEmptySegment: () => singleton?.noteTranscript(''),
     });
     sttHubs.set(groupKey, hub);
   }
