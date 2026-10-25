@@ -172,6 +172,51 @@ describe('createGlobalCursorTracker', () => {
     expect(a.sent[0]).toMatchObject({ x: 0.5, y: 0.5 });
   });
 
+  it('carries both bounds and display so the renderer needs no second source', () => {
+    // The companion maps the cursor into a single window-anchored gaze frame that
+    // continues to the screen edge. Both rectangles must ride the *sample* — if
+    // the renderer had to ask for them separately the two frames could disagree
+    // (the root of the "one works, the other does not" flap).
+    const a = makeWindow({
+      getBounds: () => ({ x: 2200, y: 300, width: 560, height: 740 }),
+    });
+    const tracker = createGlobalCursorTracker({
+      listWindows: () => [{ contactId: 'contact-a', window: a.window }],
+      getCursorPoint: () => ({ x: 2600, y: 900 }),
+      getDisplayWorkArea: () => ({ x: 0, y: 0, width: 3000, height: 1400 }),
+    });
+    tracker.sampleOnce();
+    expect(a.sent[0]).toMatchObject({
+      bounds: { x: 2200, y: 300, width: 560, height: 740 },
+      display: { x: 0, y: 0, width: 3000, height: 1400 },
+      withinWindow: true,
+    });
+  });
+
+  it('still emits when focus flips so the renderer sees the transition', () => {
+    // Focus must no longer choose the gaze frame, but the flag is still reported
+    // (a companion may surface it); an OS-focus change alone is worth a push.
+    const sent: Array<{ focused?: boolean }> = [];
+    let focused = true;
+    const tracked = {
+      isDestroyed: () => false,
+      isFocused: () => focused,
+      getBounds: () => ({ x: 0, y: 0, width: 400, height: 300 }),
+      webContents: { send: (_ch: string, payload: unknown) => sent.push(payload as never) },
+    } as never;
+    const tracker = createGlobalCursorTracker({
+      listWindows: () => [{ contactId: 'contact-a', window: tracked }],
+      getCursorPoint: () => ({ x: 200, y: 150 }),
+      getDisplayWorkArea: () => ({ x: 0, y: 0, width: 400, height: 300 }),
+    });
+    tracker.sampleOnce();
+    focused = false;
+    tracker.sampleOnce();
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({ focused: true });
+    expect(sent[1]).toMatchObject({ focused: false });
+  });
+
   it('starts and stops the shared timer exactly once', () => {
     let started = 0;
     let cleared = 0;

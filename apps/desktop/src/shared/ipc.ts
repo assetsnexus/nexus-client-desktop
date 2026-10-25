@@ -210,15 +210,15 @@ export const DEFAULT_COMPANION_DEBUG_SETTINGS: CompanionDebugSettings = {
  *
  * `x`/`y` are relative to the **display work area the companion sits on** —
  * `0` at the left/top edge of the screen, `1` at the right/bottom. This is a
- * stable, monitor-relative frame; the renderer re-normalizes into whichever gaze
- * frame is active (window box while the cursor is inside, whole screen once it
- * leaves — see `companionCursorToGazeNdc`).
+ * stable, monitor-relative frame; the renderer re-normalizes it into a single
+ * **window-anchored** gaze frame (`companionCursorToGazeNdc`) that continues to
+ * the screen edge, so the aim is a pure function of the cursor position.
  *
  * `bounds` (window) and `display` (work area) are carried so the renderer can
- * build both frames without another IPC round-trip. `focused` and `withinWindow`
- * let it choose between them: inside the webview the gaze maps across the window
- * box, so head motion stays lively; once the cursor leaves (or the window is
- * unfocused) it maps across the whole screen.
+ * build that frame without another IPC round-trip. `focused` and `withinWindow`
+ * are reported for the host's information; they must **not** select a different
+ * gaze frame (an earlier design did, which is what made head tracking flap
+ * between two aims depending on OS focus).
  */
 export type CompanionCursorCoords = {
   contactId: string;
@@ -226,9 +226,9 @@ export type CompanionCursorCoords = {
   y: number;
   /** Cursor lies outside the display work area. */
   outside: boolean;
-  /** Cursor lies inside the companion window bounds. */
+  /** Cursor lies inside the companion window bounds (reported, not frame-selecting). */
   withinWindow: boolean;
-  /** Companion window currently has OS focus. */
+  /** Companion window currently has OS focus (reported, not frame-selecting). */
   focused: boolean;
   screenX: number;
   screenY: number;
@@ -1643,14 +1643,15 @@ export type NexusBridge = {
   /**
    * Subscribe to OS-global cursor coordinates for the companion window.
    *
-   * The main process samples `screen.getCursorScreenPoint()` while any companion
-   * is open and pushes normalized coordinates relative to *that* companion's
-   * bounds, so the avatar's head/eye gaze follows the pointer anywhere on the
-   * display — not only while it is inside the window. Returns an unsubscribe fn.
+   * The main process samples the OS cursor (native X11 pointer when available)
+   * while any companion is open and pushes a sample normalized to the **display
+   * work area**, together with the window bounds, so the avatar's head/eye gaze
+   * follows the pointer anywhere on the display — not only while it is inside the
+   * window. Returns an unsubscribe fn.
    *
-   * Normalized space: `x = 0` at the window's left edge, `1` at the right;
-   * `y = 0` at the top, `1` at the bottom. Values outside `[0,1]` mean the
-   * cursor is off to that side (the renderer widens the gaze cone accordingly).
+   * The renderer maps every sample through one continuous window-anchored gaze
+   * frame (`companionCursorToGazeNdc`); `focused` / `withinWindow` are reported
+   * but never select a different frame.
    */
   onCompanionGlobalCursor(
     listener: (coords: CompanionCursorCoords) => void,

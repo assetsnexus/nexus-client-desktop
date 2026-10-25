@@ -38,7 +38,7 @@ function coords(
   };
 }
 
-describe('companionCursorToNdc — focused window-anchored frame', () => {
+describe('companionCursorToNdc — window-anchored frame', () => {
   it('is neutral over the window center', () => {
     const ndc = companionCursorToNdc(coords(CENTER_X, CENTER_Y));
     expect(ndc.x).toBeCloseTo(0, 3);
@@ -79,6 +79,13 @@ describe('companionCursorToNdc — focused window-anchored frame', () => {
     }
   });
 
+  it('maps the screen edges to ±1 so the clamped gaze sweeps its full range', () => {
+    expect(companionCursorToNdc(coords(0, CENTER_Y)).x).toBeCloseTo(-1, 2);
+    expect(companionCursorToNdc(coords(display.width, CENTER_Y)).x).toBeCloseTo(1, 2);
+    expect(companionCursorToNdc(coords(CENTER_X, 0)).y).toBeCloseTo(1, 2);
+    expect(companionCursorToNdc(coords(CENTER_X, display.height)).y).toBeCloseTo(-1, 2);
+  });
+
   it('never exceeds the ±1 clamp for far off-screen cursors', () => {
     const ndc = companionCursorToNdc(coords(-5000, -5000));
     expect(ndc.x).toBeGreaterThanOrEqual(-1);
@@ -86,38 +93,43 @@ describe('companionCursorToNdc — focused window-anchored frame', () => {
   });
 });
 
-describe('companionCursorToNdc — whole-display frame (unfocused)', () => {
-  it('uses the coarse whole-screen scale when the window is unfocused', () => {
-    // A central window: its half-width is much smaller than the distance to the
-    // screen edges, so the screen scale is clearly gentler per pixel.
+describe('companionCursorToNdc — one writer, focus-independent frame', () => {
+  /**
+   * The regression this guards: the old code switched between a window-anchored
+   * frame when the companion had OS focus and a whole-display frame when it did
+   * not. Focus flips every time the user clicks inside vs outside, so the *same*
+   * cursor position produced two different aims and the head snapped/flapped
+   * ("sometimes one works, other times the other"). The aim must now be a pure
+   * function of the cursor position, never of focus.
+   */
+  it('ignores the OS-focus flag entirely', () => {
+    for (const x of [0, 500, 1500, 2400, 2760, 3000]) {
+      for (const y of [0, 400, 900, 1400]) {
+        const focused = companionCursorToNdc(coords(x, y, { focused: true }));
+        const unfocused = companionCursorToNdc(coords(x, y, { focused: false }));
+        expect(unfocused).toEqual(focused);
+      }
+    }
+  });
+
+  it('ignores withinWindow / outside flags (window anchor is what matters)', () => {
+    const inside = coords(CENTER_X + 60, CENTER_Y, { withinWindow: true, outside: false });
+    const relabelled = {
+      ...inside,
+      withinWindow: false,
+      outside: true,
+    } as CompanionCursorCoords;
+    expect(companionCursorToNdc(relabelled)).toEqual(companionCursorToNdc(inside));
+  });
+
+  it('keeps a small in-window move livelier than the same move on a central window', () => {
+    // A central window must still reach ±0.5 at its own edges (lively in-window),
+    // while a pixel offset near the screen edge has already grown past half-range.
     const central = { x: 1200, y: 600, width: 560, height: 740 };
     const cx = central.x + central.width / 2;
     const cy = central.y + central.height / 2;
-    const at = (extra: Partial<CompanionCursorCoords>) =>
-      coords(cx + 60, cy, { bounds: central, ...extra });
-    const focusedMove = companionCursorToNdc(at({ focused: true, withinWindow: true }));
-    const unfocusedMove = companionCursorToNdc(at({ focused: false }));
-    expect(Math.abs(unfocusedMove.x)).toBeLessThan(Math.abs(focusedMove.x));
-  });
-
-  it('maps screen edges to ±1 so the clamped gaze sweeps its full range', () => {
-    expect(companionCursorToNdc(coords(0, CENTER_Y, { focused: false })).x).toBeCloseTo(-1, 2);
-    expect(
-      companionCursorToNdc(coords(display.width, CENTER_Y, { focused: false })).x,
-    ).toBeCloseTo(1, 2);
-    expect(companionCursorToNdc(coords(CENTER_X, 0, { focused: false })).y).toBeCloseTo(1, 2);
-    expect(
-      companionCursorToNdc(coords(CENTER_X, display.height, { focused: false })).y,
-    ).toBeCloseTo(-1, 2);
-  });
-
-  it('is monotonic across the screen', () => {
-    const xs = [0, 600, 1200, 1800, 2400, 3000].map(
-      (x) => companionCursorToNdc(coords(x, CENTER_Y, { focused: false })).x,
-    );
-    for (let i = 1; i < xs.length; i += 1) {
-      expect(xs[i]!).toBeGreaterThan(xs[i - 1]!);
-    }
+    const atWindowEdge = companionCursorToNdc(coords(cx + 280, cy, { bounds: central }));
+    expect(Math.abs(atWindowEdge.x)).toBeCloseTo(0.5, 2);
   });
 });
 
