@@ -2,10 +2,15 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   buildAvatarChoices,
   createCompanionAvatarStore,
+  cyclePictureIndex,
   isAvatarModelKind,
   isPictureAssetKind,
   latestTranscriptPreview,
+  parseProfilePictures,
+  pictureChoices,
   resolveAvatarSelection,
+  resolveCarouselChoice,
+  resolveCompanionStage,
   selectionToPresence,
   type CompanionAvatarAsset,
 } from './avatar-gallery.js';
@@ -188,6 +193,163 @@ describe('companion avatar gallery — pref store', () => {
     expect(store.get('ve-2')).toBeNull();
     localStorage.setItem('test:companion-avatar:v1:ve-3', '{"mode":"nope"}');
     expect(store.get('ve-3')).toBeNull();
+  });
+});
+
+describe('latestTranscriptPreview', () => {
+  it('returns the newest non-empty turn, trimmed and truncated', () => {
+    expect(latestTranscriptPreview([{ role: 'user', text: '  hi   there ' }])).toBe('hi there');
+    expect(latestTranscriptPreview([{ role: 'user', text: 'old' }, { role: 'assistant', text: 'new' }])).toBe('new');
+    expect(latestTranscriptPreview([{ role: 'assistant', text: 'x'.repeat(200) }], 20)).toHaveLength(20);
+    expect(latestTranscriptPreview([{ role: 'user', text: '   ' }])).toBe('');
+    expect(latestTranscriptPreview([])).toBe('');
+  });
+});
+
+describe('profile picture parsing (multi-picture region field)', () => {
+  it('keeps fetchable urls and drops inline/empty/duplicate entries', () => {
+    const parsed = parseProfilePictures([
+      { url: 'https://cdn/a.png', primary: true, face: 'happy', label: 'A' },
+      { url: 'blob:https://x/abc' },
+      { url: 'data:image/png;base64,AAAA' },
+      { url: '   ' },
+      { url: 'https://cdn/a.png' },
+      { url: '/public-files/b.png', addedAt: '2026-01-01T00:00:00.000Z' },
+      'nope',
+      null,
+    ]);
+    expect(parsed.map((p) => p.url)).toEqual(['https://cdn/a.png', '/public-files/b.png']);
+    expect(parsed[0]).toMatchObject({ primary: true, face: 'happy', label: 'A' });
+    expect(parsed[1]).toMatchObject({ addedAt: '2026-01-01T00:00:00.000Z' });
+  });
+
+  it('returns an empty list for a non-array / missing field', () => {
+    expect(parseProfilePictures(undefined)).toEqual([]);
+    expect(parseProfilePictures(null)).toEqual([]);
+    expect(parseProfilePictures('https://cdn/a.png')).toEqual([]);
+  });
+});
+
+describe('multi-picture carousel choices', () => {
+  const multi = {
+    id: 've-1',
+    name: 'Aria',
+    avatarUrl: 'https://cdn/primary.png',
+    profilePictures: [
+      { url: 'https://cdn/primary.png', primary: true },
+      { url: 'https://cdn/alt.png', face: 'wink', label: 'Alt' },
+    ],
+  };
+
+  it('expands profilePictures into ordered image tiles with the primary first', () => {
+    const choices = buildAvatarChoices({ contact: multi });
+    expect(choices.map((c) => c.id)).toEqual(['image:ve-1:0', 'image:ve-1:1']);
+    expect(choices.map((c) => c.url)).toEqual(['https://cdn/primary.png', 'https://cdn/alt.png']);
+    expect(choices.map((c) => c.pictureIndex)).toEqual([0, 1]);
+    expect(choices[1]).toMatchObject({ pictureFace: 'wink', label: 'Alt' });
+  });
+
+  it('does not add a duplicate canonical tile when pictures exist', () => {
+    const choices = buildAvatarChoices({ contact: multi });
+    expect(choices.some((c) => c.id === 'image:ve-1')).toBe(false);
+  });
+
+  it('keeps the single canonical tile when profilePictures is absent', () => {
+    const choices = buildAvatarChoices({ contact: { id: 've-1', name: 'Aria', avatarUrl: 'https://cdn/a.png' } });
+    expect(choices).toEqual([
+      { id: 'image:ve-1', kind: 'image', label: 'Profile image', url: 'https://cdn/a.png' },
+    ]);
+  });
+
+  it('pictureChoices only returns the agent own pictures, not catalog portraits', () => {
+    const choices = buildAvatarChoices({
+      contact: multi,
+      assets: [asset({ id: 'portrait', kind: 'picture', url: 'https://cdn/portrait.png' })],
+    });
+    expect(pictureChoices(choices).map((c) => c.pictureIndex)).toEqual([0, 1]);
+  });
+
+  it('resolveCarouselChoice clamps out-of-range indices and returns null for <2 pictures', () => {
+    const choices = buildAvatarChoices({ contact: multi });
+    expect(resolveCarouselChoice(choices, 1)?.pictureIndex).toBe(1);
+    expect(resolveCarouselChoice(choices, 9)?.pictureIndex).toBe(0);
+    expect(resolveCarouselChoice(choices, null)?.pictureIndex).toBe(0);
+    const single = buildAvatarChoices({ contact: { id: 've-1', name: 'Aria', avatarUrl: 'https://cdn/a.png' } });
+    expect(resolveCarouselChoice(single, 0)).toBeNull();
+  });
+
+  it('cyclePictureIndex wraps forward and backward', () => {
+    const choices = buildAvatarChoices({ contact: multi });
+    expect(cyclePictureIndex(choices, 0)).toBe(1);
+    expect(cyclePictureIndex(choices, 1)).toBe(0);
+    expect(cyclePictureIndex(choices, 0, -1)).toBe(1);
+  });
+});
+
+describe('avatar show-mode toggle (3D vs picture)', () => {
+  const contact = {
+    id: 've-1',
+    name: 'Aria',
+    avatarUrl: 'https://cdn/primary.png',
+    profilePictures: [
+      { url: 'https://cdn/primary.png', primary: true },
+      { url: 'https://cdn/alt.png' },
+    ],
+  };
+
+  it('mode:image shows the carousel picture at the stored index', () => {
+    const choices = buildAvatarChoices({
+      contact,
+      presence: { v: 1, vrmUrl: 'https://cdn/agent.vrm' },
+    });
+    const resolved = resolveCompanionStage(choices, {
+      mode: 'image',
+      choiceId: 'presence:vrm',
+      pictureIndex: 1,
+    });
+    expect(resolved?.choice.kind).toBe('image');
+    expect(resolved?.imageUrl).toBe('https://cdn/alt.png');
+    expect(resolved?.vrmUrl).toBeNull();
+  });
+
+  it('mode:vrm shows the stored 3D model even when a picture was chosen before', () => {
+    const choices = buildAvatarChoices({
+      contact,
+      presence: { v: 1, vrmUrl: 'https://cdn/agent.vrm' },
+    });
+    const resolved = resolveCompanionStage(choices, { mode: 'vrm', choiceId: 'presence:vrm' });
+    expect(resolved?.choice.kind).toBe('vrm');
+    expect(resolved?.vrmUrl).toBe('https://cdn/agent.vrm');
+    expect(resolved?.imageUrl).toBeNull();
+  });
+
+  it('mode:vrm falls back to a picture when the agent has no 3D model', () => {
+    const choices = buildAvatarChoices({ contact });
+    const resolved = resolveCompanionStage(choices, { mode: 'vrm', choiceId: 'presence:vrm' });
+    expect(resolved?.choice.kind).toBe('image');
+  });
+
+  it('mode:image falls back to a model when the agent has no picture', () => {
+    const choices = buildAvatarChoices({
+      contact: { id: 've-9', name: 'NoPic' },
+      presence: { v: 1, vrmUrl: 'https://cdn/only.vrm' },
+    });
+    const resolved = resolveCompanionStage(choices, { mode: 'image', choiceId: 'image:ve-9' });
+    expect(resolved?.choice.kind).toBe('vrm');
+  });
+
+  it('returns null with no choices and defers to resolveAvatarSelection without a pref', () => {
+    expect(resolveCompanionStage([], { mode: 'image', choiceId: 'x' })).toBeNull();
+    const choices = buildAvatarChoices({ contact, presence: { v: 1, vrmUrl: 'https://cdn/a.vrm' } });
+    expect(resolveCompanionStage(choices, null)?.choice.kind).toBe('vrm');
+  });
+
+  it('persists the mode + carousel index per contact (and tolerates junk indices)', () => {
+    const store = createCompanionAvatarStore('test2');
+    store.set('ve-1', { mode: 'image', choiceId: 'image:ve-1:1', pictureIndex: 1 });
+    expect(store.get('ve-1')).toEqual({ mode: 'image', choiceId: 'image:ve-1:1', pictureIndex: 1 });
+    localStorage.setItem('test2:companion-avatar:v1:ve-2', '{"mode":"image","choiceId":"i","pictureIndex":"x"}');
+    expect(store.get('ve-2')).toEqual({ mode: 'image', choiceId: 'i' });
   });
 });
 

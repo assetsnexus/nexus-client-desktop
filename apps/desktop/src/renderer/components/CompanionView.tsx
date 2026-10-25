@@ -39,7 +39,7 @@ import {
   type StatusMotionMap,
 } from '@nexus/character-react';
 import '@nexus/character-ui-kit/style.css';
-import { CHARACTER_SKILL } from '@nexus/character-kit';
+import { CHARACTER_SKILL, COMPANION_EYE_PITCH_MAX, COMPANION_EYE_YAW_MAX } from '@nexus/character-kit';
 import {
   registerCharacterTools,
   type CompanionStageHost,
@@ -74,12 +74,18 @@ import { CompanionRoomStage } from './CompanionRoomStage.js';
 import {
   buildAvatarChoices,
   createCompanionAvatarStore,
+  cyclePictureIndex,
   latestTranscriptPreview,
   mappedLocalAvatar,
-  resolveAvatarSelection,
+  parseProfilePictures,
+  pictureChoices,
+  resolveCarouselChoice,
+  resolveCompanionStage,
   selectionToPresence,
   type CompanionAvatarAsset,
   type CompanionAvatarChoice,
+  type CompanionAvatarPref,
+  type CompanionProfilePicture,
 } from '../companion/avatar-gallery.js';
 import {
   CLOSED_COMPANION_MENU,
@@ -195,6 +201,32 @@ const kbd: CSSProperties = {
   fontFamily: 'inherit',
 };
 
+/**
+ * Bottom-right picture carousel (Deliverable 5). Only rendered in picture mode
+ * when the agent has more than one profile picture. `pointerEvents: 'auto'` so
+ * the arrows are clickable (the sibling locomotion hint stays inert).
+ */
+const carouselBar: CSSProperties = {
+  position: 'absolute',
+  right: 10,
+  bottom: 10,
+  zIndex: 16,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '4px 6px',
+  borderRadius: 8,
+  border: '1px solid #2a333d',
+  background: 'rgba(15,20,26,0.85)',
+};
+
+const carouselCount: CSSProperties = {
+  color: '#9aa7b5',
+  fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+  minWidth: 34,
+  textAlign: 'center',
+};
+
 function unwrapAssets(result: unknown): CompanionAvatarAsset[] {
   const r = result as Record<string, unknown> | null;
   if (!r || typeof r !== 'object') return [];
@@ -285,9 +317,20 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   // Windowed vs fullscreen for this companion window (standard Fullscreen API).
   const [fullscreen, setFullscreen] = useState(false);
   const [assets, setAssets] = useState<CompanionAvatarAsset[]>([]);
-  const [choiceId, setChoiceId] = useState<string | null>(() => avatarStore.get(launch.contactId)?.choiceId ?? null);
+  // Per-contact avatar preference: the 3D⇄picture **mode** and the selected
+  // model/picture id, plus the carousel index (Deliverable 5). Remembered in a
+  // local store keyed by contact so reopening restores the same surface.
+  const [avatarPref, setAvatarPref] = useState<CompanionAvatarPref | null>(
+    () => avatarStore.get(launch.contactId),
+  );
   // This device's own avatar library + per-agent mapping (Deliverable 2).
   const [localAvatars, setLocalAvatars] = useState<LocalAvatarsConfig | null>(null);
+  /**
+   * Live avatar-stage snapshot, kept in a ref so the dev debug handle can read it
+   * without depending on values declared further down the component (which would
+   * be a TDZ error). Written below, after `resolved` / `carouselPictures`.
+   */
+  const avatarDebugRef = useRef<Record<string, unknown>>({});
   const clientRef = useRef<ReturnType<typeof createRegionCommandClient> | null>(null);
   // 3D companion host (flat canvas or walkable scene). The character tool pack
   // and the debug panels bind to whichever stage is mounted.
@@ -386,13 +429,18 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
 
   // Wider, configurable gaze cone: the companion tracks the cursor across the
   // whole screen, so the tight library default (head ~8° of actual turn) reads as
-  // "barely moves". Bound to the live host so a scene/flat swap re-applies it.
+  // "barely moves". The **eyes** get the companion-surface cones (70° yaw / 30°
+  // pitch) — wider than the head so the irises lead it and keep converging on the
+  // same target after the head hits its own clamp. Bound to the live host so a
+  // scene/flat swap re-applies it.
   useEffect(() => {
     const host = stageHost;
     if (!host?.setGazeLimits) return;
     host.setGazeLimits({
       headYawMaxDeg: avatarSettings?.gazeYawMaxDeg,
       headPitchMaxDeg: avatarSettings?.gazePitchMaxDeg,
+      eyeYawMaxDeg: Math.round((COMPANION_EYE_YAW_MAX * 180) / Math.PI),
+      eyePitchMaxDeg: Math.round((COMPANION_EYE_PITCH_MAX * 180) / Math.PI),
     });
   }, [stageHost, avatarSettings?.gazeYawMaxDeg, avatarSettings?.gazePitchMaxDeg]);
 
@@ -406,6 +454,97 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       gesture: avatarSettings?.clickNodGesture,
     });
   }, [stageHost, avatarSettings?.clickNod, avatarSettings?.clickNodGesture]);
+
+  // Dev-only live handle (gated on `?companionDebug=1`): expose the *live* stage
+  // host to the page so an Electron CDP client can measure head/eye aim
+  // (`getGazeDebugState`), read the ground pose (`getPoseFeedback`) and inject
+  // locomotion (`setMoveInput` / `setAnalogSpeed`) without a screenshot. Never
+  // present for a normal user — the guard is the same one the debug surfaces use.
+  useEffect(() => {
+    if (!forcedDebug || typeof window === 'undefined') return;
+    const api = {
+      pose: (radius?: number) => stageHost?.getPoseFeedback?.(radius) ?? null,
+      gaze: () => stageHost?.getGazeDebugState?.() ?? null,
+      /** Per-bone angle (deg) off rest, keyed by VRM bone name (gesture audits). */
+      bones: () => stageHost?.getBonePoseDeg?.() ?? null,
+      /** Id of the gesture clip currently driving the body (null when idle). */
+      currentGesture: () => {
+        const host = stageHost as { getGestureId?: () => string | null } | null
+        return host?.getGestureId?.() ?? null
+      },
+      gestures: () => stageHost?.listGestures?.() ?? [],
+      /**
+       * Request a gesture. The scene façade's `playGesture` is fire-and-forget
+       * (void), so this returns the id that was *requested*; read `currentGesture()`
+       * after a frame for the clip the controller actually resolved to.
+       */
+      play: (id: string, loop = false) => {
+        stageHost?.playGesture?.(id, loop, 'user');
+        return id;
+      },
+      move: (input: { x?: number; z?: number; yaw?: number; jump?: boolean }) =>
+        stageHost?.setMoveInput?.(input),
+      speed: (speed: number) => stageHost?.setAnalogSpeed?.(speed),
+      limits: (limits: Record<string, number>) => stageHost?.setGazeLimits?.(limits),
+      pointer: (x: number, y: number) => stageHost?.setPointerNdc?.(x, y),
+      /** Arm/disarm the OS-global cursor feed (proves the single-writer guard). */
+      external: (on: boolean) => stageHost?.setExternalPointerEnabled?.(on),
+      /** Route the next NDC through the external writer (as the main process does). */
+      globalPointer: (x: number, y: number) => {
+        const host = stageHost as { setExternalPointerNdc?: (x: number, y: number) => void } | null;
+        host?.setExternalPointerNdc?.(x, y);
+      },
+      /**
+       * Live avatar stage state: the toggled surface (`vrm` | `image`), the
+       * resolved choice, the carousel index + the agent's own picture indices and
+       * the picture URL. Lets an Electron CDP client verify the avatar toggle and
+       * the multi-picture carousel without a pixel screenshot.
+       */
+      avatar: () => avatarDebugRef.current,
+      /**
+       * Drive the **exact** avatar-selection functions the view uses with a
+       * synthetic multi-picture agent, so an Electron CDP client can verify the
+       * 3D⇄picture toggle and the carousel without a region round-trip.
+       * Returns the resolved surface for each mode and the carousel sequence.
+       */
+      simulateAvatar: (pictureCount: number) => {
+        const count = Math.max(1, Math.min(9, Math.floor(pictureCount) || 1));
+        const pictures: CompanionProfilePicture[] = Array.from({ length: count }, (_, i) => ({
+          url: `https://example.test/agent/${i}.png`,
+          primary: i === 0,
+          label: `Picture ${i + 1}`,
+        }));
+        const simChoices = buildAvatarChoices({
+          contact: { id: 'sim-contact', name: 'Sim', avatarUrl: 'https://example.test/primary.png', profilePictures: pictures },
+          presence: { vrmUrl: 'https://example.test/agent.vrm', vrmAssetId: 'vrm-sim', vrmValidationStatus: 'verified' },
+          assets: [],
+          localAvatars: null,
+        });
+        const carousel = pictureChoices(simChoices);
+        const vrmStage = resolveCompanionStage(simChoices, {
+          mode: 'vrm',
+          choiceId: simChoices.find((c) => c.kind === 'vrm')?.id ?? '',
+        });
+        const pictureStage = resolveCompanionStage(simChoices, { mode: 'image', choiceId: '', pictureIndex: 1 });
+        const rotated = cyclePictureIndex(simChoices, 1, 1);
+        return {
+          pictures: carousel.map((c) => ({ index: c.pictureIndex, url: c.url, label: c.label })),
+          showCarousel: carousel.length > 1,
+          vrm: vrmStage ? { mode: vrmStage.choice.kind, vrmUrl: vrmStage.vrmUrl } : null,
+          picture: pictureStage
+            ? { mode: pictureStage.choice.kind, index: pictureStage.choice.pictureIndex, url: pictureStage.imageUrl }
+            : null,
+          rotatedIndex: rotated,
+          allChoiceIds: simChoices.map((c) => c.id),
+        };
+      },
+    };
+    (window as unknown as { __nexusCompanion?: typeof api }).__nexusCompanion = api;
+    return () => {
+      const w = window as unknown as { __nexusCompanion?: unknown };
+      if (w.__nexusCompanion === api) delete w.__nexusCompanion;
+    };
+  }, [stageHost, forcedDebug]);
 
   /**
    * WASD / Shift / Space locomotion (Deliverable 4).
@@ -669,6 +808,35 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     return stored ?? fromContact ?? null;
   }, [contact, launch.contactId]);
 
+  /**
+   * The agent's own multi-picture set (Deliverable 5). The region exposes
+   * `profilePictures[]` on the virtual-employee row; the chat contact list maps
+   * only the canonical avatar, so the companion reads it directly for the
+   * *this agent* row. Failures degrade to the single-picture path.
+   */
+  const [profilePictures, setProfilePictures] = useState<CompanionProfilePicture[]>([]);
+  useEffect(() => {
+    const client = clientRef.current;
+    if (!client) return;
+    const id = launch.virtualEmployeeId ?? launch.contactId;
+    if (!id) return;
+    let cancelled = false;
+    void client
+      .send('anx.ai-agents.virtual-employees.get', { id })
+      .then((result) => {
+        if (cancelled) return;
+        const r = result as Record<string, unknown> | null;
+        const data = ((r?.responseObject ?? r?.data ?? r) as Record<string, unknown>) || null;
+        if (data) setProfilePictures(parseProfilePictures(data.profilePictures));
+      })
+      .catch(() => {
+        if (!cancelled) setProfilePictures([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [launch.virtualEmployeeId, launch.contactId, chat]);
+
   // This device's own avatar library (Deliverable 2). Read once on mount and
   // refreshed after an import/remove; a preload that predates the feature simply
   // yields `null` and the gallery falls back to its old copy.
@@ -703,33 +871,39 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     [localAvatars, launch.contactId],
   );
   const effectiveChoiceId = useMemo(() => {
-    if (choiceId) return choiceId;
+    if (avatarPref?.choiceId) return avatarPref.choiceId;
     return mappedLocal ? `local:${mappedLocal.id}` : null;
-  }, [choiceId, mappedLocal]);
+  }, [avatarPref?.choiceId, mappedLocal]);
 
   const choices: CompanionAvatarChoice[] = useMemo(
     () =>
       buildAvatarChoices({
-        contact,
+        // Layer the agent's own multi-picture set over the chat contact (which
+        // only carries the canonical avatar) so the carousel sees every picture.
+        contact: contact ? { ...contact, profilePictures } : contact,
         presence: basePresence,
         assets,
         localAvatars,
       }),
-    [contact, basePresence, assets, localAvatars],
+    [contact, profilePictures, basePresence, assets, localAvatars],
   );
-  const resolved = useMemo(
-    () => resolveAvatarSelection(choices, effectiveChoiceId),
-    [choices, effectiveChoiceId],
-  );
+  // The mounted stage: honors the stored 3D⇄picture mode, falling back to the
+  // library-mapped model when the user has not toggled yet (the D2 default).
+  const resolved = useMemo(() => {
+    const withMapping: CompanionAvatarPref | null =
+      avatarPref ?? (effectiveChoiceId ? { mode: 'vrm', choiceId: effectiveChoiceId } : null);
+    return resolveCompanionStage(choices, withMapping);
+  }, [choices, avatarPref, effectiveChoiceId]);
   const selectionPresence = useMemo(
     () => selectionToPresence(basePresence, resolved),
     [basePresence, resolved],
   );
 
-  const chooseAvatar = useCallback(
-    (choice: CompanionAvatarChoice) => {
-      setChoiceId(choice.id);
-      avatarStore.set(launch.contactId, { mode: choice.kind, choiceId: choice.id });
+  /** Persist the pref locally (per contact) and apply the choice's presence. */
+  const applyAvatarPref = useCallback(
+    (pref: CompanionAvatarPref, choice: CompanionAvatarChoice) => {
+      setAvatarPref(pref);
+      avatarStore.set(launch.contactId, pref);
       const next = selectionToPresence(basePresence, {
         choice,
         vrmUrl: choice.kind === 'vrm' ? choice.url : null,
@@ -753,9 +927,59 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
           if (config) setLocalAvatars(config);
         });
       }
-      setGalleryOpen(false);
     },
     [basePresence, launch.contactId],
+  );
+
+  const chooseAvatar = useCallback(
+    (choice: CompanionAvatarChoice) => {
+      const pref: CompanionAvatarPref = { mode: choice.kind, choiceId: choice.id };
+      if (typeof choice.pictureIndex === 'number') pref.pictureIndex = choice.pictureIndex;
+      applyAvatarPref(pref, choice);
+      setGalleryOpen(false);
+    },
+    [applyAvatarPref],
+  );
+
+  /**
+   * The avatar button: flip between the 3D stage and the agent's profile
+   * picture. The chosen *surface* is remembered per contact; toggling back to 3D
+   * restores the last model rather than dropping to the first tile.
+   */
+  const toggleAvatarMode = useCallback(() => {
+    if (!resolved) return;
+    if (resolved.choice.kind === 'image') {
+      // Picture → 3D: restore the last VRM (or the library mapping / first model).
+      const vrmChoice =
+        choices.find((c) => c.id === avatarPref?.choiceId && c.kind === 'vrm') ??
+        (effectiveChoiceId ? choices.find((c) => c.id === effectiveChoiceId && c.kind === 'vrm') : undefined) ??
+        choices.find((c) => c.kind === 'vrm');
+      if (!vrmChoice) return; // no model available — stay on the picture
+      applyAvatarPref({ mode: 'vrm', choiceId: vrmChoice.id }, vrmChoice);
+      return;
+    }
+    // 3D → picture: prefer the current carousel index, else the primary picture.
+    const carousel = resolveCarouselChoice(choices, avatarPref?.pictureIndex);
+    const picture =
+      carousel ??
+      choices.find((c) => c.kind === 'image' && typeof c.pictureIndex === 'number') ??
+      choices.find((c) => c.kind === 'image');
+    if (!picture) return; // no picture at all — keep the 3D stage
+    const pref: CompanionAvatarPref = { mode: 'image', choiceId: picture.id };
+    if (typeof picture.pictureIndex === 'number') pref.pictureIndex = picture.pictureIndex;
+    applyAvatarPref(pref, picture);
+  }, [resolved, choices, avatarPref?.choiceId, avatarPref?.pictureIndex, effectiveChoiceId, applyAvatarPref]);
+
+  /** Rotate the picture carousel (only meaningful with >1 agent picture). */
+  const rotateAvatarPicture = useCallback(
+    (step: number) => {
+      const current = avatarPref?.pictureIndex ?? resolveCarouselChoice(choices, null)?.pictureIndex ?? 0;
+      const nextIndex = cyclePictureIndex(choices, current, step);
+      const picture = choices.find((c) => c.kind === 'image' && c.pictureIndex === nextIndex);
+      if (!picture) return;
+      applyAvatarPref({ mode: 'image', choiceId: picture.id, pictureIndex: nextIndex }, picture);
+    },
+    [avatarPref?.pictureIndex, choices, applyAvatarPref],
   );
 
   const togglePin = useCallback(() => {
@@ -896,6 +1120,26 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   const preview = latestTranscriptPreview(turns);
   const agentName = launch.title ?? contact?.name ?? 'Companion';
   const isImageAvatar = resolved?.choice.kind === 'image';
+  // The agent's own multi-picture set, for the carousel control (only shown when
+  // there is more than one picture to rotate through).
+  const carouselPictures = useMemo(() => pictureChoices(choices), [choices]);
+  const showCarousel = isImageAvatar && carouselPictures.length > 1;
+  // Publish the live avatar snapshot for the dev debug handle (`?companionDebug=1`).
+  avatarDebugRef.current = {
+    mode: resolved?.choice.kind ?? null,
+    choiceId: resolved?.choice.id ?? null,
+    pictureIndex: resolved?.choice.pictureIndex ?? avatarPref?.pictureIndex ?? null,
+    pictureUrl: resolved?.imageUrl ?? null,
+    vrmUrl: resolved?.vrmUrl ?? null,
+    pictures: carouselPictures.map((c) => ({ index: c.pictureIndex, url: c.url })),
+    showCarousel,
+  };
+  const carouselPosition = useMemo(() => {
+    if (!showCarousel) return 0;
+    const current = resolved?.choice.pictureIndex ?? avatarPref?.pictureIndex ?? 0;
+    const idx = carouselPictures.findIndex((c) => c.pictureIndex === current);
+    return (idx < 0 ? 0 : idx) + 1;
+  }, [showCarousel, resolved?.choice.pictureIndex, avatarPref?.pictureIndex, carouselPictures]);
   // The composer is the STT surface when a wake handed dictation here and the
   // realtime call is not live (voice mode owns the capture). A window that does
   // not own the mic never shows the composer, so captures never compete.
@@ -934,6 +1178,17 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
           </span>
         ) : null}
         <span style={{ flex: 1 }} />
+        {resolved ? (
+          <button
+            type="button"
+            style={iconBtn(isImageAvatar)}
+            aria-label={isImageAvatar ? 'Show the 3D avatar' : 'Show the profile picture'}
+            title={isImageAvatar ? 'Switch to the 3D avatar' : 'Switch to the profile picture'}
+            onClick={toggleAvatarMode}
+          >
+            <span aria-hidden>{isImageAvatar ? '🧍' : '🖼'}</span>
+          </button>
+        ) : null}
         <button
           type="button"
           style={chatOpen ? btnActive : btn}
@@ -1091,6 +1346,32 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
             <span style={{ margin: '0 4px' }}>run</span>
             <kbd style={kbd}>Space</kbd>
             <span>jump</span>
+          </div>
+        ) : null}
+        {showCarousel ? (
+          // Multi-picture carousel (Deliverable 5): rotate the agent's own
+          // profile pictures when it has more than one. The selected index is
+          // remembered per contact, like the model/picture mode.
+          <div style={carouselBar} role="group" aria-label="Profile pictures">
+            <button
+              type="button"
+              style={btn}
+              aria-label="Previous picture"
+              onClick={() => rotateAvatarPicture(-1)}
+            >
+              ‹
+            </button>
+            <span style={{ ...carouselCount, fontSize: 11 }}>
+              {carouselPosition} / {carouselPictures.length}
+            </span>
+            <button
+              type="button"
+              style={btn}
+              aria-label="Next picture"
+              onClick={() => rotateAvatarPicture(1)}
+            >
+              ›
+            </button>
           </div>
         ) : null}
         {chatOpen && chat ? (

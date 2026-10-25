@@ -84,6 +84,10 @@ export type CompanionStageHost = CharacterToolHostLike & {
   setAnalogSpeed?: (speed: number) => void;
   /** Current ground pose + facing, for the outbound turn metadata (Deliverable 4). */
   getPoseFeedback?: (nearbyRadiusM?: number) => Record<string, unknown> | null;
+  /** Read-only gaze snapshot (head vs eye aim, limits) for live debugging. */
+  getGazeDebugState?: () => Record<string, unknown> | null;
+  /** Per-bone angle (deg) off rest, keyed by VRM bone name, for live gesture audits. */
+  getBonePoseDeg?: () => Record<string, number> | null;
 };
 
 export type ToolResultLike = {

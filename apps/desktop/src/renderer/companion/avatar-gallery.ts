@@ -57,6 +57,49 @@ function readPresenceStringOrNull(
 /** What a gallery tile represents. */
 export type CompanionAvatarKind = 'vrm' | 'image';
 
+/**
+ * One entry of the region's per-agent `profilePictures[]` (virtual employee
+ * multi-picture field). Backward compatible: an agent with a single picture
+ * returns `undefined`, and exactly one entry mirrors the canonical
+ * `profilePictureUrl` via `primary: true`.
+ */
+export type CompanionProfilePicture = {
+  url: string;
+  primary?: boolean;
+  /** Expression / face key this picture is linked to (`face` on the region). */
+  face?: string;
+  label?: string;
+  addedAt?: string;
+};
+
+/**
+ * Tolerant parse of a VE row's `profilePictures` field. Drops non-object
+ * entries and any non-fetchable URL (a `blob:`/`data:` payload must never be
+ * persisted), keeping the region's order. Pure — shared by the gallery and its
+ * tests without a region round-trip.
+ */
+export function parseProfilePictures(raw: unknown): CompanionProfilePicture[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CompanionProfilePicture[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const rec = entry as Record<string, unknown>;
+    const url = typeof rec.url === 'string' ? rec.url.trim() : '';
+    if (!url) continue;
+    if (url.startsWith('blob:') || url.startsWith('data:')) continue;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    const picture: CompanionProfilePicture = { url };
+    if (rec.primary === true) picture.primary = true;
+    if (typeof rec.face === 'string' && rec.face.trim()) picture.face = rec.face.trim();
+    if (typeof rec.label === 'string' && rec.label.trim()) picture.label = rec.label.trim();
+    if (typeof rec.addedAt === 'string' && rec.addedAt.trim()) picture.addedAt = rec.addedAt.trim();
+    out.push(picture);
+  }
+  return out;
+}
+
 export type CompanionAvatarChoice = {
   /** Stable id: `image:<contactId>` | `presence:vrm` | `vrm:<assetId>` | `local:<avatarId>`. */
   id: string;
@@ -74,6 +117,14 @@ export type CompanionAvatarChoice = {
   localAvatarId?: string | null;
   /** True for entries in the on-disk library (so the tile can offer "Remove"). */
   local?: boolean;
+  /**
+   * Zero-based index into the agent's own `profilePictures` set. Present only
+   * for the agent's own pictures (not catalog portraits), so the companion's
+   * carousel knows which picture a `kind: 'image'` choice represents.
+   */
+  pictureIndex?: number;
+  /** The picture's linked expression/face key, when the region supplied one. */
+  pictureFace?: string | null;
   /**
    * Catalog validation status, carried into presence as `vrmValidationStatus`.
    * The character kit refuses to HTTP-fetch a non-platform VRM without it
@@ -98,6 +149,12 @@ export type CompanionAvatarContact = {
   id: string;
   name: string;
   avatarUrl?: string | null;
+  /**
+   * The agent's own multi-picture set (region `profilePictures[]`). When present
+   * each entry becomes a switchable picture tile, and `avatarUrl` (the canonical
+   * primary) is skipped so the primary does not appear twice.
+   */
+  profilePictures?: CompanionProfilePicture[] | null;
 };
 
 /** True for catalog kinds that describe a 3D avatar model rather than an animation or picture. */
@@ -160,7 +217,29 @@ export function buildAvatarChoices(input: {
     choices.push(choice);
   };
 
-  if (input.contact?.avatarUrl) {
+  const pushPicture = (picture: CompanionProfilePicture, index: number) => {
+    choices.push({
+      id: `image:${input.contact!.id}:${index}`,
+      kind: 'image',
+      // Prefer the picture's own label / face key, else a plain caption.
+      label: picture.label || (picture.face ? `Picture · ${picture.face}` : 'Profile picture'),
+      url: picture.url,
+      pictureIndex: index,
+      pictureFace: picture.face ?? null,
+    });
+  };
+
+  // The agent's own multi-picture set leads the image tiles (primary first), so
+  // the carousel starts on the canonical picture. A single-picture agent still
+  // has `profilePictures === undefined` on the wire, and falls through to the
+  // plain `avatarUrl` tile below — do not regress that path.
+  const pictures = input.contact?.profilePictures ?? null;
+  if (pictures && pictures.length) {
+    const ordered = pictures
+      .map((picture, index) => ({ picture, index }))
+      .sort((a, b) => (a.picture.primary === b.picture.primary ? 0 : a.picture.primary ? -1 : 1));
+    for (const { picture, index } of ordered) pushPicture(picture, index);
+  } else if (input.contact?.avatarUrl) {
     choices.push({
       id: `image:${input.contact.id}`,
       kind: 'image',
@@ -253,7 +332,16 @@ export function resolveAvatarSelection(
 ): ResolvedCompanionAvatar | null {
   if (!choices.length) return null;
   const stored = storedChoiceId ? choices.find((c) => c.id === storedChoiceId) : undefined;
-  const chosen = stored ?? choices.find((c) => c.kind === 'vrm') ?? choices[0]!;
+  if (stored) {
+    return {
+      choice: stored,
+      vrmUrl: stored.kind === 'vrm' ? stored.url : null,
+      vrmAssetId: stored.kind === 'vrm' ? (stored.assetId ?? null) : null,
+      vrmValidationStatus: stored.kind === 'vrm' ? (stored.validationStatus ?? null) : null,
+      imageUrl: stored.kind === 'image' ? stored.url : null,
+    };
+  }
+  const chosen = choices.find((c) => c.kind === 'vrm') ?? choices[0]!;
   return {
     choice: chosen,
     vrmUrl: chosen.kind === 'vrm' ? chosen.url : null,
@@ -261,6 +349,57 @@ export function resolveAvatarSelection(
     vrmValidationStatus: chosen.kind === 'vrm' ? (chosen.validationStatus ?? null) : null,
     imageUrl: chosen.kind === 'image' ? chosen.url : null,
   };
+}
+
+/**
+ * Resolve the stage from a stored per-contact pref, honoring the **mode** the
+ * avatar button toggles:
+ *
+ *  - `mode: 'image'` → the agent's own carousel picture at `pref.pictureIndex`
+ *    (or the stored image choice / first image). This is the 2D picture surface.
+ *  - `mode: 'vrm'`  → the stored VRM choice (its model id). If that model has
+ *    gone away, fall back to the first available VRM, then to any image.
+ *
+ * Unlike {@link resolveAvatarSelection} the mode is authoritative: a stored
+ * *image* choice no longer forces the picture when the user has toggled back to
+ * 3D. Returns null when the agent has no avatar at all.
+ */
+export function resolveCompanionStage(
+  choices: CompanionAvatarChoice[],
+  pref: CompanionAvatarPref | null,
+): ResolvedCompanionAvatar | null {
+  if (!choices.length) return null;
+
+  const asResolved = (choice: CompanionAvatarChoice): ResolvedCompanionAvatar => ({
+    choice,
+    vrmUrl: choice.kind === 'vrm' ? choice.url : null,
+    vrmAssetId: choice.kind === 'vrm' ? (choice.assetId ?? null) : null,
+    vrmValidationStatus: choice.kind === 'vrm' ? (choice.validationStatus ?? null) : null,
+    imageUrl: choice.kind === 'image' ? choice.url : null,
+  });
+
+  const byId = (id: string | null | undefined) =>
+    id ? choices.find((c) => c.id === id) : undefined;
+
+  if (pref?.mode === 'image') {
+    // Prefer the carousel picture the user rotated to, then the stored choice,
+    // then the first image tile — never fall back to a 3D model in picture mode.
+    const carousel = resolveCarouselChoice(choices, pref.pictureIndex);
+    if (carousel) return asResolved(carousel);
+    const imageChoice = byId(pref.choiceId) ?? choices.find((c) => c.kind === 'image');
+    if (imageChoice) return asResolved(imageChoice);
+  }
+
+  if (pref?.mode === 'vrm') {
+    const modelChoice = byId(pref.choiceId);
+    if (modelChoice && modelChoice.kind === 'vrm') return asResolved(modelChoice);
+    const anyVrm = choices.find((c) => c.kind === 'vrm');
+    if (anyVrm) return asResolved(anyVrm);
+  }
+
+  // No pref (or the preferred surface is unavailable): keep the original policy
+  // — the stored choice, then a 3D model, then the first tile.
+  return resolveAvatarSelection(choices, pref?.choiceId ?? null);
 }
 
 /**
@@ -287,10 +426,63 @@ export function selectionToPresence(
   });
 }
 
+/**
+ * The agent's own picture choices, in carousel order (primary first). Catalog
+ * portraits (no `pictureIndex`) are excluded: the carousel rotates the agent's
+ * *own* pictures, not unrelated catalog art. Empty when the agent has ≤1 picture
+ * or only a single canonical `avatarUrl` tile.
+ */
+export function pictureChoices(choices: readonly CompanionAvatarChoice[]): CompanionAvatarChoice[] {
+  return choices.filter((c) => c.kind === 'image' && typeof c.pictureIndex === 'number');
+}
+
+/**
+ * Pick the carousel entry to display for a stored index. Clamps out-of-range
+ * indices (the picture set shrinks between sessions) onto a real entry, and
+ * falls back to the first picture when none is stored. Returns null when the
+ * agent has no carousel (0-or-1 picture / only the canonical tile).
+ */
+export function resolveCarouselChoice(
+  choices: readonly CompanionAvatarChoice[],
+  storedIndex: number | null | undefined,
+): CompanionAvatarChoice | null {
+  const pictures = pictureChoices(choices);
+  if (pictures.length < 2) return null;
+  const requested =
+    typeof storedIndex === 'number' && Number.isInteger(storedIndex) ? storedIndex : 0;
+  const found = pictures.find((c) => c.pictureIndex === requested);
+  return found ?? pictures[0]!;
+}
+
+/** Next picture index in the carousel (wraps), given the current index. */
+export function cyclePictureIndex(
+  choices: readonly CompanionAvatarChoice[],
+  currentIndex: number,
+  step = 1,
+): number {
+  const pictures = pictureChoices(choices);
+  if (!pictures.length) return 0;
+  const idx = pictures.findIndex((c) => c.pictureIndex === currentIndex);
+  const base = idx < 0 ? 0 : idx;
+  const next = (((base + step) % pictures.length) + pictures.length) % pictures.length;
+  return pictures[next]!.pictureIndex ?? 0;
+}
+
 /** Local, per-contact persistence of the gallery choice (contact id → mode+id). */
 export type CompanionAvatarPref = {
+  /**
+   * Whether the companion shows the 3D/VRM stage or the agent's profile picture.
+   * This is the avatar-button toggle; it is independent of which VRM *choice* is
+   * stored, so flipping back to 3D restores the last model instead of the first.
+   */
   mode: CompanionAvatarKind;
   choiceId: string;
+  /**
+   * Selected entry in the agent's multi-picture carousel (the region
+   * `profilePictures[].index`), remembered per contact so reopening a companion
+   * shows the same picture the user rotated to last.
+   */
+  pictureIndex?: number;
 };
 
 export type CompanionAvatarStore = {
@@ -303,7 +495,11 @@ function parsePref(raw: unknown): CompanionAvatarPref | null {
   const r = raw as Record<string, unknown>;
   if (r.mode !== 'vrm' && r.mode !== 'image') return null;
   if (typeof r.choiceId !== 'string' || !r.choiceId) return null;
-  return { mode: r.mode, choiceId: r.choiceId };
+  const pref: CompanionAvatarPref = { mode: r.mode, choiceId: r.choiceId };
+  if (typeof r.pictureIndex === 'number' && Number.isInteger(r.pictureIndex)) {
+    pref.pictureIndex = r.pictureIndex;
+  }
+  return pref;
 }
 
 /**
