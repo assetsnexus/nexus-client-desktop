@@ -54,6 +54,22 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          // React must own a dedicated chunk. Without this Rollup folds the
+          // single React copy into whichever manual chunk happens to reference
+          // it first (here `cluster-scene`), and because `cluster-scene-react`
+          // in turn imports `@nexus/character-react`, the two manual chunks
+          // form a cycle: character-voice -> cluster-scene -> character-voice.
+          // In the emitted cycle one chunk evaluates while the other is still
+          // initialising, so `character-voice` reads React's namespace (its
+          // `createContext`) before React is initialised -> undefined -> black
+          // screen on boot of the built renderer.
+          if (
+            id.includes('/node_modules/react/') ||
+            id.includes('/node_modules/react-dom/') ||
+            id.includes('/node_modules/scheduler/')
+          ) {
+            return 'react-vendor';
+          }
           if (id.includes('character-kit') && id.includes('asset-cache')) {
             return 'avatar-asset-cache';
           }
