@@ -31,6 +31,8 @@ audio. It is only ever spawned by the app, on the user's own hardware.
 from __future__ import annotations
 
 import argparse
+import ctypes
+import glob
 import io
 import json
 import os
@@ -39,6 +41,56 @@ import tempfile
 import time
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+# --------------------------------------------------------------------------- #
+# CUDA library preload
+# --------------------------------------------------------------------------- #
+
+# CTranslate2 `dlopen`s libcublas/libcudnn by soname, so those directories must be
+# discoverable. The app also puts them on `LD_LIBRARY_PATH`, but that is the one
+# thing that silently breaks GPU STT when it is wrong: the server still answers
+# `/health` with "ok" (it binds its port before the first inference), and only the
+# first *transcription* returns `RuntimeError: Library libcublas.so.12 is not
+# found`. A malformed venv path did exactly that. Preloading here makes the engine
+# independent of the parent's environment: we know our own site-packages, so we
+# find the pip-installed CUDA wheels ourselves and load them before faster-whisper
+# initialises CUDA. Any failure is non-fatal — the parent's LD_LIBRARY_PATH (or a
+# system CUDA install) may still work, and a CPU fallback must stay possible.
+_CUDA_LIB_PATTERNS = (
+    "nvidia/cublas/lib/libcublas.so.12",
+    "nvidia/cudnn/lib/libcudnn.so.9",
+    "nvidia/cuda_nvrtc/lib/libnvrtc.so.12",
+)
+
+
+def _preload_cuda_libraries() -> None:
+    """Load the pip-installed CUDA libraries from our own site-packages.
+
+    Loading them into the process *before* CTranslate2 initialises CUDA means the
+    later `dlopen` by soname resolves against the already-mapped objects, so a
+    wrong or absent `LD_LIBRARY_PATH` no longer breaks GPU inference. Never
+    raises: a machine without the pip wheels keeps the previous behaviour.
+    """
+    try:
+        candidates = [p for p in sys.path if p and os.path.isdir(p)]
+        loaded = []
+        for base in candidates:
+            for pattern in _CUDA_LIB_PATTERNS:
+                for path in sorted(glob.glob(os.path.join(base, pattern))):
+                    try:
+                        ctypes.CDLL(path, mode=ctypes.RTLD_GLOBAL)
+                        loaded.append(path)
+                    except OSError:
+                        # A single missing/conflicting library must not stop the
+                        # rest; the import below decides whether CUDA works.
+                        continue
+        if loaded:
+            # One machine-readable line so the app's log shows what happened.
+            names = ", ".join(sorted({os.path.basename(p) for p in loaded}))
+            print(f"[local-stt] preloaded CUDA libraries: {names}", flush=True)
+    except Exception as err:  # noqa: BLE001 - preloading must never be fatal
+        print(f"[local-stt] CUDA preload skipped: {err}", flush=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -118,18 +170,39 @@ class _Engine:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.model = None
+        # False when loading raised (e.g. a missing CUDA library). The server still
+        # binds and answers `/health` so the app can read the *reason* instead of
+        # seeing a dead port and guessing; every inference then reports it.
+        self.ready = False
+        self.error: str | None = None
 
     def load(self) -> None:
+        # Make the CUDA runtime discoverable from our own site-packages before
+        # CTranslate2 probes it, so GPU STT does not depend on the parent getting
+        # `LD_LIBRARY_PATH` exactly right (see `_preload_cuda_libraries`).
+        if self.args.device != "cpu":
+            _preload_cuda_libraries()
         from faster_whisper import WhisperModel
 
         started = time.time()
-        # `model` may be an official name (`base`) resolved by faster-whisper, or
-        # an absolute CTranslate2 model directory the app downloaded.
-        self.model = WhisperModel(
-            self.args.model,
-            device=self.args.device,
-            compute_type=self.args.compute_type,
-        )
+        try:
+            # `model` may be an official name (`base`) resolved by faster-whisper,
+            # or an absolute CTranslate2 model directory the app downloaded.
+            self.model = WhisperModel(
+                self.args.model,
+                device=self.args.device,
+                compute_type=self.args.compute_type,
+            )
+        except Exception as err:  # noqa: BLE001 - report, never crash the server
+            # A missing CUDA library, an unmappable model, or a corrupt download
+            # must be *visible*: the app reads `/health` for the reason rather than
+            # treating a bound port as proof the engine works.
+            self.ready = False
+            self.error = f"{type(err).__name__}: {err}"
+            print(f"[local-stt] load failed: {self.error}", flush=True)
+            return
+        self.ready = True
+        self.error = None
         # A single machine-readable line so the app can tell "ready" from "still
         # loading" without guessing a sleep duration.
         print(
@@ -145,6 +218,11 @@ class _Engine:
         # hotwords only re-weight the listed tokens, so agent names are favoured
         # without priming the output. `--initial-prompt` is still accepted as a
         # config default (see `--hotwords`), but the per-request path prefers it.
+        if not self.ready or self.model is None:
+            # Surface the load failure as a real error (HTTP 500) rather than an
+            # empty transcript, so the app can tell "engine broken" from "nothing
+            # was said".
+            raise RuntimeError(self.error or "speech engine is not ready")
         hotwords = prompt or self.args.hotwords or None
         segments, _info = self.model.transcribe(
             samples,
@@ -218,7 +296,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 (stdlib handler naming)
         if self.path.rstrip("/") in ("/health", ""):
-            self._json(200, {"status": "ok"})
+            engine = self.engine
+            # `/health` stays 200 while the server is *up* (so the port probe can
+            # still recognise it as ours), but it now reports whether the engine
+            # actually loaded. `{"status":"ok"}` alone was the trap: a server whose
+            # CUDA libraries were unreachable still answered ok and every
+            # transcription failed silently. `ready: false` + `error` lets the app
+            # refuse a broken engine and surface the reason.
+            self._json(
+                200,
+                {
+                    "status": "ok",
+                    "ready": bool(getattr(engine, "ready", False)),
+                    "error": getattr(engine, "error", None),
+                    "device": getattr(engine.args, "device", None),
+                },
+            )
         else:
             self._json(404, {"error": "not found"})
 

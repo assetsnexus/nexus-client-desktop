@@ -194,9 +194,27 @@ export type PythonEnvPlan = {
   envDir: string;
   /** The venv interpreter the engine runs (`<envDir>/bin/python`). */
   venvPython: string;
+  /**
+   * Venv `lib/`, the parent of the versioned `site-packages` directory. Kept so
+   * callers can enumerate it at runtime: the exact site-packages name embeds the
+   * interpreter's minor version (`lib/python3.12/site-packages`), which cannot be
+   * known at plan time because the venv may be created by a different Python.
+   */
+  libDir: string;
+  /**
+   * The site-packages directory for the *seeding* interpreter. A best-effort
+   * default: the real directory is discovered at runtime under {@link libDir},
+   * so a Python minor-version mismatch cannot silently point at a non-existent
+   * path (which would drop the CUDA libraries from `LD_LIBRARY_PATH`).
+   */
+  sitePackages: string;
   /** pip requirement specifiers to install. */
   requirements: string[];
-  /** Directories that must be prepended to `LD_LIBRARY_PATH` for CUDA libs. */
+  /**
+   * Directories that must be prepended to `LD_LIBRARY_PATH` for CUDA libs, under
+   * the plan-time site-packages. The spawner prefers the runtime-discovered
+   * site-packages when the venv already exists.
+   */
   libraryPaths: string[];
 };
 
@@ -209,7 +227,91 @@ export type PythonEnvPlanInput = {
   includeGpu: boolean;
   /** `posix` (Linux/macOS) or `win32` layout for `bin` vs `Scripts`. */
   platform?: NodeJS.Platform;
+  /**
+   * The venv interpreter's `major.minor` (e.g. `3.12`) when already known. Used
+   * to name the site-packages directory before the venv exists; afterwards the
+   * real directory is discovered on disk, so this is only a starting guess.
+   */
+  pythonVersion?: string;
+  /** File-existence probe for discovering the versioned site-packages dir. */
+  exists?: (path: string) => boolean;
+  /** Directory listing probe for the same discovery (injected for tests). */
+  readdir?: (path: string) => string[];
 };
+
+/**
+ * The CUDA library sub-paths the pip `nvidia-*` wheels install, relative to a
+ * site-packages directory. CTranslate2 `dlopen`s these by soname, so each lib
+ * directory must be on `LD_LIBRARY_PATH` (or preloaded — see the server script).
+ */
+export const CUDA_LIBRARY_SUBDIRS: readonly string[] = [
+  'nvidia/cublas/lib',
+  'nvidia/cudnn/lib',
+  'nvidia/cuda_nvrtc/lib',
+];
+
+/**
+ * Resolve the CUDA library directories to add to `LD_LIBRARY_PATH` from the
+ * *actual* site-packages directory of an existing venv.
+ *
+ * A POSIX venv stores packages under `lib/python<major>.<minor>/site-packages`.
+ * The previous plan hardcoded `lib/site-packages`, which does not exist in a real
+ * venv, so the CUDA directories were never found and every GPU transcription
+ * failed with `libcublas.so.12 is not found` — while `/health` still said "ok".
+ * This enumerates the versioned directories so the right one is used regardless
+ * of which Python created the venv; the first match wins (there is normally one).
+ *
+ * `exists` and `readdir` are injectable so this stays unit-testable without a
+ * filesystem.
+ */
+export function resolveSitePackages(
+  libDir: string,
+  deps: {
+    exists?: (path: string) => boolean;
+    readdir?: (path: string) => string[];
+  } = {},
+): string | null {
+  const exists = deps.exists ?? (() => false);
+  const readdir = deps.readdir ?? (() => []);
+  // Fast path: some layouts (and the tests) put site-packages directly under lib/.
+  const flat = `${libDir}/site-packages`;
+  if (exists(flat)) return flat;
+  let entries: string[] = [];
+  try {
+    entries = readdir(libDir);
+  } catch {
+    return null;
+  }
+  // `python3.12`, `python3.13`, … highest version wins if several exist.
+  const versioned = entries
+    .filter((name) => /^python\d+\.\d+$/.test(name))
+    .sort((a, b) => {
+      const [am, an] = a.slice('python'.length).split('.').map(Number);
+      const [bm, bn] = b.slice('python'.length).split('.').map(Number);
+      return (bm ?? 0) - (am ?? 0) || (bn ?? 0) - (an ?? 0);
+    });
+  for (const name of versioned) {
+    const candidate = `${libDir}/${name}/site-packages`;
+    if (exists(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** The CUDA lib dirs under a concrete site-packages directory. */
+export function cudaLibraryPathsFor(sitePackages: string): string[] {
+  return CUDA_LIBRARY_SUBDIRS.map((sub) => `${sitePackages}/${sub}`);
+}
+
+/**
+ * The running Node/Electron build's Python version, when it reports one. Node does
+ * not embed Python, so this is normally absent; the helper exists so the plan has
+ * a single place to consult and tests can substitute a known version.
+ */
+export function systemPythonVersion(): string {
+  const fromEnv = process.env.NEXUS_PYTHON_VERSION?.trim();
+  if (fromEnv) return fromEnv;
+  return '3.12';
+}
 
 /** Build the virtualenv/pip plan for the faster-whisper engine. */
 export function fasterWhisperEnvPlan(input: PythonEnvPlanInput): PythonEnvPlan {
@@ -219,19 +321,24 @@ export function fasterWhisperEnvPlan(input: PythonEnvPlanInput): PythonEnvPlan {
   // is primarily a Linux/NVIDIA story, but the layout is platform-correct anyway.
   const bin = platform === 'win32' ? 'Scripts' : 'bin';
   const pythonExe = platform === 'win32' ? 'python.exe' : 'python';
-  const sitePackages = `${envDir}/lib/site-packages`;
+  // POSIX venvs nest packages under a *versioned* directory
+  // (`lib/python3.12/site-packages`), never directly under `lib/`. Hardcoding
+  // `lib/site-packages` put a non-existent path on `LD_LIBRARY_PATH`, so
+  // CTranslate2 could not dlopen libcublas and every GPU transcription failed.
+  // Prefer a directory that actually exists on disk; otherwise fall back to the
+  // caller's known interpreter version, then to the system Python's version.
+  const libDir = `${envDir}/lib`;
+  const discovered = resolveSitePackages(libDir, input);
+  const pyVersion = input.pythonVersion?.trim() || systemPythonVersion();
+  const sitePackages = discovered ?? `${libDir}/python${pyVersion}/site-packages`;
   return {
     pythonCommand: input.pythonCommand ?? 'python3',
     envDir,
     venvPython: `${envDir}/${bin}/${pythonExe}`,
+    libDir,
+    sitePackages,
     requirements: requirementSpecs(input.includeGpu),
-    libraryPaths: input.includeGpu
-      ? [
-          `${sitePackages}/nvidia/cublas/lib`,
-          `${sitePackages}/nvidia/cudnn/lib`,
-          `${sitePackages}/nvidia/cuda_nvrtc/lib`,
-        ]
-      : [],
+    libraryPaths: input.includeGpu ? cudaLibraryPathsFor(sitePackages) : [],
   };
 }
 

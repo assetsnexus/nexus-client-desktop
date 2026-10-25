@@ -4,6 +4,7 @@ import {
   encodeWav,
   isLocalWakeHost,
   isSttServerServing,
+  probeSttHealth,
   createWakeStt,
   buildPhraseBiasPrompt,
   defaultWhisperThreads,
@@ -123,6 +124,26 @@ describe('isSttServerServing', () => {
       throw new Error('ECONNREFUSED');
     }) as unknown as typeof fetch;
     expect(await isSttServerServing(8086, down)).toBe(false);
+  });
+
+  it('still recognises a server whose engine failed to load (so the reason can be read)', async () => {
+    // A bound port with a broken engine is *ours* — it must be recognised so the
+    // app can surface the error, while `probeSttHealth` reports it is not ready.
+    const fetchFn = vi.fn(async () =>
+      json({ status: 'ok', ready: false, error: 'RuntimeError: Library libcublas.so.12 is not found' }),
+    ) as unknown as typeof fetch;
+    expect(await isSttServerServing(18085, fetchFn)).toBe(true);
+    const health = await probeSttHealth(18085, fetchFn);
+    expect(health).toMatchObject({
+      serving: true,
+      ready: false,
+      error: expect.stringContaining('libcublas.so.12'),
+    });
+  });
+
+  it('treats a server without a `ready` field as ready (whisper.cpp contract)', async () => {
+    const fetchFn = vi.fn(async () => json({ status: 'ok' })) as unknown as typeof fetch;
+    expect(await probeSttHealth(8085, fetchFn)).toMatchObject({ serving: true, ready: true, error: null });
   });
 });
 
@@ -593,6 +614,109 @@ describe('createWakeStt — faster-whisper GPU engine', () => {
     stt.dispose();
   });
 
+  it('does not adopt a GPU server whose engine failed to load, and reports why', async () => {
+    // The regression: the port answered `/health` "ok" while the engine could not
+    // dlopen libcublas, so every transcription 500'd and the wake silently showed
+    // nothing. A serving-but-not-ready engine must be rejected with its reason.
+    const model = sttModel();
+    const runner = gpuRunner();
+    const fetchFn = vi.fn(async (url: string) => {
+      if (url.includes('/health')) {
+        return {
+          ok: true,
+          text: async () =>
+            JSON.stringify({
+              status: 'ok',
+              ready: false,
+              error: 'RuntimeError: Library libcublas.so.12 is not found or cannot be loaded',
+            }),
+        };
+      }
+      return { ok: false, status: 500, text: async () => JSON.stringify({ error: 'should not be called' }) };
+    }) as unknown as typeof fetch;
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      listModels: () => [model],
+      resolveBinary: () => 'whisper-server',
+      fileExists: () => true,
+      startDelayMs: 0,
+      // Both ports report as bound so the HTTP probe decides.
+      portInUse: async () => false,
+      fetchFn,
+      gpuRunner: runner,
+      gpuPort: GPU_PORT,
+      spawnFn: vi.fn(() => ({ on: vi.fn(), kill: vi.fn() })) as unknown as typeof import('node:child_process').spawn,
+    });
+    expect(await stt.transcribe(new Float32Array([0.3]), 16_000)).toBeNull();
+    // The engine's own error is surfaced, not swallowed into "nothing was said".
+    expect(stt.lastError()).toContain('libcublas.so.12');
+  });
+
+  it('surfaces an HTTP error body from the speech server instead of a bare null', async () => {
+    const model = sttModel();
+    const fetchFn = vi.fn(async (url: string) => {
+      if (url.includes('/health')) {
+        return { ok: true, text: async () => JSON.stringify({ status: 'ok' }) };
+      }
+      return {
+        ok: false,
+        status: 500,
+        text: async () => JSON.stringify({ error: 'RuntimeError: Library libcublas.so.12 is not found' }),
+      };
+    }) as unknown as typeof fetch;
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      listModels: () => [model],
+      fileExists: () => true,
+      portInUse: async () => true,
+      fetchFn,
+    });
+    expect(await stt.transcribe(new Float32Array([0.3]), 16_000)).toBeNull();
+    expect(stt.lastError()).toContain('libcublas.so.12');
+  });
+
+  it('waits for a still-loading GPU engine instead of giving up after a fixed sleep', async () => {
+    const model = sttModel();
+    const runner = gpuRunner();
+    let ready = false;
+    const fetchFn = vi.fn(async (url: string) => {
+      if (url.includes('/health')) {
+        // Bound, still importing the model: `ready` false with no error yet.
+        return { ok: true, text: async () => JSON.stringify({ status: 'ok', ready }) };
+      }
+      return { ok: true, text: async () => JSON.stringify({ text: 'gpu-loaded' }) };
+    }) as unknown as typeof fetch;
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      listModels: () => [model],
+      fileExists: () => true,
+      startDelayMs: 0,
+      portInUse: async (p) => p === GPU_PORT,
+      fetchFn,
+      gpuRunner: runner,
+      gpuPort: GPU_PORT,
+    });
+    // The engine finishes loading shortly after the spawn.
+    setTimeout(() => {
+      ready = true;
+    }, 120);
+    expect(await stt.transcribe(new Float32Array([0.3]), 16_000)).toBe('gpu-loaded');
+    expect(stt.lastError()).toBeNull();
+    stt.dispose();
+  });
+
   it('falls back to whisper.cpp when the GPU engine is not preferred', async () => {
     const model = sttModel();
     const spawnFn = vi.fn(() => ({ on: vi.fn(), kill: vi.fn() }));
@@ -679,6 +803,89 @@ describe('createWakeStt — faster-whisper GPU engine', () => {
     });
     expect((await stt.status()).backend).toBe('custom');
     expect(runner.spawn).not.toHaveBeenCalled();
+  });
+
+  it('reuses an already-ready GPU server instead of spawning a second', async () => {
+    const model = sttModel();
+    const runner = gpuRunner();
+    const urls: string[] = [];
+    const fetchFn = vi.fn(async (url: string) => {
+      urls.push(url);
+      if (url.includes('/health')) {
+        return { ok: true, text: async () => JSON.stringify({ status: 'ok', ready: true, device: 'cuda' }) };
+      }
+      return { ok: true, text: async () => JSON.stringify({ text: 'reused-gpu' }) };
+    }) as unknown as typeof fetch;
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      listModels: () => [model],
+      fileExists: () => true,
+      startDelayMs: 0,
+      // No TCP shortcut: the HTTP health probe decides whether to reuse.
+      fetchFn,
+      gpuRunner: runner,
+      gpuPort: GPU_PORT,
+    });
+    expect(await stt.transcribe(new Float32Array([0.3]), 16_000)).toBe('reused-gpu');
+    // A healthy engine already on the port is adopted: no second spawn, and the
+    // transcription went to the GPU port.
+    expect(runner.spawn).not.toHaveBeenCalled();
+    expect(urls.some((u) => u.includes(String(GPU_PORT)) && u.includes('/inference'))).toBe(true);
+    stt.dispose();
+  });
+
+  it('does not adopt an already-bound GPU server whose engine failed to load', async () => {
+    // The reuse path used to accept any server whose port answered, so a broken
+    // engine (CUDA libraries unreachable) was adopted and every transcription
+    // 500'd with no explanation. It must be refused, its error surfaced, and the
+    // CPU engine used instead.
+    const model = sttModel();
+    const runner = gpuRunner();
+    const fetchFn = vi.fn(async (url: string) => {
+      const onGpu = url.includes(String(GPU_PORT));
+      if (url.includes('/health')) {
+        // Only the GPU engine is broken; the CPU fallback port is healthy.
+        return {
+          ok: true,
+          text: async () =>
+            JSON.stringify(
+              onGpu
+                ? {
+                    status: 'ok',
+                    ready: false,
+                    error: 'RuntimeError: Library libcublas.so.12 is not found or cannot be loaded',
+                  }
+                : { status: 'ok' },
+            ),
+        };
+      }
+      if (onGpu) {
+        return { ok: false, status: 500, text: async () => JSON.stringify({ error: 'broken gpu' }) };
+      }
+      return { ok: true, text: async () => JSON.stringify({ text: 'cpu-fallback' }) };
+    }) as unknown as typeof fetch;
+    const stt = createWakeStt({
+      modelsDir: () => '/tmp/wake-stt',
+      customEndpoint: () => null,
+      findModel: (id) => (id === model.id ? model : null),
+      isInstalled: (id) => id === model.id,
+      selectedModelId: () => model.id,
+      listModels: () => [model],
+      resolveBinary: () => 'whisper-server',
+      fileExists: () => true,
+      startDelayMs: 0,
+      // No TCP shortcut: the HTTP health probe must reject the broken GPU engine.
+      fetchFn,
+      gpuRunner: runner,
+      gpuPort: GPU_PORT,
+    });
+    expect(await stt.transcribe(new Float32Array([0.3]), 16_000)).toBe('cpu-fallback');
+    expect(stt.lastError()).toBeNull();
+    stt.dispose();
   });
 
   it('does not let a throwing GPU runner break readiness', async () => {

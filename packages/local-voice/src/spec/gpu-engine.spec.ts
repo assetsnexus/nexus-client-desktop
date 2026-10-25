@@ -6,6 +6,8 @@ import {
   MIN_USEFUL_VRAM_MIB,
   composeLibraryPath,
   cudaDeviceArg,
+  cudaLibraryPathsFor,
+  resolveSitePackages,
   fasterWhisperEnvPlan,
   fasterWhisperModelFor,
   fasterWhisperServerArgs,
@@ -124,15 +126,39 @@ describe('fasterWhisperEnvPlan', () => {
       dataDir: '/home/u/.config/Electron',
       includeGpu: true,
       platform: 'linux',
+      pythonVersion: '3.12',
     });
     expect(plan.envDir).toBe('/home/u/.config/Electron/voice-py');
     expect(plan.venvPython).toBe('/home/u/.config/Electron/voice-py/bin/python');
     expect(plan.pythonCommand).toBe('python3');
-    expect(plan.libraryPaths).toContain(
-      '/home/u/.config/Electron/voice-py/lib/site-packages/nvidia/cublas/lib',
+    // POSIX venvs nest site-packages under the interpreter version; the old
+    // `lib/site-packages` does not exist and silently broke CUDA discovery.
+    expect(plan.libDir).toBe('/home/u/.config/Electron/voice-py/lib');
+    expect(plan.sitePackages).toBe(
+      '/home/u/.config/Electron/voice-py/lib/python3.12/site-packages',
     );
     expect(plan.libraryPaths).toContain(
-      '/home/u/.config/Electron/voice-py/lib/site-packages/nvidia/cudnn/lib',
+      '/home/u/.config/Electron/voice-py/lib/python3.12/site-packages/nvidia/cublas/lib',
+    );
+    expect(plan.libraryPaths).toContain(
+      '/home/u/.config/Electron/voice-py/lib/python3.12/site-packages/nvidia/cudnn/lib',
+    );
+  });
+
+  it('prefers the site-packages directory that actually exists on disk', () => {
+    // A venv created by a different Python minor version than the guess: the
+    // on-disk directory must win, or the CUDA paths point at nothing.
+    const plan = fasterWhisperEnvPlan({
+      dataDir: '/data',
+      includeGpu: true,
+      platform: 'linux',
+      pythonVersion: '3.11',
+      exists: (p) => p === '/data/voice-py/lib/python3.13/site-packages',
+      readdir: () => ['python3.13', 'python3.12', 'site-packages'],
+    });
+    expect(plan.sitePackages).toBe('/data/voice-py/lib/python3.13/site-packages');
+    expect(plan.libraryPaths[0]).toBe(
+      '/data/voice-py/lib/python3.13/site-packages/nvidia/cublas/lib',
     );
   });
 
@@ -175,6 +201,54 @@ describe('venvCreateArgs / pipInstallArgs', () => {
     expect(args.slice(0, 4)).toEqual(['-m', 'pip', 'install', '--upgrade']);
     expect(args).toContain('faster-whisper>=1.0.0');
     expect(args).toContain('nvidia-cudnn-cu12>=9.0.0');
+  });
+});
+
+describe('resolveSitePackages', () => {
+  it('finds the versioned site-packages directory of a real venv', () => {
+    expect(
+      resolveSitePackages('/v/lib', {
+        exists: (p) => p === '/v/lib/python3.12/site-packages',
+        readdir: () => ['python3.12', 'python3.11'],
+      }),
+    ).toBe('/v/lib/python3.12/site-packages');
+  });
+
+  it('accepts a flat lib/site-packages layout when present', () => {
+    expect(
+      resolveSitePackages('/v/lib', { exists: (p) => p === '/v/lib/site-packages', readdir: () => [] }),
+    ).toBe('/v/lib/site-packages');
+  });
+
+  it('picks the highest interpreter version when several exist', () => {
+    expect(
+      resolveSitePackages('/v/lib', {
+        exists: (p) => p === '/v/lib/python3.13/site-packages',
+        readdir: () => ['python3.9', 'python3.13', 'python3.11'],
+      }),
+    ).toBe('/v/lib/python3.13/site-packages');
+  });
+
+  it('returns null when nothing matches (caller falls back to the plan)', () => {
+    expect(resolveSitePackages('/v/lib', { exists: () => false, readdir: () => ['python3.12'] })).toBeNull();
+    expect(
+      resolveSitePackages('/v/lib', {
+        exists: () => false,
+        readdir: () => {
+          throw new Error('ENOENT');
+        },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('cudaLibraryPathsFor', () => {
+  it('lists cublas, cudnn and nvrtc under the given site-packages', () => {
+    expect(cudaLibraryPathsFor('/sp')).toEqual([
+      '/sp/nvidia/cublas/lib',
+      '/sp/nvidia/cudnn/lib',
+      '/sp/nvidia/cuda_nvrtc/lib',
+    ]);
   });
 });
 

@@ -236,8 +236,32 @@ describe('createGpuSttEngine — spawnServer', () => {
     expect(call.args[call.args.indexOf('--model') + 1]).toBe('Systran/faster-whisper-base');
     expect(call.args[call.args.indexOf('--device') + 1]).toBe('cuda');
     expect(call.args[call.args.indexOf('--compute-type') + 1]).toBe('float16');
+    // The venv nests site-packages under the interpreter version; the discovered
+    // path must be used, not the old (non-existent) `lib/site-packages`.
     expect(call.env?.LD_LIBRARY_PATH).toContain(
-      '/data/voice-py/lib/site-packages/nvidia/cublas/lib',
+      '/data/voice-py/lib/python3.12/site-packages/nvidia/cublas/lib',
+    );
+    expect(call.env?.LD_LIBRARY_PATH).not.toContain('/data/voice-py/lib/site-packages');
+  });
+
+  it('discovers the real versioned site-packages for LD_LIBRARY_PATH', async () => {
+    const ctx = makeEngine({
+      fileExists: (p) =>
+        p === '/data/local-stt-server.py' ||
+        p === '/data/voice-py/bin/python' ||
+        p === '/data/voice-py/lib/python3.11/site-packages',
+      readDir: () => ['python3.11'],
+      whichFn: (cmd: string) => (cmd === 'python3' ? '/usr/bin/python3' : '/usr/bin/nvidia-smi'),
+      runCommand: (async (_c: string, args: string[]) =>
+        args[0]?.startsWith('--query-gpu')
+          ? { code: 0, stdout: 'NVIDIA GeForce RTX 2080, 8192, 555.1', stderr: '' }
+          : { code: 0, stdout: '', stderr: '' }) as never,
+    });
+    await ctx.engine.gpu();
+    ctx.engine.spawnServer({ ggmlFileName: 'ggml-tiny-q5_1.bin', port: 8085 });
+    const [call] = ctx.spawned;
+    expect(call.env?.LD_LIBRARY_PATH).toContain(
+      '/data/voice-py/lib/python3.11/site-packages/nvidia/cublas/lib',
     );
   });
 

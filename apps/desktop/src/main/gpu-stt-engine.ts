@@ -25,10 +25,11 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import {
   composeLibraryPath,
+  cudaLibraryPathsFor,
   fasterWhisperEnvPlan,
   fasterWhisperModelFor,
   fasterWhisperServerArgs,
@@ -36,6 +37,7 @@ import {
   pipInstallArgs,
   requirementSpecs,
   resolveComputeType,
+  resolveSitePackages,
   shouldUseGpu,
   venvCreateArgs,
   type ComputeType,
@@ -68,6 +70,12 @@ export type GpuSttEngineOptions = {
   nvidiaSmiPath?: string | null;
   /** File existence check; overridable for tests. */
   fileExists?: (path: string) => boolean;
+  /**
+   * Directory listing, used to discover the venv's versioned site-packages dir
+   * (`lib/python3.12/site-packages`) for the CUDA library path. Overridable so
+   * tests need no filesystem.
+   */
+  readDir?: (path: string) => string[];
   /** `nvidia-smi` runner; overridable for tests. Never throws. */
   runNvidiaSmi?: () => Promise<string | null>;
   /** PATH lookup override (tests). */
@@ -133,6 +141,7 @@ async function defaultGpuProbe(
 export function createGpuSttEngine(options: GpuSttEngineOptions): GpuSttEngine {
   const platform = options.platform ?? process.platform;
   const fileExists = options.fileExists ?? existsSync;
+  const readDirFn = options.readDir ?? ((path: string) => readdirSync(path, { withFileTypes: false }) as string[]);
   const spawnFn = options.spawnFn ?? spawn;
   const computePreference = options.computeType ?? 'auto';
   const venvAbort = { current: null as AbortController | null };
@@ -376,10 +385,22 @@ export function createGpuSttEngine(options: GpuSttEngineOptions): GpuSttEngine {
       hotwords,
     });
     // CTranslate2 loads CUDA via `dlopen`, and the pip `nvidia-*` wheels live
-    // outside the default search path, so prepend them for the child only.
+    // outside the default search path, so prepend them for the child only. The
+    // site-packages directory embeds the interpreter's minor version, so it is
+    // *discovered on disk* rather than assumed: the old hardcoded
+    // `lib/site-packages` does not exist in a real venv, which silently left the
+    // CUDA dirs off `LD_LIBRARY_PATH` and made every GPU transcription fail. The
+    // server also preloads these libraries itself (see `local-stt-server.py`), so
+    // this is now belt-and-suspenders rather than the only line of defence.
     const env: NodeJS.ProcessEnv = { ...process.env };
-    if (useGpu && plan.libraryPaths.length) {
-      env.LD_LIBRARY_PATH = composeLibraryPath(plan.libraryPaths, process.env.LD_LIBRARY_PATH);
+    if (useGpu) {
+      // Discover the venv's real site-packages (it is versioned, e.g.
+      // `lib/python3.12/site-packages`) and fall back to the plan's best guess.
+      const sitePackages = resolveSitePackages(plan.libDir, { exists: fileExists, readdir: readDirFn });
+      const libraryPaths = sitePackages ? cudaLibraryPathsFor(sitePackages) : plan.libraryPaths;
+      if (libraryPaths.length) {
+        env.LD_LIBRARY_PATH = composeLibraryPath(libraryPaths, process.env.LD_LIBRARY_PATH);
+      }
     }
     try {
       return spawnFn(plan.venvPython, args, { stdio: 'ignore', detached: false, env });

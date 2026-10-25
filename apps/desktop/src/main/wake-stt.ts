@@ -133,20 +133,65 @@ export async function isSttServerServing(
   port: number,
   doFetch: typeof fetch,
 ): Promise<boolean> {
+  const health = await probeSttHealth(port, doFetch);
+  return health.serving;
+}
+
+/** What `/health` said about a local STT server. */
+export type SttHealth = {
+  /** True when the port is answering *our* server's health contract. */
+  serving: boolean;
+  /**
+   * False when the server is up but its speech engine failed to load (e.g. the
+   * faster-whisper server could not dlopen a CUDA library, or the model download
+   * is broken). A bound port is NOT proof of a working engine — this is what made
+   * "wake word broken, no STT results" look like a healthy engine while every
+   * transcription returned an error.
+   */
+  ready: boolean;
+  /** The engine's own load error, when it reported one. */
+  error: string | null;
+  /** The device the engine loaded on (`cuda` / `cpu`), when reported. */
+  device: string | null;
+};
+
+/**
+ * Read a local STT server's `/health` and interpret it. Both engines answer
+ * `{"status":"ok"}`; the faster-whisper server additionally reports `ready` and
+ * `error` so a broken engine can be told apart from a working one. Absent
+ * `ready` (whisper.cpp, or an older server) means "serving implies ready", since
+ * that engine has no deferred load to fail.
+ */
+export async function probeSttHealth(
+  port: number,
+  doFetch: typeof fetch,
+): Promise<SttHealth> {
+  const failed: SttHealth = { serving: false, ready: false, error: null, device: null };
   try {
     const res = await doFetch(`http://127.0.0.1:${port}/health`, {
       signal: AbortSignal.timeout(1500),
     });
-    if (!res.ok) return false;
+    if (!res.ok) return failed;
     const text = await res.text();
+    let parsed: Record<string, unknown>;
     try {
-      const parsed = JSON.parse(text) as Record<string, unknown>;
-      return parsed.status === 'ok' || typeof parsed.text === 'string';
+      parsed = JSON.parse(text) as Record<string, unknown>;
     } catch {
-      return false;
+      return failed;
     }
+    const serving = parsed.status === 'ok' || typeof parsed.text === 'string';
+    if (!serving) return failed;
+    // An engine that explicitly reports not-ready is NOT usable, even though the
+    // port answered: its model/CUDA load failed and every request would 500.
+    const ready = parsed.ready === false ? false : true;
+    return {
+      serving,
+      ready,
+      error: typeof parsed.error === 'string' && parsed.error.trim() ? parsed.error : null,
+      device: typeof parsed.device === 'string' ? parsed.device : null,
+    };
   } catch {
-    return false;
+    return failed;
   }
 }
 
@@ -292,9 +337,25 @@ export type WakeSttDeps = {
   gpuPort?: number;
 };
 
+/** Parse a JSON body, returning null on any malformed input (never throws). */
+function safeParse(text: string): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(text) as unknown;
+    return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 export type WakeStt = {
   /** Resolve the local target + honest readiness (never throws). */
   status: () => Promise<WakeSttStatus>;
+  /**
+   * The last transcription failure, or null after a success. Lets the wake UI say
+   * *why* nothing was heard (engine failed to load, server unreachable) instead of
+   * silently showing an empty caption.
+   */
+  lastError: () => string | null;
   /**
    * Transcribe one utterance on-device; null when nothing was recognised.
    * `phrases` overrides the configured wake phrases for this call (the renderer
@@ -325,6 +386,19 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
   let gpuStarting: Promise<void> | null = null;
   /** True when a server we did NOT spawn is already serving on our port. */
   let externalServer = false;
+  /**
+   * The engine's own load error when a server was up but unusable (e.g. a missing
+   * CUDA library). Surfaced in status/transcribe so "no results" has a real cause
+   * instead of looking like silence.
+   */
+  let engineLoadError: string | null = null;
+  /**
+   * The most recent transcription failure (engine load error, HTTP error, or an
+   * unreachable server). Exposed via {@link WakeStt.lastError} so the renderer can
+   * explain "no results" instead of showing an empty caption as if the room was
+   * silent. Cleared on a successful transcription.
+   */
+  let lastError: string | null = null;
 
   /**
    * True when *our* STT server is answering on the port. Uses the injected
@@ -334,6 +408,23 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
   function servingOurServer(p: number): Promise<boolean> {
     if (deps.portInUse) return deps.portInUse(p).catch(() => false);
     return isSttServerServing(p, doFetch);
+  }
+
+  /**
+   * True when the port serves our server *and* its engine loaded. Reusing a
+   * server whose engine failed would make every transcription return an error
+   * while readiness said "ready" — the exact silent failure this guards against.
+   * A serving-but-not-ready server is recorded so the reason can be surfaced.
+   */
+  async function servingReadyServer(p: number): Promise<boolean> {
+    if (deps.portInUse) return deps.portInUse(p).catch(() => false);
+    const health = await probeSttHealth(p, doFetch);
+    if (health.serving && !health.ready) {
+      engineLoadError = health.error ?? 'The local speech engine failed to load.';
+      return false;
+    }
+    if (health.serving && health.ready) engineLoadError = null;
+    return health.serving;
   }
   /**
    * Whether the faster-whisper GPU engine should serve the wake. Best-effort:
@@ -432,8 +523,10 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
     const url = `http://127.0.0.1:${port}/inference`;
     // Someone already serves this port → reuse it (do not kill what we did not
     // start). Verified over HTTP, not a bare TCP connect: an unrelated service on
-    // the port must not be mistaken for our STT server.
-    if (!proc && (await servingOurServer(port))) {
+    // the port must not be mistaken for our STT server, and a server whose engine
+    // failed to load must not be reused either (its port answers, its
+    // transcriptions all error).
+    if (!proc && (await servingReadyServer(port))) {
       externalServer = true;
       return { url, model: model.modelRef ?? model.label };
     }
@@ -502,9 +595,13 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
     const runner = deps.gpuRunner;
     if (!runner) return null;
     const url = `http://127.0.0.1:${gpuPort}/inference`;
-    // Reuse a server already bound to the GPU port (e.g. a prior session). HTTP
-    // verified: a foreign service on this port must not be adopted as our server.
-    if (!gpuProc && (await servingOurServer(gpuPort))) {
+    // Reuse a server already bound to the GPU port (e.g. a prior session), but
+    // only when its engine actually *loaded*. A server whose CUDA libraries were
+    // unreachable still binds and answers `/health`, so a bare "is it serving"
+    // check would adopt a permanently broken engine and every transcription would
+    // 500 — the exact "wake word broken, no STT results" symptom. This mirrors
+    // `ensureServer`'s readiness-aware reuse for whisper.cpp.
+    if (!gpuProc && (await servingReadyServer(gpuPort))) {
       return { url, model: model.modelRef ?? model.label };
     }
     if (!gpuProc) {
@@ -537,8 +634,45 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
       gpuStarting = null;
     }
     if (!gpuProc) return null;
-    if (!(await servingOurServer(gpuPort))) return null;
+    // Wait for the engine to actually *load*, not just bind. The Python server
+    // binds its port only after importing faster-whisper/CTranslate2 and loading
+    // the model into VRAM; on a cold start (first import, model download) that can
+    // take several seconds. The previous fixed sleep gave up early, so the wake
+    // silently fell back to CPU whisper.cpp — or, worse, reused a server whose
+    // engine had failed to load. Poll `/health` until it reports ready.
+    const health = await waitForEngineReady(gpuPort);
+    if (!health.serving) return null;
+    if (!health.ready) {
+      // Bound but broken (e.g. the CUDA libraries could not be loaded): do not
+      // pretend it works — record the reason and let the caller fall back.
+      engineLoadError = health.error ?? 'The local speech engine failed to load.';
+      return null;
+    }
+    engineLoadError = null;
     return { url, model: model.modelRef ?? model.label };
+  }
+
+  /**
+   * Poll `/health` until the engine reports ready, or give up. A server that is
+   * up but whose engine failed returns immediately (retrying cannot fix a missing
+   * library), while a still-loading server keeps its port closed or reports
+   * `ready: false` without an error — both are waited on within the budget.
+   */
+  async function waitForEngineReady(p: number): Promise<SttHealth> {
+    const budget = deps.startDelayMs ?? 1200;
+    const deadline = Date.now() + Math.max(budget, 15_000);
+    let last: SttHealth = { serving: false, ready: false, error: null, device: null };
+    while (Date.now() < deadline) {
+      const health = await probeSttHealth(p, doFetch);
+      if (health.serving) {
+        if (health.ready) return health;
+        // Serving but broken with a real error: retrying will not help.
+        if (health.error) return health;
+      }
+      last = health;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return last;
   }
 
   type Resolution = {
@@ -610,7 +744,11 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
       if (await gpuPreferred()) {
         return { target: null, reason: null, code: null, model, usingCustomEndpoint: false, capable: true };
       }
-      const serving = await servingOurServer(port);
+      // A server already up on the port counts only when its engine loaded: a
+      // serving-but-broken engine would make readiness claim "ready" while every
+      // transcription failed. Otherwise a runnable runner means "capable" (it
+      // starts on demand), which is what readiness is about.
+      const serving = await servingReadyServer(port);
       if (serving || runnerIsInstalled()) {
         return {
           target: null,
@@ -671,7 +809,9 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
           : 'whisper_cpp';
       return {
         ready,
-        reason: ready ? null : r.reason,
+        // A load error already discovered on the port is more specific than the
+        // generic resolution reason, so prefer it.
+        reason: ready ? null : (engineLoadError ?? r.reason),
         code: ready ? null : r.code,
         modelId: r.model?.id ?? null,
         modelLabel: r.model?.label ?? null,
@@ -683,8 +823,17 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
     },
     async transcribe(pcm, sampleRate, phrases) {
       if (!pcm.length) return null;
-      const { target } = await resolveTarget(true);
-      if (!target) return null;
+      const resolution = await resolveTarget(true);
+      const target = resolution.target;
+      if (!target) {
+        // A real cause (missing model, missing runner, engine failed to load) must
+        // not look like "the user said nothing": the wake path would show an empty
+        // caption forever with no explanation. Report it so the renderer surfaces
+        // a message; the reason string is already human-safe.
+        const reason = engineLoadError ?? resolution.reason;
+        if (reason) lastError = reason;
+        return null;
+      }
       try {
         const wav = encodeWav(pcm, sampleRate);
         const form = new FormData();
@@ -699,21 +848,36 @@ export function createWakeStt(deps: WakeSttDeps): WakeStt {
         const phrasePrompt = buildPhraseBiasPrompt(phrases ?? deps.wakePhrases?.() ?? []);
         if (phrasePrompt) form.append('prompt', phrasePrompt);
         const res = await doFetch(target.url, { method: 'POST', body: form });
-        if (!res.ok) return null;
         const text = await res.text();
+        if (!res.ok) {
+          // An engine that cannot load answers 500 with `{"error": "…"}`. Returning
+          // a bare null here is what made a broken GPU engine indistinguishable
+          // from silence, so record and surface the engine's own message.
+          const parsed = safeParse(text);
+          const detail =
+            typeof parsed?.error === 'string' && parsed.error.trim()
+              ? parsed.error.trim()
+              : `The local speech server returned HTTP ${res.status}.`;
+          lastError = detail;
+          return null;
+        }
         if (!text) return null;
         // whisper.cpp returns `{"text": "…"}`; OpenAI-compatible returns the same.
-        try {
-          const parsed = JSON.parse(text) as Record<string, unknown>;
+        const parsed = safeParse(text);
+        if (parsed) {
           const value = parsed.text ?? (parsed.data as Record<string, unknown> | undefined)?.text;
+          lastError = null;
           return typeof value === 'string' && value.trim() ? value.trim() : null;
-        } catch {
-          const plain = text.trim();
-          return plain ? plain : null;
         }
-      } catch {
+        const plain = text.trim();
+        return plain ? plain : null;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : 'The local speech server could not be reached.';
         return null;
       }
+    },
+    lastError() {
+      return lastError;
     },
     dispose() {
       // Kill the GPU (Python) server we spawned, if any. A GPU server never goes
