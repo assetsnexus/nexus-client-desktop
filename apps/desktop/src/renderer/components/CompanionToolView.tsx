@@ -32,11 +32,12 @@ import {
   bridge,
   callBridge,
   onBridge,
+  type CompanionTitleReport,
   type CompanionToolRoute,
   type CompanionToolSnapshot,
   type CompanionToolSync,
 } from '../bridge.js';
-import { resolveCompanionLabel } from '../../shared/companion-label.js';
+import { companionToolLabel, isReportableCompanionLabel } from '../../shared/companion.js';
 
 const shell: CSSProperties = {
   height: '100vh',
@@ -66,14 +67,15 @@ const body: CSSProperties = {
 
 const muted: CSSProperties = { color: '#9aa7b5', fontSize: 12 };
 
-const TOOL_TITLES: Record<string, string> = {
-  'motion-feed': 'Motion feed',
-  gestures: 'Gesture tester',
-  'status-motions': 'Status motions',
-};
-
+/**
+ * The tool's display label (`Motion feed`, …).
+ *
+ * Delegates to the shared {@link companionToolLabel} table so this header and
+ * main's OS window caption cannot drift; the local export stays for callers that
+ * already import it.
+ */
 function toolTitle(tool: string): string {
-  return TOOL_TITLES[tool] ?? tool;
+  return companionToolLabel(tool);
 }
 
 /**
@@ -83,9 +85,18 @@ function toolTitle(tool: string): string {
  */
 export function CompanionToolView({ route }: { route: CompanionToolRoute }) {
   const { tool, contactId } = route;
-  // The agent's human name for the header — never the raw `contactId` (that was
-  // the bug: an id where a name belongs). Falls back to the neutral literal.
-  const agentName = resolveCompanionLabel(route.agentName);
+  /**
+   * The agent's human name for the header — never the raw `contactId` (that was
+   * the bug: an id where a name belongs).
+   *
+   * The hash only carries what was known when this window opened, so the name is
+   * kept in state: the owning companion pushes the label it resolved *after*
+   * mount through the tool snapshot, and the header follows it. The neutral
+   * literal is only the floor when nothing human-readable ever arrives.
+   */
+  const [liveAgentName, setLiveAgentName] = useState<string | null>(
+    isReportableCompanionLabel(route.agentName) ? (route.agentName as string).trim() : null,
+  );
 
   // Status motions start from the shared defaults and are replaced by the owning
   // companion's snapshot; an edit is relayed straight back so the companion (and
@@ -104,9 +115,32 @@ export function CompanionToolView({ route }: { route: CompanionToolRoute }) {
       if (snapshot.statusMotions) setStatusMotions(parseStatusMotions(snapshot.statusMotions));
       setGestures(Array.isArray(snapshot.gestures) ? snapshot.gestures : []);
       setFeed(Array.isArray(snapshot.actionFeed) ? snapshot.actionFeed : []);
+      // A snapshot carries the owning companion's resolved agent name; adopt it so
+      // a tool window opened before the name was known loses its bare label. The
+      // floor literal (`Companion`) is not a name, so it is ignored here rather
+      // than becoming `<Tool> · Companion`.
+      const pushedName = isReportableCompanionLabel(snapshot.agentName)
+        ? (snapshot.agentName as string).trim()
+        : null;
+      if (pushedName) setLiveAgentName((current) => current ?? pushedName);
     });
     return () => off();
   }, [contactId]);
+
+  /**
+   * Report this window's own caption to main so its OS title follows the resolved
+   * agent (the create-time title is only a hint, frozen before the name arrived).
+   * Addressed to *this* tool window by contact + tool, so main re-titles exactly
+   * this caption and nothing else. A report with no usable name is dropped in main.
+   */
+  useEffect(() => {
+    if (!liveAgentName) return;
+    void callBridge<boolean>(bridge, 'companionSetTitle', false, {
+      contactId,
+      titles: [liveAgentName],
+      tool,
+    } satisfies CompanionTitleReport);
+  }, [contactId, tool, liveAgentName]);
 
   const publishStatusMotions = useCallback(
     (next: StatusMotionMap) => {
@@ -138,12 +172,19 @@ export function CompanionToolView({ route }: { route: CompanionToolRoute }) {
         <strong style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {toolTitle(tool)}
         </strong>
-        <span style={{ ...muted, fontSize: 11 }}>· {agentName}</span>
+        {/* The agent suffix only appears once a real name is known: rendering the
+            floor literal here (`· Companion`) was exactly the bug, so the header
+            stays the bare tool label until the owning companion reports a name. */}
+        {liveAgentName ? <span style={{ ...muted, fontSize: 11 }}>· {liveAgentName}</span> : null}
         <span style={{ flex: 1 }} />
       </div>
       <div style={body}>
         {!snapshotSeen && tool !== 'gestures' ? (
-          <p style={muted}>Waiting for {agentName}&rsquo;s companion to share its state…</p>
+          <p style={muted}>
+            {liveAgentName
+              ? `Waiting for ${liveAgentName}’s companion to share its state…`
+              : 'Waiting for the companion to share its state…'}
+          </p>
         ) : null}
         {tool === 'status-motions' ? (
           <StatusMotionsConfig motions={statusMotions} onChange={publishStatusMotions} />

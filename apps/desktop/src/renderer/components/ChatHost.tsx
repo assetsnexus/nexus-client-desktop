@@ -96,6 +96,12 @@ export function ChatHost({
      * renders the room's **shared** multi-agent scene, not a lone avatar.
      */
     roomId: string | null;
+    /**
+     * The room's own human name, when the panel is a room. A room companion is
+     * named after the room it renders, so it is carried separately from the
+     * focused agent's `title` (which names one occupant, not the room).
+     */
+    roomTitle: string | null;
     isAgent: boolean;
   } | null>(null);
 
@@ -205,6 +211,12 @@ export function ChatHost({
         // A panel bound to a group room carries the room id; the companion uses
         // it to render every agent of the room in one shared scene.
         roomId: panel?.roomId ?? null,
+        // The room's own name, so a room companion is titled with the room rather
+        // than whichever occupant happens to be focused. A DM panel has no room,
+        // so this stays null and the agent name is the caption.
+        roomTitle: resolveCompanionLabelOrNull(
+          panel?.roomId ? (panel.displayTitle ?? panel.title) : null,
+        ),
         isAgent: true,
       });
     };
@@ -704,9 +716,13 @@ export function ChatHost({
       // Hand the live wake session to the companion (it renders the STT preview +
       // composer straight away) instead of starting a separate realtime call:
       // voice mode is a toggle the user opts into, not the wake default.
+      // Prefer the conversation the wake resolved; fall back to whatever thread the
+      // chat already has open so the launch is still bound to a conversation rather
+      // than opening an unaddressed window.
+      const conversationId = conversationIdRef.current ?? chat.getState().conversationId ?? null;
       const presented = await callBridge(bridge, 'companionPresent', false, {
         contactId: target.contactId,
-        conversationId: conversationIdRef.current,
+        conversationId,
         agentId: target.agentId,
         phrase: wakeSession?.target.phrase ?? null,
         dictate: true,
@@ -715,7 +731,7 @@ export function ChatHost({
       if (presented) return;
       await bridge.companionOpen({
         contactId: target.contactId,
-        conversationId: conversationIdRef.current,
+        conversationId,
         agentId: target.agentId,
         title: resolveCompanionLabelOrNull(target.agentName),
         avatarUrl: target.avatarUrl ?? null,
@@ -807,6 +823,9 @@ export function ChatHost({
                 // Room panels open the shared multi-agent scene; 1:1 DMs leave
                 // this null for the single-avatar stage.
                 roomId: activeContact.roomId,
+                // A room companion is titled after the room; carry its own name
+                // so the OS caption is right before the room scene even loads.
+                roomTitle: activeContact.roomTitle,
               }
             : null;
       if (!target) return;

@@ -8,6 +8,12 @@ import {
   electSttOwner,
   sttOwnerMessage,
   COMPANION_HASH_PREFIX,
+  COMPANION_WINDOW_TITLE_FALLBACK,
+  companionLabelCandidates,
+  companionToolLabel,
+  companionToolWindowTitle,
+  companionWindowTitle,
+  isReportableCompanionLabel,
 } from './companion.js';
 
 describe('buildCompanionHash / parseCompanionHash', () => {
@@ -20,6 +26,7 @@ describe('buildCompanionHash / parseCompanionHash', () => {
       title: 'Aria',
       avatarUrl: 'https://x/avatar.png',
       roomId: 'room-7',
+      roomTitle: 'Writers',
       autoStart: true,
       mode: 'split' as const,
       alwaysOnTop: true,
@@ -34,6 +41,21 @@ describe('buildCompanionHash / parseCompanionHash', () => {
     expect(parsed?.roomId).toBe('room-7');
   });
 
+  it('round-trips the room name so a room companion is titled with the room', () => {
+    const parsed = parseCompanionHash(
+      buildCompanionHash({ contactId: 've-1', roomId: 'room-7', roomTitle: 'Writers', title: 'Aria' }),
+    );
+    expect(parsed?.roomTitle).toBe('Writers');
+  });
+
+  it('drops an id-shaped roomTitle from a hand-built hash', () => {
+    const RAW_ID = '1792316062792-nm26u6zve';
+    const parsed = parseCompanionHash(
+      buildCompanionHash({ contactId: 've-1', roomId: 'room-7', roomTitle: RAW_ID }),
+    );
+    expect(parsed?.roomTitle).toBeNull();
+  });
+
   it('keeps only the required field and defaults autoStart to true', () => {
     const parsed = parseCompanionHash(buildCompanionHash({ contactId: 've-1' }));
     expect(parsed).toEqual({
@@ -44,6 +66,7 @@ describe('buildCompanionHash / parseCompanionHash', () => {
       title: null,
       avatarUrl: null,
       roomId: null,
+      roomTitle: null,
       autoStart: true,
       mode: 'fullscreen',
       alwaysOnTop: false,
@@ -140,6 +163,66 @@ describe('parseCompanionHash rejection', () => {
   it('isCompanionHash mirrors parse', () => {
     expect(isCompanionHash(buildCompanionHash({ contactId: 'x' }))).toBe(true);
     expect(isCompanionHash('#chat')).toBe(false);
+  });
+});
+
+describe('companion window titles (one caption rule for main + renderer)', () => {
+  it('composes the OS caption as `Nexus · <Name>`', () => {
+    expect(companionWindowTitle('Aria')).toBe('Nexus · Aria');
+  });
+
+  it('falls back to the app-neutral literal when nothing human-readable exists', () => {
+    expect(companionWindowTitle(null, undefined, '   ')).toBe(COMPANION_WINDOW_TITLE_FALLBACK);
+  });
+
+  it('never lets an id-shaped candidate become a caption', () => {
+    expect(companionWindowTitle('1792316062792-nm26u6zve')).toBe(COMPANION_WINDOW_TITLE_FALLBACK);
+    // A later real name still wins over an id-shaped first candidate.
+    expect(companionWindowTitle('1792316062792-nm26u6zve', 'Aria')).toBe('Nexus · Aria');
+  });
+
+  it('orders candidates: room name first for a room companion', () => {
+    expect(
+      companionLabelCandidates({ roomId: 'room-1', roomTitle: 'Writers', title: 'Aria' })[0],
+    ).toBe('Writers');
+  });
+
+  it('orders candidates: agent name first for a 1:1 companion', () => {
+    expect(companionLabelCandidates({ roomId: null, roomTitle: null, title: 'Aria' })[0]).toBe('Aria');
+  });
+
+  it('appends extra live candidates after the launch hints', () => {
+    expect(
+      companionLabelCandidates({ roomId: null, roomTitle: null, title: null }, 'Live Name'),
+    ).toEqual([null, null, 'Live Name']);
+  });
+
+  it('composes a tool caption as `<Tool> · <Agent>` and degrades to the bare tool', () => {
+    expect(companionToolWindowTitle('motion-feed', 'Aria')).toBe('Motion feed · Aria');
+    expect(companionToolWindowTitle('motion-feed', null)).toBe('Motion feed');
+    expect(companionToolWindowTitle('motion-feed', '1792316062792-nm26u6zve')).toBe('Motion feed');
+  });
+
+  it('labels a tool by its human name, falling back to the raw id for an unknown tool', () => {
+    expect(companionToolLabel('gestures')).toBe('Gesture tester');
+    expect(companionToolLabel('mystery')).toBe('mystery');
+  });
+
+  describe('isReportableCompanionLabel', () => {
+    it('accepts a real human name', () => {
+      expect(isReportableCompanionLabel('Aria')).toBe(true);
+    });
+
+    it('rejects the in-app floor literal so it never becomes `Nexus · Companion`', () => {
+      expect(isReportableCompanionLabel('Companion')).toBe(false);
+    });
+
+    it('rejects ids and blanks', () => {
+      expect(isReportableCompanionLabel('1792316062792-nm26u6zve')).toBe(false);
+      expect(isReportableCompanionLabel('   ')).toBe(false);
+      expect(isReportableCompanionLabel(null)).toBe(false);
+      expect(isReportableCompanionLabel(undefined)).toBe(false);
+    });
   });
 });
 

@@ -23,6 +23,7 @@ import type { MeetingPresenceMap } from '@nexus/meetings-core';
 import { bridge, type MeetingRoomRow } from '../bridge.js';
 import { projectRoomSession } from '../meetings/room-session.js';
 import { resolveFocusOccupantId, sceneRoomOccupants } from '../meetings/scene-occupants.js';
+import { resolveCompanionLabelOrNull } from '../../shared/companion-label.js';
 
 /** Presence projection: room presence rows → the meetings-core presence map. */
 function presenceMap(row: MeetingRoomRow): MeetingPresenceMap {
@@ -79,12 +80,23 @@ export type CompanionRoomStageProps = {
    * character tool pack to just this agent inside the shared scene.
    */
   onRoomReady?: (room: SceneRoom | null, focusOccupantId: string | null) => void;
+  /**
+   * Receives the room's own human name once the roster loads.
+   *
+   * A room companion is titled after the room, but the launch only carries the
+   * name when the caller already knew it (and the name may be absent on a cold
+   * open). This is how the window learns it afterwards so the caption can be
+   * corrected without a reload. Never called with an id-shaped value: the shared
+   * label rule rejects those at the consumer.
+   */
+  onRoomTitle?: (title: string | null) => void;
 };
 
 export function CompanionRoomStage({
   roomId,
   focusIds,
   onRoomReady,
+  onRoomTitle,
 }: CompanionRoomStageProps) {
   const [room, setRoom] = useState<MeetingRoomRow | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +121,13 @@ export function CompanionRoomStage({
       cancelled = true;
     };
   }, [roomId]);
+
+  // Report the room's own name once the roster resolves, so a room companion
+  // opened before the name was known can title its window with the room.
+  useEffect(() => {
+    if (!room) return;
+    onRoomTitle?.(resolveCompanionLabelOrNull(room.title));
+  }, [room, onRoomTitle]);
 
   const session = useMemo(() => (room ? projectRoomSession(room) : null), [room]);
   const occupancy = useMemo(

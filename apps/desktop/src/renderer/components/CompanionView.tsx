@@ -93,7 +93,13 @@ import {
   type CompanionMenuAction,
 } from '../companion/companion-scene-menu.js';
 import { SceneContextMenu, SceneMenuAnchorContext } from '../companion/SceneContextMenu.js';
-import { normalizePoseContext, poseToBrowserContext } from '../../shared/companion.js';
+import {
+  companionLabelCandidates,
+  isReportableCompanionLabel,
+  normalizePoseContext,
+  poseToBrowserContext,
+  type CompanionTitleReport,
+} from '../../shared/companion.js';
 import { resolveCompanionLabel, resolveCompanionLabelOrNull } from '../../shared/companion-label.js';
 import type { CompanionToolId, LocalAvatarsConfig } from '../../shared/ipc.js';
 
@@ -1054,12 +1060,28 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
             contactId: launch.contactId,
             // A human name for the tool-window title; `null` (not an id) when the
             // agent is not resolved yet, so the window falls back to its literal.
-            agentName: resolveCompanionLabelOrNull(launch.title, contact?.name),
+            agentName: resolveCompanionLabelOrNull(...companionLabelCandidates(launch, contact?.name)),
+            // The tool window resolves the *same* live session as this companion,
+            // so the conversation binding is carried through instead of leaving the
+            // window to guess which thread it belongs to.
+            conversationId: launch.conversationId ?? null,
+            agentId: launch.agentId ?? null,
+            virtualEmployeeId: launch.virtualEmployeeId ?? null,
           });
           break;
       }
     },
-    [resetPose, launch.contactId, launch.title, contact?.name],
+    [
+      resetPose,
+      launch.contactId,
+      launch.title,
+      launch.roomId,
+      launch.roomTitle,
+      launch.conversationId,
+      launch.agentId,
+      launch.virtualEmployeeId,
+      contact?.name,
+    ],
   );
 
   // Deliverable 3: main tells us which of our tool windows are open, so the
@@ -1125,9 +1147,64 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   }, [present?.conversationId, present?.token, chat]);
 
   const preview = latestTranscriptPreview(turns);
-  // Header label: the launch title (only ever a human name — a raw id is dropped
-  // at hash build/parse), then the live contact name, then the neutral literal.
-  const agentName = resolveCompanionLabel(launch.title, contact?.name);
+  /**
+   * The room's live name once its roster loads (Deliverable: room companions are
+   * named after the room). Seeded from the launch hint and enriched by
+   * {@link CompanionRoomStage}, so a room opened before the name was known still
+   * ends up titled with the room.
+   */
+  const [roomTitle, setRoomTitle] = useState<string | null>(launch.roomTitle ?? null);
+  /**
+   * Adopt the room's name once the roster resolves it. Stable identity so the
+   * room stage's report effect does not re-run on every render; an already-known
+   * name is never replaced by a later (or missing) one.
+   */
+  const applyRoomTitle = useCallback((title: string | null) => {
+    if (!title) return;
+    setRoomTitle((current) => current ?? title);
+  }, []);
+  /**
+   * Header label, following the shared precedence exactly (never a second rule):
+   * the room's own name for a room companion, else the launch title (only ever a
+   * human name — a raw id is dropped at hash build/parse), then the live contact
+   * name, then the neutral literal. Ordered through {@link companionLabelCandidates}
+   * so main's OS caption and this header can never disagree about what the window
+   * is called.
+   */
+  const agentName = resolveCompanionLabel(
+    ...companionLabelCandidates(
+      { roomId: launch.roomId, roomTitle, title: launch.title },
+      contact?.name,
+    ),
+  );
+  /**
+   * The same label, but `null` when all that is available is the neutral floor
+   * literal. Handed to the tool relay (and used for the OS caption report) so the
+   * literal `Companion` is never mistaken for a name.
+   */
+  const reportableAgentName = isReportableCompanionLabel(agentName) ? agentName : null;
+  /**
+   * Report the resolved label to main so the OS window caption follows the live
+   * session, not just the one-shot launch hint. Without this a companion opened
+   * before its contact/room resolved would keep `Nexus Companion` in the title bar
+   * forever. The report only carries *candidates*: main re-applies the shared
+   * id-shape rule and ignores a report that resolves nothing, so this can never
+   * downgrade a good name. Re-runs as `contact`/room data fills in.
+   */
+  useEffect(() => {
+    // Only *reportable* candidates are sent: the fallback contact's neutral literal
+    // (`Companion`) is not a name, and reporting it would only set the OS caption
+    // to `Nexus · Companion`. The helper is shared with main so the two agree.
+    const titles = companionLabelCandidates(
+      { roomId: launch.roomId, roomTitle, title: launch.title },
+      contact?.name,
+    ).filter((value) => isReportableCompanionLabel(value));
+    if (titles.length === 0) return;
+    void callBridge<boolean>(bridge, 'companionSetTitle', false, {
+      contactId: launch.contactId,
+      titles,
+    } satisfies CompanionTitleReport);
+  }, [launch.contactId, launch.title, launch.roomId, roomTitle, contact?.name]);
   const isImageAvatar = resolved?.choice.kind === 'image';
   // The agent's own multi-picture set, for the carousel control (only shown when
   // there is more than one picture to rotate through).
@@ -1303,6 +1380,10 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
                     // The room roster keys occupants by participant id, which may
                     // be the agent id or the VE id rather than the contact id.
                     focusIds={[launch.contactId, launch.agentId, launch.virtualEmployeeId]}
+                    // Enrich the room's own name once the roster loads, so a room
+                    // companion opened before the name was known is titled with the
+                    // room (never one occupant's name).
+                    onRoomTitle={applyRoomTitle}
                     onRoomReady={(room, occupantId) => {
                       // `CompanionSceneHost` satisfies the stage-host contract at
                       // runtime (the tool pack only calls these methods); its
@@ -1448,6 +1529,11 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
         active={toolWindowsOpen}
         statusMotions={statusMotions}
         getGestures={() => hostGetterRef.current?.listGestures?.() ?? []}
+        // The resolved agent name, so a tool window opened before the name was
+        // known can title itself (and be re-titled in the OS caption) instead of
+        // showing the bare tool label forever. `null` (not the floor literal) when
+        // nothing human-readable exists yet.
+        agentName={reportableAgentName}
       />
 
       {menu.open ? (
@@ -1517,13 +1603,19 @@ function CompanionToolRelay({
   active,
   statusMotions,
   getGestures,
+  agentName,
 }: {
   contactId: string;
   active: boolean;
   statusMotions: StatusMotionMap;
   getGestures: () => string[];
+  /** The resolved agent label, pushed so a tool window can title itself. */
+  agentName?: string | null;
 }) {
   const feed = useMotionFeed();
+  // A tool window has no session of its own, so this companion is the only surface
+  // that can tell it the agent's name once it resolves: `agentName` rides the
+  // tool snapshot, and the tool window re-titles itself from it.
   useEffect(() => {
     if (!active) return;
     void callBridge<boolean>(bridge, 'companionToolPublish', false, {
@@ -1531,10 +1623,11 @@ function CompanionToolRelay({
       statusMotions: serializeStatusMotions(statusMotions),
       gestures: getGestures(),
       actionFeed: feed.events,
+      agentName: agentName ?? null,
     });
     // `feed.events` is a fresh array per event, so this republishes on every
     // action without a timer; `statusMotions` publishes on an edit too. The
     // gestures are read through the getter so a stage swap is reflected live.
-  }, [active, contactId, statusMotions, getGestures, feed.events]);
+  }, [active, contactId, statusMotions, getGestures, feed.events, agentName]);
   return null;
 }

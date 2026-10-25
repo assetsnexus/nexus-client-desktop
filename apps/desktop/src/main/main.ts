@@ -101,6 +101,7 @@ import {
   type CompanionLaunch,
   type CompanionPresent,
   type CompanionSessionView,
+  type CompanionTitleReport,
   type CompanionToolSnapshot,
   type CompanionToolSync,
   type ConnectionConfigPatch,
@@ -1573,6 +1574,14 @@ function registerIpc(): void {
     return closed;
   });
   ipcMain.handle(IPC.companionList, () => companionWindows.openContactIds());
+  // The launch title is a hint frozen at window-create time, so the companion
+  // renderer reports the label it resolved from the live session and main applies
+  // it to the OS caption. Without this a companion opened before its contact/room
+  // resolved would keep the neutral `Nexus Companion` caption forever.
+  ipcMain.handle(IPC.companionTitle, (_e, report: CompanionTitleReport) => {
+    if (!report || typeof report.contactId !== 'string') return false;
+    return companionWindows.retitle(report);
+  });
   // Deliverable 3: open/close a companion context-menu tool ("Motion feed" /
   // "Gestures" / "Status motions") in its own BrowserWindow, scoped to the
   // current agent/contact so its per-agent settings never leak across windows.
@@ -1584,6 +1593,11 @@ function registerIpc(): void {
       tool,
       contactId,
       agentName: typeof input.agentName === 'string' ? input.agentName : null,
+      // The tool window resolves the same live session as its companion, so the
+      // conversation binding is carried through (never invented when absent).
+      conversationId: typeof input.conversationId === 'string' ? input.conversationId : null,
+      agentId: typeof input.agentId === 'string' ? input.agentId : null,
+      virtualEmployeeId: typeof input.virtualEmployeeId === 'string' ? input.virtualEmployeeId : null,
     });
   });
   ipcMain.handle(IPC.companionCloseTool, (_e, contactId: string, tool?: string) => {

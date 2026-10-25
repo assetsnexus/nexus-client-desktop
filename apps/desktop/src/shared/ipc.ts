@@ -20,6 +20,7 @@ import type {
   CompanionPresent,
   CompanionSessionView,
   CompanionSttOwner,
+  CompanionTitleReport,
   CompanionToolPresence,
   CompanionToolSnapshot,
   CompanionToolSync,
@@ -115,6 +116,7 @@ export type {
   CompanionSessionStatus,
   CompanionSessionView,
   CompanionSttOwner,
+  CompanionTitleReport,
   CompanionToolPresence,
   CompanionToolRoute,
   CompanionToolSnapshot,
@@ -312,6 +314,15 @@ export type CompanionToolLaunch = {
   contactId: string;
   /** Display name of the agent, for the window title. */
   agentName?: string;
+  /**
+   * Conversation binding, when known. A tool window is popped out of a specific
+   * conversation and resolves the *same* live session as its companion, so the
+   * address rides the tool hash too (see `buildCompanionToolHash`) instead of
+   * leaving the window to guess which conversation it belongs to.
+   */
+  conversationId?: string | null;
+  agentId?: string | null;
+  virtualEmployeeId?: string | null;
 };
 
 /** Coerce an unknown value into a known tool id, or `null` when unrecognised. */
@@ -1706,6 +1717,17 @@ export type NexusBridge = {
   companionClose(contactId: string): Promise<boolean>;
   companionList(): Promise<string[]>;
   /**
+   * Report the human label a companion renderer resolved for its own window, so
+   * main can apply it with `win.setTitle`.
+   *
+   * The launch title is only a hint captured when the window was created; the
+   * renderer owns the live session, so it is the only surface that can name the
+   * window once the contact/agent/room data has loaded. Without this the OS
+   * caption stays the neutral `Nexus Companion` forever. Id-shaped/blank labels
+   * are rejected in main. Returns false when the window is gone.
+   */
+  companionSetTitle(report: CompanionTitleReport): Promise<boolean>;
+  /**
    * Pin / unpin a companion above other windows. Returns the applied state, or
    * `null` when no companion is open for that contact.
    */
@@ -1980,6 +2002,12 @@ export const IPC = {
   companionOpen: 'nexus:companion:open',
   companionClose: 'nexus:companion:close',
   companionList: 'nexus:companion:list',
+  /**
+   * Companion renderer → main title report (`win.setTitle`). The launch title is
+   * frozen at create time, so the renderer pushes the label it resolved from the
+   * live session here and main re-applies the OS caption.
+   */
+  companionTitle: 'nexus:companion:title',
   companionSetAlwaysOnTop: 'nexus:companion:set-always-on-top',
   companionIsAlwaysOnTop: 'nexus:companion:is-always-on-top',
   /**

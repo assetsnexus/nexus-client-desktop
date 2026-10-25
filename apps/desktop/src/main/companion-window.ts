@@ -19,29 +19,26 @@ import {
   buildCompanionToolHash,
   COMPANION_DEFAULT_SIZE,
   COMPANION_MIN_SIZE,
+  companionLabelCandidates,
+  companionToolWindowTitle,
+  companionWindowTitle,
+  isReportableCompanionLabel,
   electSttOwner,
   sttOwnerMessage,
   type CompanionLaunch,
   type CompanionPresent,
   type CompanionSessionView,
   type CompanionSttOwner,
+  type CompanionTitleReport,
   type CompanionToolPresence,
   type CompanionToolSnapshot,
   type CompanionToolSync,
   type SttOwnerElection,
 } from '../shared/companion.js';
 import { IPC, type CompanionToolId } from '../shared/ipc.js';
-import { resolveCompanionLabelOrNull } from '../shared/companion-label.js';
 
 /** Default size of a detached companion tool window (Deliverable 3). */
 const TOOL_DEFAULT_SIZE = { width: 460, height: 560 } as const;
-
-/** Human labels for the tool window titles (`Motion feed`, …). */
-const TOOL_LABELS: Record<CompanionToolId, string> = {
-  'motion-feed': 'Motion feed',
-  gestures: 'Gesture tester',
-  'status-motions': 'Status motions',
-};
 export type CompanionWindowOptions = {
   /** Resolve the renderer base URL (dev server or file:// index.html). */
   resolveRendererUrl: () => string;
@@ -121,12 +118,61 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     }
   }
 
+  /**
+   * The first *reportable* candidate from a renderer's live report, or `null`.
+   *
+   * "Reportable" is stricter than "usable": it also drops the in-app floor literal
+   * (`Companion`), which the renderer's fallback contact carries before a real
+   * name resolves. Re-applying it would only produce `Nexus · Companion` — no
+   * better than the neutral caption — so it is skipped and a real name may still
+   * land later.
+   */
+  function reportableLabel(
+    candidates: Array<string | null | undefined>,
+  ): string | null {
+    for (const candidate of candidates) {
+      if (isReportableCompanionLabel(candidate)) return (candidate as string).trim();
+    }
+    return null;
+  }
+
+  /**
+   * Apply a caption, refusing to downgrade a good one.
+   *
+   * The renderer reports the *live* label and may report it several times (mount,
+   * then after a region fetch). A later report that resolves nothing (a transient
+   * outage, an unresolved contact) must not wipe the name the window already
+   * shows, so a resolution that yields nothing reportable is skipped.
+   */
+  function applyWindowTitle(win: BrowserWindow, candidates: Array<string | null | undefined>): void {
+    if (win.isDestroyed()) return;
+    const title = reportableLabel(candidates);
+    if (!title) return;
+    win.setTitle(companionWindowTitle(title));
+  }
+
+  /**
+   * The same "never downgrade" rule for a detached tool window's caption.
+   *
+   * A tool window has no session of its own, so its name arrives later from the
+   * companion that owns the agent. Re-applying a report that resolves nothing must
+   * leave `<Tool> · <Agent>` intact rather than fall back to the bare tool label.
+   */
+  function applyToolWindowTitle(
+    win: BrowserWindow,
+    tool: string,
+    candidates: Array<string | null | undefined>,
+  ): void {
+    if (win.isDestroyed()) return;
+    const title = reportableLabel(candidates);
+    if (!title) return;
+    win.setTitle(companionToolWindowTitle(tool, title));
+  }
+
   function open(launch: CompanionLaunch): { opened: boolean; contactId: string } {
     if (!launch?.contactId) throw new Error('companion launch requires a contactId');
 
     const alwaysOnTop = launch.alwaysOnTop === true;
-    // Never let an id-shaped or blank title reach the OS window caption.
-    const launchTitle = resolveCompanionLabelOrNull(launch.title);
     const existing = windows.get(launch.contactId);
     if (existing && !existing.isDestroyed()) {
       // Reuse: refocus and re-apply the requested column semantics. We do NOT
@@ -134,6 +180,11 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
       // receives the mode via a dedicated channel when it changes.
       pinned.set(launch.contactId, alwaysOnTop);
       if (typeof existing.setAlwaysOnTop === 'function') existing.setAlwaysOnTop(alwaysOnTop);
+      // Re-apply the caption on reuse. A window opened before its name was known
+      // (or one whose launch title was absent) would otherwise keep the generic
+      // `Nexus Companion` forever; only a *usable* title is applied, so a reopen
+      // without one cannot downgrade a window the renderer has already named.
+      applyWindowTitle(existing, companionLabelCandidates(launch));
       existing.focus();
       // Re-focusing an open companion makes it the active STT surface; the mic
       // follows the window the user brought forward (unless a wake later moves
@@ -150,10 +201,11 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
       minWidth: COMPANION_MIN_SIZE.width,
       minHeight: COMPANION_MIN_SIZE.height,
       backgroundColor: '#0b0f14',
-      // OS window title. A raw id never becomes a title: `launch.title` is
-      // cleared of ids at hash build/parse, and a stray one falls back to the
-      // app-neutral caption.
-      title: launchTitle ? `Nexus · ${launchTitle}` : 'Nexus Companion',
+      // OS window caption from the launch hint (a real room/agent name when the
+      // caller knew one). The renderer re-reports the live label once the session
+      // resolves, so this is deliberately still correct when the hint is absent:
+      // the caption then starts app-neutral and is *corrected*, not frozen.
+      title: companionWindowTitle(...companionLabelCandidates(launch)),
       // A companion is a focus surface, not a taskbar-spamming app instance.
       skipTaskbar: true,
       alwaysOnTop,
@@ -231,25 +283,31 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     tool: CompanionToolId;
     contactId: string;
     agentName?: string | null;
+    conversationId?: string | null;
+    agentId?: string | null;
+    virtualEmployeeId?: string | null;
   }): { contactId: string; tool: CompanionToolId } | null {
     if (!windows.has(input.contactId)) return null;
     const key = toolKey(input.contactId, input.tool);
     const existing = toolWindows.get(key);
     if (existing && !existing.isDestroyed()) {
       if (existing.isMinimized()) existing.restore();
+      // Re-apply the caption on reuse, exactly like the companion: a tool window
+      // first opened without a name must pick one up on a later reopen.
+      applyToolWindowTitle(existing, input.tool, [input.agentName]);
       existing.focus();
       return { contactId: input.contactId, tool: input.tool };
     }
 
     const display = screen.getPrimaryDisplay().workAreaSize;
-    // Tool-window OS title: `<Tool>` plus the agent's human name when one was
-    // passed. An id-shaped `agentName` is dropped rather than rendered.
-    const toolAgentName = resolveCompanionLabelOrNull(input.agentName);
     const win = new BrowserWindow({
       width: Math.min(TOOL_DEFAULT_SIZE.width, display.width),
       height: Math.min(TOOL_DEFAULT_SIZE.height, display.height),
       backgroundColor: '#0b0f14',
-      title: `${TOOL_LABELS[input.tool]}${toolAgentName ? ` · ${toolAgentName}` : ''}`,
+      // `<Tool> · <Agent Name>`; the agent name is a live-updatable hint (the
+      // companion re-titles this window once it resolves the agent), and an
+      // id-shaped `agentName` is dropped by the pure title helper.
+      title: companionToolWindowTitle(input.tool, input.agentName),
       skipTaskbar: true,
       webPreferences: {
         preload: options.preloadPath,
@@ -325,11 +383,41 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     } satisfies CompanionToolPresence);
   }
 
+  /**
+   * Re-title a companion (or one of its tool windows) from a renderer report.
+   *
+   * This is the fix for the generic `Companion` caption: the launch title is only
+   * a hint frozen at create time, so the renderer — which owns the live session —
+   * reports the label it actually resolved here, and main applies it with
+   * `setTitle`. A report with no usable label (or an id-shaped one) is ignored so
+   * it cannot blank an already-correct caption. Returns whether a window was
+   * found (not whether the title changed).
+   */
+  function retitle(report: CompanionTitleReport): boolean {
+    const contactId = typeof report?.contactId === 'string' ? report.contactId.trim() : '';
+    if (!contactId) return false;
+    const candidates = Array.isArray(report.titles) ? [...report.titles] : [];
+    const tool = typeof report.tool === 'string' ? report.tool : '';
+    if (tool) {
+      const win = toolWindows.get(toolKey(contactId, tool as CompanionToolId));
+      if (!win || win.isDestroyed()) return false;
+      applyToolWindowTitle(win, tool, candidates);
+      return true;
+    }
+    const win = windows.get(contactId);
+    if (!win || win.isDestroyed()) return false;
+    applyWindowTitle(win, candidates);
+    return true;
+  }
+
   return {
     open,
 
     /** Open one context-menu tool in its own window, scoped to a contact. */
     openTool,
+
+    /** Re-apply a companion/tool caption from a renderer's live label report. */
+    retitle,
 
     /**
      * Close a contact's tool windows (one tool when `tool` is given, else all of

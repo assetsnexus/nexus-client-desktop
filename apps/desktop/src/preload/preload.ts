@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import { IPC, type CertificatePromptInfo, type CompanionAction, type CompanionCursorCoords, type CompanionPresent, type CompanionSessionView, type CompanionSttOwner, type CompanionToolPresence, type CompanionToolSnapshot, type CompanionToolSync, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
+import { IPC, type CertificatePromptInfo, type CompanionAction, type CompanionCursorCoords, type CompanionPresent, type CompanionSessionView, type CompanionSttOwner, type CompanionTitleReport, type CompanionToolPresence, type CompanionToolSnapshot, type CompanionToolSync, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
 
 const bridge: NexusBridge = {
   getVersion: () => ipcRenderer.invoke(IPC.version),
@@ -161,6 +161,8 @@ const bridge: NexusBridge = {
   companionOpen: (launch) => ipcRenderer.invoke(IPC.companionOpen, launch),
   companionClose: (contactId) => ipcRenderer.invoke(IPC.companionClose, contactId),
   companionList: () => ipcRenderer.invoke(IPC.companionList),
+  companionSetTitle: (report: CompanionTitleReport) =>
+    ipcRenderer.invoke(IPC.companionTitle, report),
   companionSetAlwaysOnTop: (contactId, onTop) =>
     ipcRenderer.invoke(IPC.companionSetAlwaysOnTop, contactId, onTop),
   companionIsAlwaysOnTop: (contactId) =>

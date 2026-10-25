@@ -12,6 +12,8 @@ class FakeWindow {
   alwaysOnTop: boolean | null = null;
   visible = true;
   minimized = false;
+  /** OS window caption, seeded from the create-time title and mutated by setTitle. */
+  title: string;
   sent: Array<{ channel: string; payload: unknown }> = [];
   loadURL = vi.fn(async (_url: string) => undefined);
   webContents = {
@@ -28,6 +30,10 @@ class FakeWindow {
   constructor(public options: Record<string, unknown>) {
     created.push(this);
     this.alwaysOnTop = (options.alwaysOnTop as boolean) ?? false;
+    this.title = (options.title as string) ?? '';
+  }
+  setTitle(title: string) {
+    this.title = title;
   }
   on(event: string, listener: () => void) {
     (this.listeners[event] ??= []).push(listener);
@@ -400,6 +406,34 @@ describe('detached companion tool windows (Deliverable 3)', () => {
     expect(m.openTool({ tool: 'motion-feed', contactId: 've-9' })).toBeNull();
   });
 
+  it('carries the conversation binding into the tool hash when one is known', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.openTool({
+      tool: 'motion-feed',
+      contactId: 've-1',
+      agentName: 'Aria',
+      conversationId: 'conv-9',
+      agentId: 'agent-3',
+      virtualEmployeeId: 've-1',
+    });
+    const url = created.at(-1)!.loadURL.mock.calls[0][0];
+    // The tool window resolves the same live session as its companion, so the
+    // address must ride the hash rather than being guessed at runtime.
+    expect(url).toContain('conversationId=conv-9');
+    expect(url).toContain('agentId=agent-3');
+    expect(url).toContain('virtualEmployeeId=ve-1');
+  });
+
+  it('omits the conversation binding when it is unknown (never invents one)', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.openTool({ tool: 'motion-feed', contactId: 've-1' });
+    const url = created.at(-1)!.loadURL.mock.calls[0][0];
+    expect(url).not.toContain('conversationId=');
+    expect(url).not.toContain('agentId=');
+  });
+
   it('reports which tools are open to the owning companion, per contact', () => {
     const m = manager();
     m.open({ contactId: 've-1' });
@@ -465,6 +499,140 @@ describe('detached companion tool windows (Deliverable 3)', () => {
     m.openTool({ tool: 'motion-feed', contactId: 've-1' });
     expect(m.closeTool('ve-1', 'gestures')).toBe(false);
     expect(m.closeTool('ve-1', 'motion-feed')).toBe(true);
+  });
+});
+
+describe('companion window titles', () => {
+  /**
+   * The bug this pins: the caption was computed once from the launch hint. A
+   * companion opened without a usable title showed `Nexus Companion` forever,
+   * because nothing re-applied the caption after the renderer resolved the live
+   * contact/room name. `retitle` is that missing path.
+   */
+  it('starts app-neutral without a usable title, then adopts the reported agent name', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    expect(created[0].title).toBe('Nexus Companion');
+
+    expect(m.retitle({ contactId: 've-1', titles: [null, 'Aria'] })).toBe(true);
+    expect(created[0].title).toBe('Nexus · Aria');
+  });
+
+  it('titles the window from the launch hint when one is usable', () => {
+    const m = manager();
+    m.open({ contactId: 've-1', title: 'Aria' });
+    expect(created[0].title).toBe('Nexus · Aria');
+  });
+
+  it('refreshes the title when an already-open companion is reopened', () => {
+    const m = manager();
+    // Opened before the name was known — the caption starts generic.
+    m.open({ contactId: 've-1' });
+    expect(created[0].title).toBe('Nexus Companion');
+
+    // Reopening from the header now carries the resolved name: the reuse branch
+    // must correct the existing caption without reloading (a reload would restart
+    // the live voice session).
+    const second = m.open({ contactId: 've-1', title: 'Aria' });
+    expect(second.opened).toBe(false);
+    expect(created).toHaveLength(1);
+    expect(created[0].loadURL).toHaveBeenCalledTimes(1);
+    expect(created[0].title).toBe('Nexus · Aria');
+  });
+
+  it('rejects an id-shaped reported title and keeps the good name', () => {
+    const m = manager();
+    m.open({ contactId: 've-1', title: 'Aria' });
+    expect(created[0].title).toBe('Nexus · Aria');
+
+    // A raw region id is an address, not a name: it must not replace the caption.
+    expect(m.retitle({ contactId: 've-1', titles: ['1792316062792-nm26u6zve'] })).toBe(true);
+    expect(created[0].title).toBe('Nexus · Aria');
+    expect(created[0].title).not.toContain('1792316062792');
+  });
+
+  it('does not downgrade a named window when a report resolves nothing', () => {
+    const m = manager();
+    m.open({ contactId: 've-1', title: 'Aria' });
+    // A transient failed lookup resolves to no label; the caption must survive.
+    expect(m.retitle({ contactId: 've-1', titles: [null, ''] })).toBe(true);
+    expect(created[0].title).toBe('Nexus · Aria');
+  });
+
+  it('ignores the in-app floor literal so it never becomes `Nexus · Companion`', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    expect(created[0].title).toBe('Nexus Companion');
+    // The companion renderer's fallback contact carries the literal `Companion`
+    // before a real name resolves; reporting it must not pin a faux name.
+    expect(m.retitle({ contactId: 've-1', titles: ['Companion'] })).toBe(true);
+    expect(created[0].title).toBe('Nexus Companion');
+    // ...and a real name arriving later still wins.
+    m.retitle({ contactId: 've-1', titles: ['Aria'] });
+    expect(created[0].title).toBe('Nexus · Aria');
+  });
+
+  it('titles a room companion with the room name, not the focused agent', () => {
+    const m = manager();
+    m.open({ contactId: 've-1', roomId: 'room-1', roomTitle: 'Writers', title: 'Aria' });
+    expect(created[0].title).toBe('Nexus · Writers');
+  });
+
+  it('falls back to the focused agent when the room has no usable name', () => {
+    const m = manager();
+    m.open({ contactId: 've-1', roomId: 'room-1', title: 'Aria' });
+    expect(created[0].title).toBe('Nexus · Aria');
+  });
+
+  it('re-titles a room companion from a live report', () => {
+    const m = manager();
+    m.open({ contactId: 've-1', roomId: 'room-1' });
+    expect(created[0].title).toBe('Nexus Companion');
+    m.retitle({ contactId: 've-1', titles: ['Writers'] });
+    expect(created[0].title).toBe('Nexus · Writers');
+  });
+
+  it('reports false for an unknown contact or a closed window', () => {
+    const m = manager();
+    expect(m.retitle({ contactId: 'nope', titles: ['Aria'] })).toBe(false);
+    m.open({ contactId: 've-1' });
+    m.close('ve-1');
+    expect(m.retitle({ contactId: 've-1', titles: ['Aria'] })).toBe(false);
+  });
+
+  it('re-titles a detached tool window from a report addressed to it', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    // Opened without a name: the caption is the bare tool label.
+    m.openTool({ tool: 'motion-feed', contactId: 've-1' });
+    const tool = created.at(-1)!;
+    expect(tool.title).toBe('Motion feed');
+
+    expect(m.retitle({ contactId: 've-1', titles: ['Aria'], tool: 'motion-feed' })).toBe(true);
+    expect(tool.title).toBe('Motion feed · Aria');
+  });
+
+  it('refreshes a tool window caption when it is reopened with a name', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.openTool({ tool: 'gestures', contactId: 've-1' });
+    const tool = created.at(-1)!;
+    expect(tool.title).toBe('Gesture tester');
+    m.openTool({ tool: 'gestures', contactId: 've-1', agentName: 'Aria' });
+    expect(tool.title).toBe('Gesture tester · Aria');
+  });
+
+  it('never renders an id-shaped agent name in a tool caption', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.openTool({ tool: 'gestures', contactId: 've-1', agentName: '1792316062792-nm26u6zve' });
+    expect(created.at(-1)!.title).toBe('Gesture tester');
+  });
+
+  it('reports false re-titling a tool window that is not open', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    expect(m.retitle({ contactId: 've-1', titles: ['Aria'], tool: 'motion-feed' })).toBe(false);
   });
 });
 

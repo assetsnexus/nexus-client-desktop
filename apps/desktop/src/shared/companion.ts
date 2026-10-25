@@ -1,4 +1,5 @@
 import {
+  COMPANION_FALLBACK_LABEL,
   isUsableCompanionLabel,
   resolveCompanionLabelOrNull,
 } from './companion-label.js';
@@ -30,6 +31,111 @@ export const COMPANION_MIN_SIZE = { width: 380, height: 480 } as const;
 
 /** `#companion?...` hash segment identifying the companion route. */
 export const COMPANION_HASH_PREFIX = 'companion';
+
+/**
+ * OS window caption used only when **nothing** human-readable can be resolved for
+ * a companion (not even after the live session loads). Deliberately app-neutral:
+ * the literal `Companion` a user sees in the header is a different (in-app) floor,
+ * but both mean "we could not name this window".
+ */
+export const COMPANION_WINDOW_TITLE_FALLBACK = 'Nexus Companion';
+
+/** Prefix on a resolved OS window title (`Nexus · Rune`). */
+export const COMPANION_WINDOW_TITLE_PREFIX = 'Nexus';
+
+/**
+ * The OS window caption for a companion/tool window.
+ *
+ * The launch title is only a *hint*: it is frozen at window-create time, so a
+ * companion opened before the region resolved a name would keep a generic caption
+ * forever. The renderer therefore re-reports the live label (see
+ * {@link CompanionTitleReport}), and this is the one pure place the caption is
+ * composed — so the create path and the live re-title path can never drift.
+ *
+ * An id-shaped or blank candidate never becomes a caption; with no usable label
+ * the app-neutral {@link COMPANION_WINDOW_TITLE_FALLBACK} is used.
+ */
+export function companionWindowTitle(
+  ...candidates: ReadonlyArray<string | null | undefined>
+): string {
+  const label = resolveCompanionLabelOrNull(...candidates);
+  return label ? `${COMPANION_WINDOW_TITLE_PREFIX} · ${label}` : COMPANION_WINDOW_TITLE_FALLBACK;
+}
+
+/**
+ * Label candidates for a companion, highest priority first, from the launch
+ * address alone (plus any already-resolved names passed as `extra`).
+ *
+ * A **room** companion is named after the room it renders — that is what the
+ * window *is* — falling back to the focused agent; a 1:1 companion uses the agent
+ * name. This is the one precedence shared by the OS caption (main, at create and
+ * on every live re-title) and the in-app header (renderer), so the two can never
+ * disagree about what a window is called. Id-shaped values are dropped downstream
+ * by the shared label rule, so a raw id can never become a name.
+ */
+export function companionLabelCandidates(
+  launch: Pick<CompanionLaunch, 'roomId' | 'roomTitle' | 'title'>,
+  ...extra: ReadonlyArray<string | null | undefined>
+): Array<string | null | undefined> {
+  return launch.roomId
+    ? [launch.roomTitle, launch.title, ...extra]
+    : [launch.title, launch.roomTitle, ...extra];
+}
+
+/**
+ * A companion renderer's report of the human label it resolved for its own
+ * window (renderer → main). The renderer owns the live session, so only it can
+ * name the window once the contact/room/agent data has loaded; main re-applies it
+ * with `win.setTitle` so the OS caption is never left generic.
+ */
+export type CompanionTitleReport = {
+  /** The contact whose companion window this is (the manager's key). */
+  contactId: string;
+  /**
+   * One or more label candidates, highest priority first (e.g. `displayTitle,
+   * name, agentName`). Main routes this through {@link companionWindowTitle}, so
+   * a raw id is still rejected at the last step.
+   */
+  titles: ReadonlyArray<string | null | undefined>;
+  /**
+   * When set, re-title that detached **tool** window of the contact instead of
+   * the companion itself. A tool window holds no session of its own, so the
+   * companion that owns the agent is the only surface that can name it.
+   */
+  tool?: string | null;
+};
+
+/**
+ * Human labels for the detachable companion tool windows. Lives here (not in
+ * `ipc.ts`/the renderer) so main's OS caption and the tool window's own header
+ * can never drift; `ipc.ts` imports this module, so the reverse would be a cycle.
+ */
+export const COMPANION_TOOL_LABELS: Readonly<Record<string, string>> = {
+  'motion-feed': 'Motion feed',
+  gestures: 'Gesture tester',
+  'status-motions': 'Status motions',
+};
+
+/** The display label for a tool id, falling back to the raw id for an unknown one. */
+export function companionToolLabel(tool: string): string {
+  return COMPANION_TOOL_LABELS[tool] ?? tool;
+}
+
+/**
+ * The OS window caption for a detached tool window: `<Tool> · <Agent Name>`.
+ *
+ * Mirrors {@link companionWindowTitle}: the agent name is optional (a tool window
+ * opened before the companion resolved a name keeps the bare tool label as its
+ * floor), and an id-shaped name is never rendered.
+ */
+export function companionToolWindowTitle(
+  tool: string,
+  ...candidates: ReadonlyArray<string | null | undefined>
+): string {
+  const label = resolveCompanionLabelOrNull(...candidates);
+  const toolLabel = companionToolLabel(tool);
+  return label ? `${toolLabel} · ${label}` : toolLabel;
+}
 
 /**
  * `#companion-tool?...` hash segment identifying a detached companion tool
@@ -64,6 +170,13 @@ export type CompanionLaunch = {
    * agent companion (the default single-avatar stage).
    */
   roomId?: string | null;
+  /**
+   * Human-readable room name, when the popout came from a group/meeting room.
+   * Carried so the window can be titled with the **room** it is bound to instead
+   * of one occupant's agent name, and so the OS title is right from the first
+   * frame rather than only after the room loads.
+   */
+  roomTitle?: string | null;
   /** Auto-start the live voice session on open (default true). */
   autoStart?: boolean;
   /** Stage layout; defaults to `fullscreen`. */
@@ -75,6 +188,20 @@ export type CompanionLaunch = {
    */
   alwaysOnTop?: boolean;
 };
+
+/**
+ * Is this candidate an actual resolved name (not the in-app floor)?
+ *
+ * The shared label rule returns `Companion` as the last-resort literal, and the
+ * companion renderer seeds its fallback contact's `name` with exactly that (see
+ * `CompanionView`). Re-reporting it would therefore set the OS caption to
+ * `Nexus · Companion`, which is no better than the neutral `Nexus Companion` —
+ * so a report filters it out and lets a real name arrive later instead.
+ */
+export function isReportableCompanionLabel(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  return isUsableCompanionLabel(value) && value.trim() !== COMPANION_FALLBACK_LABEL;
+}
 
 function clean(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -104,6 +231,11 @@ export function buildCompanionHash(launch: CompanionLaunch): string {
   if (avatarUrl) params.set('avatarUrl', avatarUrl);
   const roomId = clean(launch.roomId);
   if (roomId) params.set('roomId', roomId);
+  // A room's own human name rides the hash (id-shaped values dropped) so a room
+  // companion can be titled with the room, not whichever occupant happens to be
+  // focused.
+  const roomTitle = resolveCompanionLabelOrNull(launch.roomTitle);
+  if (roomTitle) params.set('roomTitle', roomTitle);
   if (launch.autoStart === false) params.set('autoStart', '0');
   if (launch.mode === 'split') params.set('mode', 'split');
   if (launch.alwaysOnTop === true) params.set('onTop', '1');
@@ -132,6 +264,9 @@ export function parseCompanionHash(hash: string): CompanionLaunch | null {
     title: isUsableCompanionLabel(params.get('title')) ? clean(params.get('title')) : null,
     avatarUrl: clean(params.get('avatarUrl')),
     roomId: clean(params.get('roomId')),
+    // Same id-shape guard as `title`: a legacy/edited hash must not smuggle a
+    // raw room id into the caption.
+    roomTitle: isUsableCompanionLabel(params.get('roomTitle')) ? clean(params.get('roomTitle')) : null,
     autoStart: params.get('autoStart') !== '0',
     mode: params.get('mode') === 'split' ? 'split' : 'fullscreen',
     alwaysOnTop: params.get('onTop') === '1',
@@ -242,6 +377,16 @@ export type CompanionToolSnapshot = {
    * by the companion's ring buffer.
    */
   actionFeed: unknown[];
+  /**
+   * The owning agent's human name, when the companion has resolved one.
+   *
+   * A tool window holds no session of its own, so it cannot name its agent: the
+   * launch hash only carries what was known when it was opened. The companion
+   * that owns the session pushes the resolved name here so a tool window opened
+   * before the name was known shows the agent instead of its neutral literal.
+   * Optional for backward compatibility with a preload/companion that predates it.
+   */
+  agentName?: string | null;
 };
 
 /**
