@@ -1,3 +1,8 @@
+import {
+  isUsableCompanionLabel,
+  resolveCompanionLabelOrNull,
+} from './companion-label.js';
+
 /**
  * Immersive companion window contract (Phase 7a).
  *
@@ -90,7 +95,10 @@ export function buildCompanionHash(launch: CompanionLaunch): string {
   if (agentId) params.set('agentId', agentId);
   const virtualEmployeeId = clean(launch.virtualEmployeeId);
   if (virtualEmployeeId) params.set('virtualEmployeeId', virtualEmployeeId);
-  const title = clean(launch.title);
+  // Only a human-readable title rides the hash. A raw id here (the caller passed
+  // `launch.title = contactId`) would be rendered as a name downstream, so drop
+  // it and let the receiver resolve the real name from the live contact.
+  const title = resolveCompanionLabelOrNull(launch.title);
   if (title) params.set('title', title);
   const avatarUrl = clean(launch.avatarUrl);
   if (avatarUrl) params.set('avatarUrl', avatarUrl);
@@ -119,7 +127,9 @@ export function parseCompanionHash(hash: string): CompanionLaunch | null {
     conversationId: clean(params.get('conversationId')),
     agentId: clean(params.get('agentId')),
     virtualEmployeeId: clean(params.get('virtualEmployeeId')),
-    title: clean(params.get('title')),
+    // A hand-edited/legacy hash could still carry a raw id as `title`; drop it so
+    // the companion never renders one (it falls back to the live contact name).
+    title: isUsableCompanionLabel(params.get('title')) ? clean(params.get('title')) : null,
     avatarUrl: clean(params.get('avatarUrl')),
     roomId: clean(params.get('roomId')),
     autoStart: params.get('autoStart') !== '0',
@@ -150,7 +160,9 @@ export function buildCompanionToolHash(input: {
   const params = new URLSearchParams();
   params.set('tool', input.tool);
   params.set('contactId', input.contactId);
-  const agentName = clean(input.agentName);
+  // `agentName` is a *label* rendered in the tool-window title, so it must be a
+  // human name — never a raw id, which the caller may have passed by mistake.
+  const agentName = resolveCompanionLabelOrNull(input.agentName);
   if (agentName) params.set('agentName', agentName);
   const conversationId = clean(input.conversationId);
   if (conversationId) params.set('conversationId', conversationId);
@@ -186,7 +198,9 @@ export function parseCompanionToolHash(hash: string): CompanionToolRoute | null 
   return {
     tool,
     contactId,
-    agentName: clean(params.get('agentName')),
+    // A raw id is never an agent label; a legacy/hand-edited hash carrying one
+    // resolves to `null` so the tool window renders the neutral literal instead.
+    agentName: isUsableCompanionLabel(params.get('agentName')) ? clean(params.get('agentName')) : null,
     conversationId: clean(params.get('conversationId')),
     agentId: clean(params.get('agentId')),
     virtualEmployeeId: clean(params.get('virtualEmployeeId')),

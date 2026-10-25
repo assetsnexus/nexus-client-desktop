@@ -26,6 +26,7 @@ import { DEFAULT_DESKTOP_TOOLS, AUDIO_TOOLS, localCommandTools } from '../tools/
 import { resolveOrgLogoUrl } from '../../shared/org-logo.js';
 import { setToolAuditContext, resolveToolAuditContext } from '../tools/audit-context.js';
 import { createIncomingWatcher, resolveSenderName } from '../notifications/incoming.js';
+import { resolveCompanionLabelOrNull } from '../../shared/companion-label.js';
 import { createWakeChatRouter } from '../wake/router.js';
 import type { SessionState } from '../wake/session.js';
 import { createPreviewUtteranceSource } from '../wake/utterance.js';
@@ -83,7 +84,8 @@ export function ChatHost({
   // mode" for any agent — not only while a call is live.
   const [activeContact, setActiveContact] = useState<{
     contactId: string;
-    title: string;
+    /** Region-resolved human label; `null` when only a raw id is known. */
+    title: string | null;
     avatarUrl: string | null;
     agentId: string | null;
     virtualEmployeeId: string | null;
@@ -192,7 +194,10 @@ export function ChatHost({
       }
       setActiveContact({
         contactId: contact.id,
-        title: contact.name,
+        // Prefer the region-resolved panel label (`displayTitle`/`agentName`) and
+        // fall back to the contact's already region-resolved `name`; an id shape
+        // is dropped by the shared label rule so a raw id never rides the popout.
+        title: resolveCompanionLabelOrNull(panel?.displayTitle, panel?.agentName, contact.name),
         avatarUrl: contact.avatarUrl ?? null,
         agentId: contact.agentId ?? null,
         virtualEmployeeId: contact.virtualEmployeeId ?? null,
@@ -419,7 +424,8 @@ export function ChatHost({
         setWakeSessionToken((n) => n + 1);
         companionPoseRef.current = null;
         const agentRow = chat.getState().contacts.find((c) => c.id === target.contactId) ?? null;
-        const agentName = target.agentName ?? agentRow?.name ?? null;
+        // The wake widget's agent label: a human name only, never an id shape.
+        const agentName = resolveCompanionLabelOrNull(target.agentName, agentRow?.name);
         const avatarUrl = agentRow?.avatarUrl ?? null;
         setWakeAgent({ name: agentName ?? 'Agent', avatarUrl });
         // Remember the session's address so the widget can offer "open companion
@@ -471,7 +477,7 @@ export function ChatHost({
               contactId: target.contactId,
               conversationId,
               agentId: target.agentId,
-              title: target.agentName ?? null,
+              title: resolveCompanionLabelOrNull(target.agentName),
               avatarUrl: agentRow?.avatarUrl ?? null,
               // A realtime call only auto-starts in voice mode; dictation mode
               // opens in the STT preview with voice a toggle.
@@ -671,7 +677,7 @@ export function ChatHost({
         contactId: target.contactId,
         conversationId: conversationIdRef.current,
         agentId: target.agentId,
-        title: target.agentName ?? null,
+        title: resolveCompanionLabelOrNull(target.agentName),
         avatarUrl: target.avatarUrl ?? null,
         // Open in dictation, not an auto-started call (the companion's voice
         // toggle turns the call on when the user wants it).
@@ -744,7 +750,10 @@ export function ChatHost({
               contactId: activeVoice.contactId,
               conversationId: chat?.getState().conversationId ?? null,
               agentId: activeVoice.agentId,
-              title: activeVoice.title,
+              // A human name only — an id-shaped title is dropped (the companion
+              // resolves the live contact name), so a raw id is never the popout
+              // window's label.
+              title: resolveCompanionLabelOrNull(activeVoice.title),
               avatarUrl: activeVoice.avatarUrl,
             }
           : activeContact
@@ -753,7 +762,7 @@ export function ChatHost({
                 conversationId: activeContact.conversationId,
                 agentId: activeContact.agentId,
                 virtualEmployeeId: activeContact.virtualEmployeeId,
-                title: activeContact.title,
+                title: resolveCompanionLabelOrNull(activeContact.title),
                 avatarUrl: activeContact.avatarUrl,
                 // Room panels open the shared multi-agent scene; 1:1 DMs leave
                 // this null for the single-avatar stage.

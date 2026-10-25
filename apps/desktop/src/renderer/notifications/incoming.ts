@@ -10,6 +10,8 @@
  * messages are not news, and system notices are handled by their own surfaces.
  */
 
+import { resolveCompanionLabelOrNull } from '../../shared/companion-label.js';
+
 export type ObservableMessage = {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -58,16 +60,16 @@ export function selectIncomingMessages(input: SelectIncomingInput): ObservableMe
 /**
  * Pick the best display name for the sender of a message in the active
  * conversation. Falls back through agent name, conversation title, then null so
- * the notification builder can supply its own generic title.
+ * the notification builder can supply its own generic title. An id-shaped value
+ * is skipped (never a notification title) via the shared companion-label rule.
  */
 export function resolveSenderName(input: {
   agentName?: string | null;
   conversationTitle?: string | null;
 }): string | null {
-  const agent = input.agentName?.trim();
-  if (agent) return agent;
-  const title = input.conversationTitle?.trim();
-  return title || null;
+  return (
+    resolveCompanionLabelOrNull(input.agentName, input.conversationTitle) ?? null
+  );
 }
 
 /** A snapshot of the chat state the watcher needs to make a decision. */

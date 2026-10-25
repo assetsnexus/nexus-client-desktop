@@ -3,6 +3,8 @@ import {
   buildCompanionHash,
   parseCompanionHash,
   isCompanionHash,
+  buildCompanionToolHash,
+  parseCompanionToolHash,
   electSttOwner,
   sttOwnerMessage,
   COMPANION_HASH_PREFIX,
@@ -75,6 +77,51 @@ describe('buildCompanionHash / parseCompanionHash', () => {
     const parsed = parseCompanionHash(buildCompanionHash({ contactId: 'a b&c', title: 'x/y' }));
     expect(parsed?.contactId).toBe('a b&c');
     expect(parsed?.title).toBe('x/y');
+  });
+});
+
+describe('companion launch labels never carry a raw id', () => {
+  const RAW_ID = '1792316062792-nm26u6zve';
+
+  it('buildCompanionHash drops an id-shaped title (falls back to a live name)', () => {
+    const hash = buildCompanionHash({ contactId: 've-1', title: RAW_ID });
+    expect(hash.includes('title')).toBe(false);
+    expect(parseCompanionHash(hash)?.title).toBeNull();
+  });
+
+  it('buildCompanionHash keeps a real title but drops a bad one ahead of it', () => {
+    expect(parseCompanionHash(buildCompanionHash({ contactId: 've-1', title: 'Rune' }))?.title).toBe(
+      'Rune',
+    );
+    // Only one title field exists, so an id-only title is simply omitted.
+    expect(
+      buildCompanionHash({ contactId: 've-1', title: RAW_ID }).includes(encodeURIComponent(RAW_ID)),
+    ).toBe(false);
+  });
+
+  it('parseCompanionHash drops an id-shaped title from a hand-built hash', () => {
+    const parsed = parseCompanionHash(`#companion?contactId=ve-1&title=${encodeURIComponent(RAW_ID)}`);
+    expect(parsed?.contactId).toBe('ve-1');
+    expect(parsed?.title).toBeNull();
+  });
+
+  it('buildCompanionToolHash drops an id-shaped agentName', () => {
+    const hash = buildCompanionToolHash({ tool: 'gestures', contactId: 've-1', agentName: RAW_ID });
+    expect(hash.includes('agentName')).toBe(false);
+    expect(parseCompanionToolHash(hash)?.agentName).toBeNull();
+  });
+
+  it('buildCompanionToolHash keeps a real agentName', () => {
+    const hash = buildCompanionToolHash({ tool: 'gestures', contactId: 've-1', agentName: 'Rune' });
+    expect(parseCompanionToolHash(hash)?.agentName).toBe('Rune');
+  });
+
+  it('parseCompanionToolHash drops an id-shaped agentName from a hand-built hash', () => {
+    const parsed = parseCompanionToolHash(
+      `#companion-tool?tool=gestures&contactId=ve-1&agentName=${encodeURIComponent(RAW_ID)}`,
+    );
+    expect(parsed?.contactId).toBe('ve-1');
+    expect(parsed?.agentName).toBeNull();
   });
 });
 

@@ -76,6 +76,15 @@ describe('resolveSenderName', () => {
   it('returns null when nothing is known', () => {
     expect(resolveSenderName({})).toBeNull();
   });
+
+  it('never returns a raw internal id as the notification title', () => {
+    const rawId = '1792316062792-nm26u6zve';
+    // An id where a name belongs must not become the notification label.
+    expect(resolveSenderName({ agentName: rawId })).toBeNull();
+    expect(resolveSenderName({ agentName: rawId, conversationTitle: rawId })).toBeNull();
+    // A real name still wins even when an id precedes it.
+    expect(resolveSenderName({ agentName: rawId, conversationTitle: 'Support' })).toBe('Support');
+  });
 });
 
 describe('createIncomingWatcher', () => {

@@ -36,6 +36,7 @@ import {
   type CompanionToolSnapshot,
   type CompanionToolSync,
 } from '../bridge.js';
+import { resolveCompanionLabel } from '../../shared/companion-label.js';
 
 const shell: CSSProperties = {
   height: '100vh',
@@ -82,7 +83,9 @@ function toolTitle(tool: string): string {
  */
 export function CompanionToolView({ route }: { route: CompanionToolRoute }) {
   const { tool, contactId } = route;
-  const agentName = route.agentName ?? contactId;
+  // The agent's human name for the header — never the raw `contactId` (that was
+  // the bug: an id where a name belongs). Falls back to the neutral literal.
+  const agentName = resolveCompanionLabel(route.agentName);
 
   // Status motions start from the shared defaults and are replaced by the owning
   // companion's snapshot; an edit is relayed straight back so the companion (and

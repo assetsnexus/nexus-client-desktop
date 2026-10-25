@@ -94,6 +94,7 @@ import {
 } from '../companion/companion-scene-menu.js';
 import { SceneContextMenu, SceneMenuAnchorContext } from '../companion/SceneContextMenu.js';
 import { normalizePoseContext, poseToBrowserContext } from '../../shared/companion.js';
+import { resolveCompanionLabel, resolveCompanionLabelOrNull } from '../../shared/companion-label.js';
 import type { CompanionToolId, LocalAvatarsConfig } from '../../shared/ipc.js';
 
 type ChatIdentity = Parameters<typeof createRegionCommandClient>[0]['identity'];
@@ -654,7 +655,10 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     // stage for *every* companion window, which read as "all avatars are broken".
     const fallbackContact: ChatContact = {
       id: launch.contactId,
-      name: launch.title ?? launch.contactId,
+      // Neutral literal, never the raw `contactId`: a region outage must not put
+      // an internal id where the agent's name belongs. The contact list enriches
+      // this with the real name when it loads.
+      name: resolveCompanionLabel(launch.title),
       type: 'agent',
       virtualEmployeeId: launch.virtualEmployeeId ?? undefined,
       agentId: launch.agentId ?? undefined,
@@ -1047,7 +1051,9 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
           void callBridge<{ contactId: string } | null>(bridge, 'companionOpenTool', null, {
             tool: action as CompanionToolId,
             contactId: launch.contactId,
-            agentName: launch.title ?? contact?.name ?? null,
+            // A human name for the tool-window title; `null` (not an id) when the
+            // agent is not resolved yet, so the window falls back to its literal.
+            agentName: resolveCompanionLabelOrNull(launch.title, contact?.name),
           });
           break;
       }
@@ -1118,7 +1124,9 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   }, [present?.conversationId, present?.token, chat]);
 
   const preview = latestTranscriptPreview(turns);
-  const agentName = launch.title ?? contact?.name ?? 'Companion';
+  // Header label: the launch title (only ever a human name — a raw id is dropped
+  // at hash build/parse), then the live contact name, then the neutral literal.
+  const agentName = resolveCompanionLabel(launch.title, contact?.name);
   const isImageAvatar = resolved?.choice.kind === 'image';
   // The agent's own multi-picture set, for the carousel control (only shown when
   // there is more than one picture to rotate through).

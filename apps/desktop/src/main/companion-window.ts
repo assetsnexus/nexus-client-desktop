@@ -31,6 +31,7 @@ import {
   type SttOwnerElection,
 } from '../shared/companion.js';
 import { IPC, type CompanionToolId } from '../shared/ipc.js';
+import { resolveCompanionLabelOrNull } from '../shared/companion-label.js';
 
 /** Default size of a detached companion tool window (Deliverable 3). */
 const TOOL_DEFAULT_SIZE = { width: 460, height: 560 } as const;
@@ -124,6 +125,8 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     if (!launch?.contactId) throw new Error('companion launch requires a contactId');
 
     const alwaysOnTop = launch.alwaysOnTop === true;
+    // Never let an id-shaped or blank title reach the OS window caption.
+    const launchTitle = resolveCompanionLabelOrNull(launch.title);
     const existing = windows.get(launch.contactId);
     if (existing && !existing.isDestroyed()) {
       // Reuse: refocus and re-apply the requested column semantics. We do NOT
@@ -147,7 +150,10 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
       minWidth: COMPANION_MIN_SIZE.width,
       minHeight: COMPANION_MIN_SIZE.height,
       backgroundColor: '#0b0f14',
-      title: launch.title ? `Nexus · ${launch.title}` : 'Nexus Companion',
+      // OS window title. A raw id never becomes a title: `launch.title` is
+      // cleared of ids at hash build/parse, and a stray one falls back to the
+      // app-neutral caption.
+      title: launchTitle ? `Nexus · ${launchTitle}` : 'Nexus Companion',
       // A companion is a focus surface, not a taskbar-spamming app instance.
       skipTaskbar: true,
       alwaysOnTop,
@@ -236,11 +242,14 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     }
 
     const display = screen.getPrimaryDisplay().workAreaSize;
+    // Tool-window OS title: `<Tool>` plus the agent's human name when one was
+    // passed. An id-shaped `agentName` is dropped rather than rendered.
+    const toolAgentName = resolveCompanionLabelOrNull(input.agentName);
     const win = new BrowserWindow({
       width: Math.min(TOOL_DEFAULT_SIZE.width, display.width),
       height: Math.min(TOOL_DEFAULT_SIZE.height, display.height),
       backgroundColor: '#0b0f14',
-      title: `${TOOL_LABELS[input.tool]}${input.agentName ? ` · ${input.agentName}` : ''}`,
+      title: `${TOOL_LABELS[input.tool]}${toolAgentName ? ` · ${toolAgentName}` : ''}`,
       skipTaskbar: true,
       webPreferences: {
         preload: options.preloadPath,
