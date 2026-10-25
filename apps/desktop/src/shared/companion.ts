@@ -27,6 +27,13 @@ export const COMPANION_MIN_SIZE = { width: 380, height: 480 } as const;
 export const COMPANION_HASH_PREFIX = 'companion';
 
 /**
+ * `#companion-tool?...` hash segment identifying a detached companion tool
+ * window (Deliverable 3): "Motion feed", "Gesture tester", "Status motions".
+ * Each window is scoped to the current agent/contact.
+ */
+export const COMPANION_TOOL_HASH_PREFIX = 'companion-tool';
+
+/**
  * Companion presentation mode (Phase 11e):
  * - `fullscreen` — full-window 3D/VRM stage with the realtime voice session;
  * - `split` — the same session, chat beside the 3D stage.
@@ -125,6 +132,129 @@ export function parseCompanionHash(hash: string): CompanionLaunch | null {
 export function isCompanionHash(hash: string): boolean {
   return parseCompanionHash(hash) != null;
 }
+
+/**
+ * Build the `#companion-tool?...` hash for a detached tool window. It carries
+ * the same routing addresses as a companion launch (contact + agent) so the
+ * window resolves the live session exactly like the companion it was popped
+ * from, plus which tool to render.
+ */
+export function buildCompanionToolHash(input: {
+  tool: string;
+  contactId: string;
+  agentName?: string | null;
+  conversationId?: string | null;
+  agentId?: string | null;
+  virtualEmployeeId?: string | null;
+}): string {
+  const params = new URLSearchParams();
+  params.set('tool', input.tool);
+  params.set('contactId', input.contactId);
+  const agentName = clean(input.agentName);
+  if (agentName) params.set('agentName', agentName);
+  const conversationId = clean(input.conversationId);
+  if (conversationId) params.set('conversationId', conversationId);
+  const agentId = clean(input.agentId);
+  if (agentId) params.set('agentId', agentId);
+  const virtualEmployeeId = clean(input.virtualEmployeeId);
+  if (virtualEmployeeId) params.set('virtualEmployeeId', virtualEmployeeId);
+  return `#${COMPANION_TOOL_HASH_PREFIX}?${params.toString()}`;
+}
+
+/** A parsed `#companion-tool?...` route. */
+export type CompanionToolRoute = {
+  tool: string;
+  contactId: string;
+  agentName: string | null;
+  conversationId: string | null;
+  agentId: string | null;
+  virtualEmployeeId: string | null;
+};
+
+/** Parse a `#companion-tool?...` hash. Returns `null` for any other route. */
+export function parseCompanionToolHash(hash: string): CompanionToolRoute | null {
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  if (!raw) return null;
+  const [route, query = ''] = raw.split('?');
+  if (route !== COMPANION_TOOL_HASH_PREFIX) return null;
+  const params = new URLSearchParams(query);
+  const tool = clean(params.get('tool'));
+  const contactId = clean(params.get('contactId'));
+  // Scope is mandatory: a tool window without a contact cannot load per-agent
+  // settings, so it is a routing error rather than a "global" fallback.
+  if (!tool || !contactId) return null;
+  return {
+    tool,
+    contactId,
+    agentName: clean(params.get('agentName')),
+    conversationId: clean(params.get('conversationId')),
+    agentId: clean(params.get('agentId')),
+    virtualEmployeeId: clean(params.get('virtualEmployeeId')),
+  };
+}
+
+/** Is this renderer URL/hash a detached companion tool route? */
+export function isCompanionToolHash(hash: string): boolean {
+  return parseCompanionToolHash(hash) != null;
+}
+
+/**
+ * The tool-scoped state a companion window shares with its detached tool windows
+ * (Deliverable 3).
+ *
+ * A companion tool ("Motion feed" / "Gesture tester" / "Status motions") is now
+ * its own `BrowserWindow`, so it cannot read the agent's stage or settings from
+ * the companion's React tree. The companion that owns the agent pushes this
+ * snapshot; main tags each tool window with the contact it was opened for, so a
+ * window ignores every other agent's state instead of rendering whichever
+ * companion pushed last.
+ */
+export type CompanionToolSnapshot = {
+  /** The agent/contact this state belongs to (the scoping key). */
+  contactId: string;
+  /**
+   * The status-motions map (as persisted) that drives the agent's working loops,
+   * so the detached editor opens on the current config instead of defaults.
+   */
+  statusMotions: Record<string, unknown> | null;
+  /**
+   * Loaded gesture ids in the agent's stage, so the detached gesture tester lists
+   * the same clips the companion can play (an empty array = nothing loaded yet).
+   */
+  gestures: string[];
+  /**
+   * Recent action-feed rows from the agent's stage, so the detached motion feed
+   * mirrors the companion instead of sitting empty. Newest first; already bounded
+   * by the companion's ring buffer.
+   */
+  actionFeed: unknown[];
+};
+
+/**
+ * Whether a companion currently has detached tool windows open, so it knows to
+ * publish tool snapshots. Pushed by main when a tool window for the contact opens
+ * or its last one closes — the companion only runs its (small) relay loop while
+ * something is listening.
+ */
+export type CompanionToolPresence = {
+  contactId: string;
+  open: boolean;
+  /**
+   * Which of the contact's tools are currently open (as `CompanionToolId`s, held
+   * as strings here to avoid an `ipc.ts` cycle), so the companion's scene menu can
+   * show each row's live state and only relay what a window needs. Optional for
+   * backward-compat with a preload that only knew `open`.
+   */
+  tools?: string[];
+};
+
+/** A status-motions edit made in a detached tool window (window → companion). */
+export type CompanionToolSync = {
+  /** The agent/contact whose config changed. */
+  contactId: string;
+  /** The serialized status-motions map the companion should now persist + use. */
+  statusMotions: Record<string, unknown> | null;
+};
 
 /**
  * Live activation pushed into an *already open* companion window (main →
@@ -273,4 +403,98 @@ export type CompanionAction = {
   action: 'submit' | 'cancel' | 'sendAudio' | 'edit';
   /** New text, for `edit` only. */
   text?: string;
+  /**
+   * Turn metadata the session owner should attach when it submits this turn
+   * (Deliverable 4): the companion's live avatar pose, read at click time. Rides
+   * the existing relay so the owning window sends it with its `sendMessage` — no
+   * new command and no break for callers that omit it.
+   */
+  browserContext?: Record<string, unknown>;
 };
+
+/**
+ * The avatar's world position, reported with an outbound companion turn
+ * (Deliverable 4).
+ *
+ * Read from the character-kit locomotion pose (`getPoseFeedback`) so a turn sent
+ * while the user has walked the avatar carries *where* it stands. Structure-only:
+ * metres + a facing angle, never anything about the user. Sent as a
+ * `browserContext` block on the turn (`source: 'companion_pose'`) so it rides the
+ * existing chat-call path without a new command and without breaking callers that
+ * do not set it.
+ */
+export type CompanionPoseContext = {
+  /** The agent/contact whose companion reported this pose. */
+  contactId: string;
+  /** Ground position in scene metres. */
+  x: number;
+  y: number;
+  z: number;
+  /** Facing angle (radians, plus the rounded degrees for a readable caption). */
+  facingRad: number;
+  facingDeg: number;
+  /** True while the rig is mid-stride (walk/run), so the model can distinguish. */
+  moving?: boolean;
+  /** ISO timestamp the pose was captured. */
+  capturedAt?: string;
+};
+
+/**
+ * Coerce a raw pose value into a finite-only {@link CompanionPoseContext}, or
+ * null when it is not a usable pose. Pure so the clamping rules are unit-tested;
+ * the renderer reads the field straight out of `getPoseFeedback().pose`.
+ */
+export function normalizePoseContext(
+  raw: unknown,
+  contactId: string,
+  nowMs: number = Date.now(),
+): CompanionPoseContext | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const pose = (raw as { pose?: unknown }).pose ?? raw;
+  if (!pose || typeof pose !== 'object') return null;
+  const p = pose as Record<string, unknown>;
+  const num = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null;
+  const x = num(p.x);
+  const y = num(p.y);
+  const z = num(p.z);
+  if (x === null || y === null || z === null) return null;
+  // Facing is optional (older feedback / a rig mid-load); derive it from radians.
+  const facingRad = num(p.facingRad) ?? 0;
+  const facingDeg = num(p.facingDeg) ?? Math.round((facingRad * 180) / Math.PI * 10) / 10;
+  const key = typeof contactId === 'string' ? contactId.trim() : '';
+  if (!key) return null;
+  const out: CompanionPoseContext = {
+    contactId: key,
+    x: Math.round(x * 1000) / 1000,
+    y: Math.round(y * 1000) / 1000,
+    z: Math.round(z * 1000) / 1000,
+    facingRad: Math.round(facingRad * 10000) / 10000,
+    facingDeg: Math.round(facingDeg * 10) / 10,
+    capturedAt: new Date(nowMs).toISOString(),
+  };
+  if (typeof p.moving === 'boolean') out.moving = p.moving;
+  return out;
+}
+
+/**
+ * Wrap a pose as the `browserContext` block a turn carries. Structure-only and
+ * tagged, mirroring `appRouteToBrowserContext`, so inference can distinguish it
+ * from a portal/app page context instead of mistaking it for one.
+ */
+export function poseToBrowserContext(
+  pose: CompanionPoseContext | null | undefined,
+): Record<string, unknown> | undefined {
+  if (!pose) return undefined;
+  return {
+    source: 'companion_pose',
+    contactId: pose.contactId,
+    x: pose.x,
+    y: pose.y,
+    z: pose.z,
+    facingRad: pose.facingRad,
+    facingDeg: pose.facingDeg,
+    ...(pose.moving === undefined ? {} : { moving: pose.moving }),
+    capturedAt: pose.capturedAt ?? null,
+  };
+}

@@ -26,13 +26,12 @@ import '@nexus/chat-react/style.css';
 // chat surface uses). Imported from `@nexus/character-react` because the
 // published `@nexus/chat-react` type entry does not re-export it.
 import { CachedAvatarImage, createCompanionSceneHost } from '@nexus/character-react';
-// Motion-feed / gesture-config debug surfaces (re-exported from
-// `@nexus/character-ui-kit`). Stylesheet imported once for the panel chrome.
+// Motion-feed / status-motion debug surfaces. The *panels* now render in their
+// own standalone windows (Deliverable 3), but the companion still needs the
+// action-feed provider (to mirror events to those windows) and the status-motion
+// hook (to cycle working clips on the live stage).
 import {
-  MotionFeedPanel,
   MotionFeedProvider,
-  GestureTestPanel,
-  StatusMotionsConfig,
   useMotionFeed,
   useAgentStatusMotions,
   parseStatusMotions,
@@ -47,7 +46,20 @@ import {
 } from '../companion/character-tools.js';
 import { companionCursorToGazeNdc } from '../companion/companion-cursor.js';
 import {
+  IDLE_MOVE_KEYS,
+  isLocomotionKey,
+  isTypingTarget,
+  isIdleMoveInput,
+  moveInputFromKeys,
+  moveSpeedForKeys,
+  readMoveKeys,
+  type MoveKeys,
+} from '../companion/locomotion-keys.js';
+import { CompanionAvatarGallery } from './CompanionAvatarGallery.js';
+import {
   bridge,
+  callBridge,
+  hasBridgeMethod,
   onBridge,
   type AuthState,
   type CompanionAvatarSettings,
@@ -63,6 +75,7 @@ import {
   buildAvatarChoices,
   createCompanionAvatarStore,
   latestTranscriptPreview,
+  mappedLocalAvatar,
   resolveAvatarSelection,
   selectionToPresence,
   type CompanionAvatarAsset,
@@ -74,6 +87,8 @@ import {
   type CompanionMenuAction,
 } from '../companion/companion-scene-menu.js';
 import { SceneContextMenu, SceneMenuAnchorContext } from '../companion/SceneContextMenu.js';
+import { normalizePoseContext, poseToBrowserContext } from '../../shared/companion.js';
+import type { CompanionToolId, LocalAvatarsConfig } from '../../shared/ipc.js';
 
 type ChatIdentity = Parameters<typeof createRegionCommandClient>[0]['identity'];
 
@@ -142,35 +157,42 @@ const voiceBadge: CSSProperties = {
   color: '#9aa7b5',
 };
 
-const galleryPanel: CSSProperties = {
-  position: 'absolute',
-  top: 42,
-  left: 8,
-  zIndex: 20,
-  width: 'min(360px, calc(100% - 16px))',
-  maxHeight: '60%',
-  overflowY: 'auto',
-  padding: 10,
-  borderRadius: 10,
-  border: '1px solid #2a333d',
-  background: 'rgba(15,20,26,0.98)',
-  boxShadow: '0 8px 30px rgba(0,0,0,0.45)',
-};
-
 // Reuse the same presence store ConfigSheet writes to, so a model chosen there
 // is the one the companion opens with.
 const presenceStore = createPresenceStore('nexus-chat-react');
 const avatarStore = createCompanionAvatarStore('nexus-desktop');
 
-/** Dock the dev debug surfaces over the bottom of the companion, above the strip. */
-const debugPanel: CSSProperties = {
+/** Bottom-left WASD hint shown only when the mounted stage is walkable. */
+const locomotionHint: CSSProperties = {
   position: 'absolute',
-  right: 8,
-  bottom: 40,
-  zIndex: 30,
-  width: 'min(560px, calc(100% - 16px))',
-  maxHeight: '70%',
-  overflowY: 'auto',
+  left: 10,
+  bottom: 10,
+  zIndex: 15,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '5px 8px',
+  borderRadius: 8,
+  border: '1px solid #2a333d',
+  background: 'rgba(15,20,26,0.85)',
+  color: '#9aa7b5',
+  fontSize: 11,
+  pointerEvents: 'none',
+};
+
+const kbd: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 16,
+  height: 16,
+  padding: '0 3px',
+  borderRadius: 4,
+  border: '1px solid #3a4654',
+  background: '#1c2430',
+  color: '#e8eef4',
+  fontSize: 10,
+  fontFamily: 'inherit',
 };
 
 function unwrapAssets(result: unknown): CompanionAvatarAsset[] {
@@ -264,6 +286,8 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   const [fullscreen, setFullscreen] = useState(false);
   const [assets, setAssets] = useState<CompanionAvatarAsset[]>([]);
   const [choiceId, setChoiceId] = useState<string | null>(() => avatarStore.get(launch.contactId)?.choiceId ?? null);
+  // This device's own avatar library + per-agent mapping (Deliverable 2).
+  const [localAvatars, setLocalAvatars] = useState<LocalAvatarsConfig | null>(null);
   const clientRef = useRef<ReturnType<typeof createRegionCommandClient> | null>(null);
   // 3D companion host (flat canvas or walkable scene). The character tool pack
   // and the debug panels bind to whichever stage is mounted.
@@ -273,11 +297,26 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   // User-facing avatar behaviour (click nod). Defaults ON when settings are absent.
   const [avatarSettings, setAvatarSettings] = useState<CompanionAvatarSettings | null>(null);
   const forcedDebug = useMemo(() => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('companionDebug') === '1', []);
-  const [motionFeedOpen, setMotionFeedOpen] = useState(false);
-  const [gestureTestOpen, setGestureTestOpen] = useState(false);
-  const [statusMotionsOpen, setStatusMotionsOpen] = useState(false);
+  /**
+   * Detached tool windows (Deliverable 3). Each context-menu tool ("Motion feed",
+   * "Gesture tester", "Status motions") opens as its own `BrowserWindow` scoped to
+   * this contact, so nothing is docked inside the companion anymore. This tracks
+   * *whether* main reports one open, so the menu can show it as active and the
+   * companion only runs the (small) state-relay loop while something listens.
+   */
+  const [toolWindowsOpen, setToolWindowsOpen] = useState(false);
+  // Which of this agent's tools currently have a window open (for the menu's
+  // per-row state and to know what the relay needs to publish).
+  const [openTools, setOpenTools] = useState<CompanionToolId[]>([]);
   const [statusMotions, setStatusMotions] = useState<StatusMotionMap>(() => parseStatusMotions(null));
   const registeredToolsRef = useRef<Set<string>>(new Set());
+  // WASD/Shift/Space state (Deliverable 4). Kept in a ref so the key handlers can
+  // drive the live host without re-rendering the whole companion every keypress.
+  const moveKeysRef = useRef<MoveKeys>({ ...IDLE_MOVE_KEYS });
+  /** Live pressed key codes, cleared on blur. */
+  const pressedKeysRef = useRef<Set<string>>(new Set());
+  /** Whether a non-idle input is currently pushed (skips redundant no-op pushes). */
+  const moveInputPushedRef = useRef(false);
 
   useEffect(() => {
     void bridge.getConnectionConfig().then(setConnection);
@@ -367,6 +406,66 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       gesture: avatarSettings?.clickNodGesture,
     });
   }, [stageHost, avatarSettings?.clickNod, avatarSettings?.clickNodGesture]);
+
+  /**
+   * WASD / Shift / Space locomotion (Deliverable 4).
+   *
+   * The keyboard only drives the walkable scene (and the shared room scene); the
+   * flat avatar stage has no ground plane, so the listeners are inert without
+   * `setMoveInput`. Key events are filtered so the composer keeps typing (`W` in a
+   * text field must not walk the rig) and so a held key does not keep walking
+   * after the window loses focus.
+   *
+   * `Space` stays a held flag: the locomotion tick consumes it as a rising edge
+   * and the animator plays the `jump` clip on the edge, so a held key cannot
+   * re-fire or leave the rig stuck airborne.
+   */
+  useEffect(() => {
+    const host = stageHost;
+    if (!host?.setMoveInput) return;
+    // Capture the (guarded, non-optional) method so the closures below do not
+    // have to re-narrow the live host on every keypress.
+    const setMoveInput = host.setMoveInput;
+    const push = () => {
+      if (hostGetterRef.current !== host) return;
+      const keys = moveKeysRef.current;
+      host.setAnalogSpeed?.(moveSpeedForKeys(keys));
+      const input = moveInputFromKeys(keys);
+      // Skip a redundant no-op push (every frame of a held idle key).
+      if (isIdleMoveInput(input) && !moveInputPushedRef.current) return;
+      moveInputPushedRef.current = !isIdleMoveInput(input);
+      setMoveInput(input);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!isLocomotionKey(e.code) || isTypingTarget(e.target)) return;
+      // Keep Space from scrolling and WASD from any default page pan.
+      e.preventDefault();
+      moveKeysRef.current = readMoveKeys(pressedKeysRef.current.add(e.code));
+      push();
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (!isLocomotionKey(e.code)) return;
+      pressedKeysRef.current.delete(e.code);
+      moveKeysRef.current = readMoveKeys(pressedKeysRef.current);
+      push();
+    };
+    // Losing focus clears the input so a held key does not walk the rig forever.
+    const clear = () => {
+      pressedKeysRef.current.clear();
+      moveKeysRef.current = { ...IDLE_MOVE_KEYS };
+      setMoveInput({ x: 0, z: 0, yaw: 0, jump: false });
+      moveInputPushedRef.current = false;
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', clear);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', clear);
+      clear();
+    };
+  }, [stageHost]);
 
   // Cycle status gestures while the agent is working (only when the editor is on).
   useAgentStatusMotions({
@@ -570,13 +669,57 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     return stored ?? fromContact ?? null;
   }, [contact, launch.contactId]);
 
+  // This device's own avatar library (Deliverable 2). Read once on mount and
+  // refreshed after an import/remove; a preload that predates the feature simply
+  // yields `null` and the gallery falls back to its old copy.
+  useEffect(() => {
+    if (!hasBridgeMethod(bridge, 'localAvatarsList')) return;
+    let cancelled = false;
+    const read = () => {
+      void callBridge<LocalAvatarsConfig | null>(bridge, 'localAvatarsList', null).then((config) => {
+        if (!cancelled) setLocalAvatars(config);
+      });
+    };
+    read();
+    // The Settings surface can add/remove models and remap agents while this
+    // window is open, so re-read on focus — no reload (which would drop the live
+    // voice call) and no polling.
+    const onFocus = () => read();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
+
+  /**
+   * The library avatar mapped to **this** agent wins the initial selection when
+   * the user has not explicitly picked a tile in this window. It is deliberately
+   * per-contact: several companions can be open and each remembers its own
+   * agent's model instead of one global avatar.
+   */
+  const mappedLocal = useMemo(
+    () => mappedLocalAvatar(localAvatars, launch.contactId),
+    [localAvatars, launch.contactId],
+  );
+  const effectiveChoiceId = useMemo(() => {
+    if (choiceId) return choiceId;
+    return mappedLocal ? `local:${mappedLocal.id}` : null;
+  }, [choiceId, mappedLocal]);
+
   const choices: CompanionAvatarChoice[] = useMemo(
-    () => buildAvatarChoices({ contact, presence: basePresence, assets }),
-    [contact, basePresence, assets],
+    () =>
+      buildAvatarChoices({
+        contact,
+        presence: basePresence,
+        assets,
+        localAvatars,
+      }),
+    [contact, basePresence, assets, localAvatars],
   );
   const resolved = useMemo(
-    () => resolveAvatarSelection(choices, choiceId),
-    [choices, choiceId],
+    () => resolveAvatarSelection(choices, effectiveChoiceId),
+    [choices, effectiveChoiceId],
   );
   const selectionPresence = useMemo(
     () => selectionToPresence(basePresence, resolved),
@@ -595,6 +738,21 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
         imageUrl: choice.kind === 'image' ? choice.url : null,
       });
       presenceStore.set(launch.contactId, next);
+      // Deliverable 2: a picked library model becomes this agent's remembered
+      // mapping (so the gallery highlights it and a reopen restores it). Picking
+      // anything else clears the mapping, so it never overrides an explicit pick.
+      if (hasBridgeMethod(bridge, 'localAvatarsSetMapping')) {
+        const avatarId = choice.local ? (choice.localAvatarId ?? null) : null;
+        void callBridge<LocalAvatarsConfig | null>(
+          bridge,
+          'localAvatarsSetMapping',
+          null,
+          launch.contactId,
+          avatarId,
+        ).then((config) => {
+          if (config) setLocalAvatars(config);
+        });
+      }
       setGalleryOpen(false);
     },
     [basePresence, launch.contactId],
@@ -658,18 +816,73 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
           resetPose();
           break;
         case 'motion-feed':
-          setMotionFeedOpen((open) => !open);
-          break;
         case 'gestures':
-          setGestureTestOpen((open) => !open);
-          break;
         case 'status-motions':
-          setStatusMotionsOpen((open) => !open);
+          // Deliverable 3: these open as their own windows, scoped to this
+          // contact's agent, instead of docking inside the companion.
+          void callBridge<{ contactId: string } | null>(bridge, 'companionOpenTool', null, {
+            tool: action as CompanionToolId,
+            contactId: launch.contactId,
+            agentName: launch.title ?? contact?.name ?? null,
+          });
           break;
       }
     },
-    [resetPose],
+    [resetPose, launch.contactId, launch.title, contact?.name],
   );
+
+  // Deliverable 3: main tells us which of our tool windows are open, so the
+  // companion only runs the state-relay loop while a window is listening and the
+  // menu can show each tool row's live state.
+  useEffect(() => {
+    const off = onBridge<{ contactId: string; open: boolean; tools?: string[] }>(
+      bridge,
+      'onCompanionToolPresence',
+      (presence) => {
+        if (!presence || presence.contactId !== launch.contactId) return;
+        const tools = (presence.tools ?? []) as CompanionToolId[];
+        setOpenTools(tools);
+        setToolWindowsOpen(Boolean(presence.open));
+      },
+    );
+    return () => off();
+  }, [launch.contactId]);
+
+  // Deliverable 3: a status-motions edit made in a detached tool window is relayed
+  // back here — the window that owns the agent's session persists + applies it.
+  useEffect(() => {
+    const off = onBridge<{ contactId: string; statusMotions: Record<string, unknown> | null }>(
+      bridge,
+      'onCompanionToolSync',
+      (sync) => {
+        if (!sync || sync.contactId !== launch.contactId) return;
+        const next = parseStatusMotions(sync.statusMotions);
+        setStatusMotions(next);
+        const profile = presenceStore.get(launch.contactId);
+        if (profile) {
+          presenceStore.set(launch.contactId, {
+            ...profile,
+            settings: {
+              ...(profile.settings ?? {}),
+              status_motions: serializeStatusMotions(next),
+            },
+          });
+        }
+      },
+    );
+    return () => off();
+  }, [launch.contactId]);
+
+  // Deliverable 3: turn metadata for the next outbound companion turn — where the
+  // avatar stands now. Read at send time (see `CompanionComposer.getTurnContext`)
+  // so a turn carries the live pose, and shape it as a `browserContext` block the
+  // chat call already forwards.
+  const getTurnContext = useCallback((): Record<string, unknown> | undefined => {
+    const host = hostGetterRef.current;
+    if (!host?.getPoseFeedback) return undefined;
+    const pose = normalizePoseContext(host.getPoseFeedback(), launch.contactId);
+    return poseToBrowserContext(pose);
+  }, [launch.contactId]);
 
   // A wake may resolve a different (latest active) conversation than the one this
   // window opened with; follow it so the composer sends to the right thread.
@@ -687,6 +900,12 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   // realtime call is not live (voice mode owns the capture). A window that does
   // not own the mic never shows the composer, so captures never compete.
   const showComposer = dictate && !voiceStatus.active && sttPrimary;
+  /**
+   * Deliverable 4: whether the mounted stage is the walkable scene (flat stage
+   * with scene mode on, or a shared room). Only then do WASD/Shift/Space mean
+   * anything, so the on-screen hint is shown only here.
+   */
+  const walkable = Boolean(launch.roomId) || (!launch.roomId && debugEnabled.sceneMode && !isImageAvatar);
 
   return (
     <MotionFeedProvider host={stageHost}>
@@ -753,69 +972,14 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       </header>
 
       {galleryOpen ? (
-        <div style={galleryPanel} role="dialog" aria-label="Avatar gallery">
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-            <strong style={{ fontSize: 12 }}>Avatar gallery</strong>
-            <span style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={() => setGalleryOpen(false)}>
-              ×
-            </button>
-          </div>
-          {choices.length === 0 ? (
-            <p style={{ fontSize: 12, color: '#9aa7b5', margin: 0 }}>
-              No avatar yet. Upload a VRM in the main window’s chat config, or keep the profile image.
-            </p>
-          ) : (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}>
-              {choices.map((choice) => (
-                <li key={choice.id}>
-                  <button
-                    type="button"
-                    style={{
-                      ...(choice.id === resolved?.choice.id ? btnActive : btn),
-                      width: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      justifyContent: 'flex-start',
-                    }}
-                    onClick={() => chooseAvatar(choice)}
-                  >
-                    {choice.kind === 'image' && choice.url ? (
-                      <CachedAvatarImage
-                        src={choice.url}
-                        alt=""
-                        style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'cover' }}
-                        fallback={'🖼'}
-                      />
-                    ) : (
-                      <span
-                        style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: 6,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          background: '#0f141a',
-                          border: '1px solid #2a333d',
-                        }}
-                      >
-                        🧍
-                      </span>
-                    )}
-                    <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                      <span style={{ fontSize: 12 }}>{choice.label}</span>
-                      <span style={{ fontSize: 10, color: '#9aa7b5' }}>
-                        {choice.kind === 'vrm' ? '3D model (VRM)' : 'profile image'}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <CompanionAvatarGallery
+          choices={choices}
+          resolved={resolved}
+          onChoose={chooseAvatar}
+          onClose={() => setGalleryOpen(false)}
+          onOpenSettings={() => void callBridge<boolean>(bridge, 'openSettings', false)}
+          onLibraryChange={setLocalAvatars}
+        />
       ) : null}
 
       {/* The 3D/voice stage stays mounted across chat collapse/expand so the
@@ -914,6 +1078,21 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
             />
           )}
         </div>
+        {walkable && stageHost?.setMoveInput ? (
+          // Deliverable 4: the 3D scene is keyboard-drivable here. The hint is
+          // pointer-events:none so it never eats a scene click / right-click.
+          <div style={locomotionHint} aria-hidden>
+            <kbd style={kbd}>W</kbd>
+            <kbd style={kbd}>A</kbd>
+            <kbd style={kbd}>S</kbd>
+            <kbd style={kbd}>D</kbd>
+            <span style={{ margin: '0 4px' }}>walk</span>
+            <kbd style={kbd}>Shift</kbd>
+            <span style={{ margin: '0 4px' }}>run</span>
+            <kbd style={kbd}>Space</kbd>
+            <span>jump</span>
+          </div>
+        ) : null}
         {chatOpen && chat ? (
           <div
             data-testid="companion-transcript"
@@ -947,7 +1126,9 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
         ) : null}
       </div>
 
-      {showComposer ? <CompanionComposer contactId={launch.contactId} /> : null}
+      {showComposer ? (
+        <CompanionComposer contactId={launch.contactId} getTurnContext={getTurnContext} />
+      ) : null}
 
       {!chatOpen && preview ? (
         <div
@@ -968,40 +1149,16 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
         </div>
       ) : null}
 
-      {debugEnabled.motionFeed && motionFeedOpen ? (
-        <DockedMotionFeed onClose={() => setMotionFeedOpen(false)} />
-      ) : null}
-      {debugEnabled.gestureTest ? (
-        <GestureTestPanel
-          open={gestureTestOpen}
-          getCatalog={() => stageHost?.listLoadedGestures?.() ?? []}
-          onPlay={(id, loop) => stageHost?.playGesture?.(id, loop, 'user', 'debug')}
-          onClose={() => setGestureTestOpen(false)}
-        />
-      ) : null}
-      {debugEnabled.statusMotions && statusMotionsOpen ? (
-        <div style={debugPanel} role="dialog" aria-label="Status motions editor">
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-            <span style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={() => setStatusMotionsOpen(false)}>
-              ×
-            </button>
-          </div>
-          <StatusMotionsConfig
-            motions={statusMotions}
-            onChange={(next) => {
-              setStatusMotions(next);
-              const profile = presenceStore.get(launch.contactId);
-              if (profile) {
-                presenceStore.set(launch.contactId, {
-                  ...profile,
-                  settings: { ...(profile.settings ?? {}), status_motions: serializeStatusMotions(next) },
-                });
-              }
-            }}
-          />
-        </div>
-      ) : null}
+      {/* Deliverable 3: the debug tool panels are no longer docked here — they
+          open as their own per-agent windows. This relay keeps the owning
+          companion streaming live state (status motions, loaded gestures, action
+          feed) to those windows only while one is listening. */}
+      <CompanionToolRelay
+        contactId={launch.contactId}
+        active={toolWindowsOpen}
+        statusMotions={statusMotions}
+        getGestures={() => hostGetterRef.current?.listGestures?.() ?? []}
+      />
 
       {menu.open ? (
         <SceneMenuAnchorContext.Provider value={menuAnchor}>
@@ -1009,9 +1166,10 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
             debugEnabled={debugEnabled}
             open={{
               galleryOpen,
-              motionFeedOpen,
-              gestureTestOpen,
-              statusMotionsOpen,
+              // A tool row shows as active when that tool's own window is open.
+              motionFeedOpen: openTools.includes('motion-feed'),
+              gestureTestOpen: openTools.includes('gestures'),
+              statusMotionsOpen: openTools.includes('status-motions'),
             }}
             poseResetAvailable={Boolean(stageHost?.resetPose)}
             onAction={onMenuAction}
@@ -1054,17 +1212,39 @@ function FullscreenGlyph({ exit }: { exit: boolean }) {
   );
 }
 
-/** Motion feed panel wired to the provider (keeps the provider hook scoped here). */
-function DockedMotionFeed({ onClose }: { onClose: () => void }) {
+/**
+ * Tool-state relay (Deliverable 3). Runs inside the `MotionFeedProvider` so it
+ * can read the live action feed, and mirrors this agent's stage into its own
+ * detached tool windows while any is open.
+ *
+ * The gestures are read straight off the live host each tick; the action feed
+ * comes from the provider (its events update every action, so an effect keyed on
+ * them republishes immediately rather than on a poll). Publishing stops when the
+ * last tool window closes, so an idle companion does no periodic work.
+ */
+function CompanionToolRelay({
+  contactId,
+  active,
+  statusMotions,
+  getGestures,
+}: {
+  contactId: string;
+  active: boolean;
+  statusMotions: StatusMotionMap;
+  getGestures: () => string[];
+}) {
   const feed = useMotionFeed();
-  return (
-    <div style={debugPanel} role="dialog" aria-label="Motion feed">
-      <MotionFeedPanel
-        open
-        events={feed.events}
-        onClear={feed.clear}
-        onClose={onClose}
-      />
-    </div>
-  );
+  useEffect(() => {
+    if (!active) return;
+    void callBridge<boolean>(bridge, 'companionToolPublish', false, {
+      contactId,
+      statusMotions: serializeStatusMotions(statusMotions),
+      gestures: getGestures(),
+      actionFeed: feed.events,
+    });
+    // `feed.events` is a fresh array per event, so this republishes on every
+    // action without a timer; `statusMotions` publishes on an edit too. The
+    // gestures are read through the getter so a stage swap is reflected live.
+  }, [active, contactId, statusMotions, getGestures, feed.events]);
+  return null;
 }

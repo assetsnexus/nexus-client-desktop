@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import { IPC, type CertificatePromptInfo, type CompanionAction, type CompanionCursorCoords, type CompanionPresent, type CompanionSessionView, type CompanionSttOwner, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
+import { IPC, type CertificatePromptInfo, type CompanionAction, type CompanionCursorCoords, type CompanionPresent, type CompanionSessionView, type CompanionSttOwner, type CompanionToolPresence, type CompanionToolSnapshot, type CompanionToolSync, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
 
 const bridge: NexusBridge = {
   getVersion: () => ipcRenderer.invoke(IPC.version),
@@ -197,6 +197,36 @@ const bridge: NexusBridge = {
     const handler = (_e: unknown, action: CompanionAction) => listener(action);
     ipcRenderer.on(IPC.companionActionRelay, handler);
     return () => ipcRenderer.removeListener(IPC.companionActionRelay, handler);
+  },
+  companionOpenTool: (input) => ipcRenderer.invoke(IPC.companionOpenTool, input),
+  companionCloseTool: (contactId, tool) => ipcRenderer.invoke(IPC.companionCloseTool, contactId, tool),
+  onCompanionToolSnapshot: (listener) => {
+    const handler = (_e: unknown, snapshot: CompanionToolSnapshot) => listener(snapshot);
+    ipcRenderer.on(IPC.companionToolSnapshot, handler);
+    return () => ipcRenderer.removeListener(IPC.companionToolSnapshot, handler);
+  },
+  onCompanionToolPresence: (listener) => {
+    const handler = (_e: unknown, presence: CompanionToolPresence) => listener(presence);
+    ipcRenderer.on(IPC.companionToolPresence, handler);
+    return () => ipcRenderer.removeListener(IPC.companionToolPresence, handler);
+  },
+  companionToolPublish: (snapshot) => ipcRenderer.invoke(IPC.companionToolPublish, snapshot),
+  companionToolSync: (sync) => ipcRenderer.invoke(IPC.companionToolSync, sync),
+  onCompanionToolSync: (listener) => {
+    const handler = (_e: unknown, sync: CompanionToolSync) => listener(sync);
+    ipcRenderer.on(IPC.companionToolSync, handler);
+    return () => ipcRenderer.removeListener(IPC.companionToolSync, handler);
+  },
+  localAvatarsList: () => ipcRenderer.invoke(IPC.localAvatarsList),
+  localAvatarsPick: () => ipcRenderer.invoke(IPC.localAvatarsPick),
+  localAvatarsRemove: (id) => ipcRenderer.invoke(IPC.localAvatarsRemove, id),
+  localAvatarsSetMapping: (contactId, avatarId) =>
+    ipcRenderer.invoke(IPC.localAvatarsSetMapping, contactId, avatarId),
+  openSettings: () => ipcRenderer.invoke(IPC.openSettings),
+  onOpenSettings: (listener) => {
+    const handler = () => listener();
+    ipcRenderer.on(IPC.openSettings, handler);
+    return () => ipcRenderer.removeListener(IPC.openSettings, handler);
   },
   calendarListEvents: (input) => ipcRenderer.invoke(IPC.calendarListEvents, input),
   calendarUpcoming: () => ipcRenderer.invoke(IPC.calendarUpcoming),

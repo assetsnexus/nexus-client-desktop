@@ -74,12 +74,20 @@ export type WakeChatRouterOptions = {
   /** Capture one utterance and transcribe it; null when nothing was heard. */
   dictate: (onPartial: (text: string) => void) => Promise<string | null>;
   /** Deliver the transcript as the user's message to the open conversation. */
-  send: (input: { contactId: string; text: string }) => Promise<void>;
+  send: (input: {
+    contactId: string;
+    text: string;
+    /** Optional turn metadata (e.g. the companion's avatar pose). */
+    browserContext?: Record<string, unknown>;
+  }) => Promise<void>;
   /**
    * Deliver the recorded audio batch as a normal voice message (cloud / custom
    * STT applies). Optional; the widget hides "send as voice" without it.
    */
-  sendAudio?: (input: { contactId: string }) => Promise<boolean>;
+  sendAudio?: (input: {
+    contactId: string;
+    browserContext?: Record<string, unknown>;
+  }) => Promise<boolean>;
   /**
    * Current audio-batch progress for the active turn (ms + chunk count). Called
    * by the capture as VAD segments accumulate, so the widget can show "Audio
@@ -88,6 +96,12 @@ export type WakeChatRouterOptions = {
   batchProgress?: () => { durationMs: number; chunks: number };
   /** Keep an unsubmitted transcript for review (the `queue` unsent policy). */
   enqueue: (entry: QueuedUtterance) => void;
+  /**
+   * Turn metadata to attach to a companion-originated turn. Called at send time
+   * so it reflects the avatar's pose *now* (Deliverable 4); a non-companion
+   * surface (widget / chat) omits it and sends a plain turn.
+   */
+  companionTurnContext?: () => Record<string, unknown> | undefined;
   /** Known agents for speak-led routing ("Bob, …"). */
   listAgents?: () => TranscriptAgent[];
   /**
@@ -239,12 +253,18 @@ export function createWakeChatRouter(options: WakeChatRouterOptions) {
             await options.send({
               contactId: input.agentId ?? target.contactId,
               text: input.text,
+              // Deliverable 4: the companion attaches its live avatar pose at
+              // send time; a non-companion surface leaves it undefined.
+              browserContext: options.companionTurnContext?.(),
             });
           },
           ...(options.sendAudio
             ? {
                 sendAudio: () =>
-                  options.sendAudio!({ contactId: target.contactId }),
+                  options.sendAudio!({
+                    contactId: target.contactId,
+                    browserContext: options.companionTurnContext?.(),
+                  }),
               }
             : {}),
           enqueue: options.enqueue,

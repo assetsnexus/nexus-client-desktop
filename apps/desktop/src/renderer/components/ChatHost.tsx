@@ -417,6 +417,7 @@ export function ChatHost({
         // Every presentation is a new activation: bump the token so the widget
         // resets any frozen edit from a previous wake.
         setWakeSessionToken((n) => n + 1);
+        companionPoseRef.current = null;
         const agentRow = chat.getState().contacts.find((c) => c.id === target.contactId) ?? null;
         const agentName = target.agentName ?? agentRow?.name ?? null;
         const avatarUrl = agentRow?.avatarUrl ?? null;
@@ -484,7 +485,7 @@ export function ChatHost({
         return { dictate: true };
       },
       dictate: (onPartial) => captureOneUtterance(chat, client, onPartial),
-      sendAudio: async ({ contactId }) => {
+      sendAudio: async ({ contactId, browserContext }) => {
         const blob = activeBatchBlobRef.current;
         if (!blob || blob.size === 0) return false;
         const audio = await blobToInlineAudio(blob, 'voice-message.wav');
@@ -492,12 +493,14 @@ export function ChatHost({
           conversationId: chat.getState().conversationId ?? undefined,
           contactId,
           attachments: [audio],
+          ...(browserContext ? { browserContext } : {}),
           bypassFallback: true,
         });
         return result.ok;
       },
       batchProgress: () =>
         activeRecorderRef.current?.progress() ?? { durationMs: 0, chunks: 0 },
+      companionTurnContext,
       listAgents: () => chat.getState().contacts.map((c) => ({ contactId: c.id, name: c.name })),
       /**
        * Whether dictation transcribes in the cloud. Uses the same capability
@@ -521,9 +524,13 @@ export function ChatHost({
           customSttEndpoint: local.custom,
         });
       },
-      send: async ({ contactId, text }) => {
+      send: async ({ contactId, text, browserContext }) => {
         const conversationId = chat.getState().conversationId ?? undefined;
-        await chat.sendMessage(text, { contactId, conversationId });
+        await chat.sendMessage(text, {
+          contactId,
+          conversationId,
+          ...(browserContext ? { browserContext } : {}),
+        });
       },
       enqueue: (entry) => {
         setQueued((prev) => {
@@ -567,6 +574,18 @@ export function ChatHost({
   wakeTargetRef.current = wakeTarget;
 
   /**
+   * Pose the companion reported with its latest control (Deliverable 4). Read at
+   * send time so a plain chat / widget turn carries no pose, while a companion
+   * turn carries where the avatar stood when the user sent it.
+   */
+  const companionPoseRef = useRef<Record<string, unknown> | null>(null);
+  const companionTurnContext = useCallback((): Record<string, unknown> | undefined => {
+    const target = wakeTargetRef.current;
+    if (!target) return undefined;
+    return companionPoseRef.current ?? undefined;
+  }, []);
+
+  /**
    * Mirror the live wake session into the companion window so it can render the
    * STT preview + composer. The session itself stays here (this window owns the
    * shared mic graph and pre-roll); the companion is a *view* of it, so both
@@ -600,6 +619,14 @@ export function ChatHost({
     const off = onBridge<CompanionAction>(bridge, 'onCompanionActionRelay', (action) => {
       const target = wakeTargetRef.current;
       if (!target || action.contactId !== target.contactId) return;
+      // Deliverable 4: remember the companion's reported pose so the turn this
+      // control submits carries it. Cleared when a non-edit control carries none,
+      // so a stale walk position never leaks onto a later turn.
+      if (action.browserContext && action.browserContext.source === 'companion_pose') {
+        companionPoseRef.current = action.browserContext;
+      } else if (action.action !== 'edit') {
+        companionPoseRef.current = null;
+      }
       if (action.action === 'submit') void wakeRouterRef.current?.submit();
       else if (action.action === 'cancel') wakeRouterRef.current?.cancel();
       else if (action.action === 'sendAudio') void wakeRouterRef.current?.submitAudio();

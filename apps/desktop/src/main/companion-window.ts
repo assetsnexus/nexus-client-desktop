@@ -16,6 +16,7 @@ import { BrowserWindow, screen } from 'electron';
 import { join } from 'node:path';
 import {
   buildCompanionHash,
+  buildCompanionToolHash,
   COMPANION_DEFAULT_SIZE,
   COMPANION_MIN_SIZE,
   electSttOwner,
@@ -24,9 +25,22 @@ import {
   type CompanionPresent,
   type CompanionSessionView,
   type CompanionSttOwner,
+  type CompanionToolPresence,
+  type CompanionToolSnapshot,
+  type CompanionToolSync,
   type SttOwnerElection,
 } from '../shared/companion.js';
-import { IPC } from '../shared/ipc.js';
+import { IPC, type CompanionToolId } from '../shared/ipc.js';
+
+/** Default size of a detached companion tool window (Deliverable 3). */
+const TOOL_DEFAULT_SIZE = { width: 460, height: 560 } as const;
+
+/** Human labels for the tool window titles (`Motion feed`, …). */
+const TOOL_LABELS: Record<CompanionToolId, string> = {
+  'motion-feed': 'Motion feed',
+  gestures: 'Gesture tester',
+  'status-motions': 'Status motions',
+};
 export type CompanionWindowOptions = {
   /** Resolve the renderer base URL (dev server or file:// index.html). */
   resolveRendererUrl: () => string;
@@ -46,6 +60,14 @@ export type CompanionWindowManager = ReturnType<typeof createCompanionWindowMana
 
 export function createCompanionWindowManager(options: CompanionWindowOptions) {
   const windows = new Map<string, BrowserWindow>();
+  /**
+   * Detached tool windows (Deliverable 3): `"<contactId>::<tool>"` → window.
+   * Scoped per (contact, tool) so each agent gets its own Motion feed /
+   * Gesture tester / Status motions window, and two agents never share one.
+   */
+  const toolWindows = new Map<string, BrowserWindow>();
+  /** Which contact each open tool window belongs to (for the targeted relay). */
+  const toolOwners = new Map<number, string>();
   /** Pin state per contact, so a reopen preserves the user's choice. */
   const pinned = new Map<string, boolean>();
   /**
@@ -168,11 +190,155 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     return { opened: true, contactId: launch.contactId };
   }
 
+  const toolKey = (contactId: string, tool: CompanionToolId): string => `${contactId}::${tool}`;
+
+  /**
+   * Close a contact's tool windows (one tool when `tool` is given, else all of
+   * that contact's tools). Returns whether anything was closed.
+   */
+  function closeToolWindows(contactId: string, tool?: CompanionToolId): boolean {
+    let closed = false;
+    for (const [key, win] of [...toolWindows.entries()]) {
+      const [owner, ownerTool] = key.split('::');
+      if (owner !== contactId) continue;
+      if (tool && ownerTool !== tool) continue;
+      if (!win.isDestroyed()) win.close();
+      toolOwners.delete(win.id);
+      toolWindows.delete(key);
+      closed = true;
+    }
+    if (closed) notifyToolPresence(contactId);
+    return closed;
+  }
+
+  /**
+   * Open (or refocus) one context-menu tool in its own `BrowserWindow`, scoped to
+   * a single agent/contact. Unlike the companion window this never touches STT
+   * ownership — a debug/config surface must not steal the mic — so it is a plain
+   * renderer window that resolves the agent's settings from the same session.
+   *
+   * Fails closed (returns `null`) when the requested contact has no open
+   * companion: a tool window without its agent would show global settings, which
+   * is exactly the per-agent leak this deliverable forbids.
+   */
+  function openTool(input: {
+    tool: CompanionToolId;
+    contactId: string;
+    agentName?: string | null;
+  }): { contactId: string; tool: CompanionToolId } | null {
+    if (!windows.has(input.contactId)) return null;
+    const key = toolKey(input.contactId, input.tool);
+    const existing = toolWindows.get(key);
+    if (existing && !existing.isDestroyed()) {
+      if (existing.isMinimized()) existing.restore();
+      existing.focus();
+      return { contactId: input.contactId, tool: input.tool };
+    }
+
+    const display = screen.getPrimaryDisplay().workAreaSize;
+    const win = new BrowserWindow({
+      width: Math.min(TOOL_DEFAULT_SIZE.width, display.width),
+      height: Math.min(TOOL_DEFAULT_SIZE.height, display.height),
+      backgroundColor: '#0b0f14',
+      title: `${TOOL_LABELS[input.tool]}${input.agentName ? ` · ${input.agentName}` : ''}`,
+      skipTaskbar: true,
+      webPreferences: {
+        preload: options.preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    toolWindows.set(key, win);
+    toolOwners.set(win.id, input.contactId);
+    options.harden?.(win.webContents);
+    win.on('closed', () => {
+      toolOwners.delete(win.id);
+      if (toolWindows.get(key) === win) toolWindows.delete(key);
+      // The last tool window for this agent just closed: tell the companion it can
+      // stop publishing tool snapshots.
+      notifyToolPresence(input.contactId);
+    });
+
+    const base = options.resolveRendererUrl();
+    void win.loadURL(`${base}${buildCompanionToolHash(input)}`);
+    notifyToolPresence(input.contactId);
+    return { contactId: input.contactId, tool: input.tool };
+  }
+
+  /**
+   * Push a companion's tool-scoped state to **its** open tool windows only.
+   * Tagged per contact so a tool window never renders another agent's config.
+   */
+  function publishToolSnapshot(snapshot: CompanionToolSnapshot): boolean {
+    const contactId = typeof snapshot?.contactId === 'string' ? snapshot.contactId.trim() : '';
+    if (!contactId) return false;
+    let sent = false;
+    for (const win of toolWindows.values()) {
+      if (win.isDestroyed() || toolOwners.get(win.id) !== contactId) continue;
+      win.webContents.send(IPC.companionToolSnapshot, snapshot);
+      sent = true;
+    }
+    return sent;
+  }
+
+  /**
+   * Relay a tool-window edit back to the agent's companion window (the window
+   * whose session owns the config). Returns false when that companion is gone.
+   */
+  function syncToolState(sync: CompanionToolSync): boolean {
+    const contactId = typeof sync?.contactId === 'string' ? sync.contactId.trim() : '';
+    if (!contactId) return false;
+    const win = windows.get(contactId);
+    if (!win || win.isDestroyed()) return false;
+    win.webContents.send(IPC.companionToolSync, sync);
+    return true;
+  }
+
+  /** Set while a companion must not be relied on for live data. */
+  /**
+   * Tell a companion whether any of its tool windows are open, so it only runs
+   * the tool-state relay loop while something is listening.
+   */
+  function notifyToolPresence(contactId: string): void {
+    const win = windows.get(contactId);
+    if (!win || win.isDestroyed()) return;
+    const tools: string[] = [];
+    for (const [key, toolWin] of toolWindows.entries()) {
+      if (toolWin.isDestroyed() || toolOwners.get(toolWin.id) !== contactId) continue;
+      const tool = key.split('::')[1];
+      if (tool) tools.push(tool);
+    }
+    win.webContents.send(IPC.companionToolPresence, {
+      contactId,
+      open: tools.length > 0,
+      tools,
+    } satisfies CompanionToolPresence);
+  }
+
   return {
     open,
 
+    /** Open one context-menu tool in its own window, scoped to a contact. */
+    openTool,
+
+    /**
+     * Close a contact's tool windows (one tool when `tool` is given, else all of
+     * that contact's tools). Returns whether anything was closed.
+     */
+    closeTool: closeToolWindows,
+
+    /** Push a companion's tool-scoped state to its own tool windows. */
+    publishToolSnapshot,
+
+    /** Relay a tool-window edit back to the agent's companion window. */
+    syncToolState,
+
     /** Close a contact's companion (no-op when none is open). */
     close(contactId: string): boolean {
+      // A tool window mirrors one agent's config; closing that agent's companion
+      // removes the surface it is scoped to, so its tools close with it.
+      closeToolWindows(contactId);
       const win = windows.get(contactId);
       if (!win || win.isDestroyed()) return false;
       win.close();

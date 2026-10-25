@@ -20,6 +20,9 @@ import type {
   CompanionPresent,
   CompanionSessionView,
   CompanionSttOwner,
+  CompanionToolPresence,
+  CompanionToolSnapshot,
+  CompanionToolSync,
 } from './companion.js';
 import type { RegionEnvironment } from './sandbox-environment.js';
 import type {
@@ -37,8 +40,40 @@ import type {
   TrayAppItem,
   TrayAppSettings,
 } from './nexus-apps.js';
+// Imported (not only re-exported) because the bridge contract below *uses*
+// `LocalAvatarsConfig` in method signatures, which a bare `export type … from`
+// does not bring into scope.
+import type { LocalAvatarsConfig } from './local-avatars.js';
 
 export type { RegionEnvironment } from './sandbox-environment.js';
+
+export type {
+  LocalAvatarKind,
+  LocalAvatarRecord,
+  LocalAvatarsConfig,
+} from './local-avatars.js';
+export {
+  DEFAULT_LOCAL_AVATARS,
+  LOCAL_AVATAR_ACCEPT,
+  LOCAL_AVATAR_EXTENSIONS,
+  LOCAL_AVATAR_HOST,
+  LOCAL_AVATAR_MIME,
+  LOCAL_AVATAR_SCHEME,
+  avatarIdSlug,
+  avatarKindFromFileName,
+  avatarLabelFromFileName,
+  isSupportedAvatarFileName,
+  isDeviceLocalAvatarUrl,
+  localAvatarFileNameFromPath,
+  localAvatarUrl,
+  mappedAvatarId,
+  mappedLocalAvatar,
+  normalizeContactMappings,
+  normalizeLocalAvatarRecord,
+  normalizeLocalAvatarsConfig,
+  pruneContactMappings,
+  removeLocalAvatar,
+} from './local-avatars.js';
 
 export type {
   AppLockSettings,
@@ -74,12 +109,18 @@ export type {
   CompanionAction,
   CompanionLaunch,
   CompanionMode,
+  CompanionPoseContext,
   CompanionPresent,
   CompanionSessionStatus,
   CompanionSessionView,
   CompanionSttOwner,
+  CompanionToolPresence,
+  CompanionToolRoute,
+  CompanionToolSnapshot,
+  CompanionToolSync,
   SttOwnerElection,
 } from './companion.js';
+export { normalizePoseContext, poseToBrowserContext } from './companion.js';
 export type { CountryRow, RegionRow } from '@nexus/node-core';
 export type { CountryRegionResolution } from './login-region.js';
 
@@ -247,6 +288,36 @@ export function normalizeCompanionDebugSettings(raw: unknown): CompanionDebugSet
     statusMotions: flag('statusMotions'),
     sceneMode: flag('sceneMode'),
   };
+}
+
+/**
+ * The companion right-click menu "tool" subviews that can be detached into
+ * their own `BrowserWindow` (Deliverable 3). Each one is scoped to the current
+ * agent/contact, never global.
+ */
+export type CompanionToolId = 'motion-feed' | 'gestures' | 'status-motions';
+
+/** Every detachable companion tool, in menu order. */
+export const COMPANION_TOOL_IDS: readonly CompanionToolId[] = [
+  'motion-feed',
+  'gestures',
+  'status-motions',
+];
+
+/** Launch payload for a standalone companion tool window. */
+export type CompanionToolLaunch = {
+  tool: CompanionToolId;
+  /** Agent/contact the tool is scoped to (its settings are per contact). */
+  contactId: string;
+  /** Display name of the agent, for the window title. */
+  agentName?: string;
+};
+
+/** Coerce an unknown value into a known tool id, or `null` when unrecognised. */
+export function normalizeCompanionToolId(raw: unknown): CompanionToolId | null {
+  return typeof raw === 'string' && (COMPANION_TOOL_IDS as readonly string[]).includes(raw)
+    ? (raw as CompanionToolId)
+    : null;
 }
 
 /**
@@ -1699,6 +1770,60 @@ export type NexusBridge = {
    * session-owning window. Returns an unsubscribe fn.
    */
   onCompanionActionRelay(listener: (action: CompanionAction) => void): () => void;
+  /**
+   * Open one companion context-menu tool in its own `BrowserWindow`, scoped to
+   * the current agent/contact (its settings are per contact, never global).
+   * Resolves the tool window's contact id, or `null` when it could not open.
+   */
+  companionOpenTool(input: CompanionToolLaunch): Promise<{ contactId: string } | null>;
+  /** Close the tool windows for a contact (one tool when `tool` is given). */
+  companionCloseTool(contactId: string, tool?: CompanionToolId): Promise<boolean>;
+  /**
+   * Subscribe to the tool-scoped state a companion window shares with its
+   * detached tool windows (main → renderer), tagged with the owning contact so a
+   * window ignores every other agent's state. Returns an unsubscribe fn.
+   */
+  onCompanionToolSnapshot(listener: (snapshot: CompanionToolSnapshot) => void): () => void;
+  /**
+   * Subscribe (companion window) to whether any of *its* tool windows are open,
+   * so it only runs the tool-state relay loop while something is listening.
+   */
+  onCompanionToolPresence(listener: (presence: CompanionToolPresence) => void): () => void;
+  /**
+   * Push a tool-scoped state snapshot from the companion that owns a contact to
+   * its open tool windows (renderer → main → windows of that contact).
+   */
+  companionToolPublish(snapshot: CompanionToolSnapshot): Promise<boolean>;
+  /**
+   * Push a status-motions edit from a detached tool window back to the owning
+   * companion (window → main → the contact's companion window).
+   */
+  companionToolSync(sync: CompanionToolSync): Promise<boolean>;
+  /**
+   * Subscribe to a status-motions edit relayed from another window of the same
+   * contact. Returns an unsubscribe fn.
+   */
+  onCompanionToolSync(listener: (sync: CompanionToolSync) => void): () => void;
+  // Local VRM/GLB avatar library (Deliverable 2).
+  /** Read the persisted library + the per-contact avatar mapping. */
+  localAvatarsList(): Promise<LocalAvatarsConfig>;
+  /**
+   * Open the native file picker and import `.vrm` / `.glb` files into the
+   * library. Resolves the updated config (unchanged when the user cancels).
+   */
+  localAvatarsPick(): Promise<LocalAvatarsConfig>;
+  /** Remove a library entry (and its copied file). */
+  localAvatarsRemove(id: string): Promise<LocalAvatarsConfig>;
+  /** Remember (or clear, with `null`) the library avatar one agent renders with. */
+  localAvatarsSetMapping(contactId: string, avatarId: string | null): Promise<LocalAvatarsConfig>;
+  /**
+   * Ask the main shell window to open its Settings surface (the gallery links
+   * here to configure client-remembered agent ↔ avatar mappings). Resolves true
+   * when the request was delivered.
+   */
+  openSettings(): Promise<boolean>;
+  /** Subscribe to that request in the main shell window. Returns an unsubscribe fn. */
+  onOpenSettings(listener: () => void): () => void;
   // Desktop calendar (Phase 7b).
   calendarListEvents(input?: CalendarListInput): Promise<CalendarEventRow[]>;
   calendarUpcoming(): Promise<CalendarEventRow[]>;
@@ -1896,6 +2021,38 @@ export const IPC = {
   companionActionRelay: 'nexus:companion:action-relay',
   /** Push OS-global cursor samples to a companion window (main → renderer). */
   companionGlobalCursor: 'nexus:companion:global-cursor',
+  /**
+   * Open one companion context-menu tool ("Motion feed" / "Gestures" /
+   * "Status motions") in its own `BrowserWindow`, scoped to the current
+   * agent/contact. Renderer → main invoke; resolves the window's contact id
+   * (or null when it could not open).
+   */
+  companionOpenTool: 'nexus:companion:open-tool',
+  /** Close a previously opened tool window (all tools for a contact, or one). */
+  companionCloseTool: 'nexus:companion:close-tool',
+  /**
+   * Tool-scoped state for detached companion tool windows (Deliverable 3).
+   * `snapshot` (main → window) carries the owning contact's status motions;
+   * `publish`/`sync` carry the same state the other way, and `sync` is what a
+   * tool window uses to write a status-motions edit back to its companion.
+   */
+  companionToolSnapshot: 'nexus:companion:tool-snapshot',
+  companionToolPublish: 'nexus:companion:tool-publish',
+  companionToolSync: 'nexus:companion:tool-sync',
+  /** Main → companion: whether any of its tool windows are currently open. */
+  companionToolPresence: 'nexus:companion:tool-presence',
+  /**
+   * Local VRM/GLB library (Deliverable 2). `list` reads the persisted library
+   * plus the per-contact mapping, `pick` opens the native file dialog and copies
+   * the chosen file into the library, `remove` deletes an entry, and
+   * `set-mapping` remembers which library avatar one agent renders with.
+   */
+  localAvatarsList: 'nexus:local-avatars:list',
+  localAvatarsPick: 'nexus:local-avatars:pick',
+  localAvatarsRemove: 'nexus:local-avatars:remove',
+  localAvatarsSetMapping: 'nexus:local-avatars:set-mapping',
+  /** Companion/child window → main shell: open the Settings surface. */
+  openSettings: 'nexus:shell:open-settings',
   calendarListEvents: 'nexus:calendar:list-events',
   calendarUpcoming: 'nexus:calendar:upcoming',
   calendarCreateEvent: 'nexus:calendar:create-event',

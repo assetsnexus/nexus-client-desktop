@@ -21,6 +21,16 @@ import {
   mergeParticipantPresenceV1,
   type ParticipantPresenceV1,
 } from '@nexus/chat-core';
+import {
+  localAvatarUrl,
+  mappedLocalAvatar,
+  type LocalAvatarRecord,
+  type LocalAvatarsConfig,
+} from '../../shared/local-avatars.js';
+
+// Re-exported so a consumer (e.g. `CompanionView`) that already imports the
+// gallery helpers can resolve an agent's mapped model without a second import.
+export { mappedLocalAvatar };
 
 /** The presence fields the gallery reads (read defensively — the shape is loose). */
 export type CompanionPresenceLike = {
@@ -48,7 +58,7 @@ function readPresenceStringOrNull(
 export type CompanionAvatarKind = 'vrm' | 'image';
 
 export type CompanionAvatarChoice = {
-  /** Stable id: `image:<contactId>` | `presence:vrm` | `vrm:<assetId>`. */
+  /** Stable id: `image:<contactId>` | `presence:vrm` | `vrm:<assetId>` | `local:<avatarId>`. */
   id: string;
   kind: CompanionAvatarKind;
   label: string;
@@ -56,6 +66,14 @@ export type CompanionAvatarChoice = {
   url: string | null;
   /** Catalog asset id when the choice came from `anx.inference.avatar-assets.list`. */
   assetId?: string | null;
+  /**
+   * Local library entry id when the choice came from this device's own avatar
+   * library (`nexus-avatar://…`). The gallery uses it to remove the entry, and
+   * the companion uses it to persist the per-agent mapping.
+   */
+  localAvatarId?: string | null;
+  /** True for entries in the on-disk library (so the tile can offer "Remove"). */
+  local?: boolean;
   /**
    * Catalog validation status, carried into presence as `vrmValidationStatus`.
    * The character kit refuses to HTTP-fetch a non-platform VRM without it
@@ -99,20 +117,38 @@ export function isPictureAssetKind(kind: string | null | undefined): boolean {
 }
 
 /**
+ * True when a VRM URL points at this device's own avatar library (the
+ * `nexus-avatar:` scheme the main process serves). Such a URL is per-device, so
+ * it is presented as a library tile instead of the agent's configured VRM.
+ */
+export function isLocalLibraryUrl(url: string | null | undefined): boolean {
+  const trimmed = typeof url === 'string' ? url.trim().toLowerCase() : '';
+  return trimmed.startsWith('nexus-avatar:');
+}
+
+/**
  * Build the ordered gallery for an agent:
  *  1. the profile image (always available as a fallback when the contact has one),
- *  2. the agent's configured VRM (`presence.vrmUrl`), then
- *  3. every usable catalog avatar row — 3D VRM models and 2D portraits.
+ *  2. this device's own avatar library (`nexus-avatar://…`, Deliverable 2) — the
+ *     entries the user imported, with the one mapped to **this** agent leading,
+ *  3. the agent's configured VRM (`presence.vrmUrl`), then
+ *  4. every usable catalog avatar row — 3D VRM models and 2D portraits.
  *
  * Gesture packs (`vrma`/`manifest`) are deliberately excluded: the region maps
  * those to animation clips, not avatars. Duplicate URLs are collapsed, and
  * blob:/data: model URLs are rejected (a `blob:` URL is per-session and must
  * never be persisted — same rule the config sheet enforces).
+ *
+ * A configured VRM that is itself a library URL is skipped: it is only a mirror
+ * of a local pick (`selectionToPresence` writes the picked URL into presence),
+ * and the library tile is the authoritative, removable record of it.
  */
 export function buildAvatarChoices(input: {
   contact: CompanionAvatarContact | null;
   presence?: CompanionPresenceLike | null;
   assets?: CompanionAvatarAsset[] | null;
+  /** This device's local avatar library + per-agent mapping (Deliverable 2). */
+  localAvatars?: LocalAvatarsConfig | null;
 }): CompanionAvatarChoice[] {
   const choices: CompanionAvatarChoice[] = [];
   const seenVrmUrls = new Set<string>();
@@ -133,8 +169,32 @@ export function buildAvatarChoices(input: {
     });
   }
 
+  // The agent's *mapped* library avatar leads the 3D tiles, so the model the
+  // user deliberately pinned to this agent is the one that wins the fallback
+  // order (and the one the gallery highlights when nothing is stored). The other
+  // library entries follow, newest last.
+  const local = input.localAvatars ?? null;
+  const mapped = mappedLocalAvatar(local, input.contact?.id);
+  const localRecords: LocalAvatarRecord[] = (local?.avatars ?? []).slice();
+  if (mapped) {
+    localRecords.sort((a, b) => (a.id === mapped.id ? -1 : b.id === mapped.id ? 1 : 0));
+  }
+  for (const record of localRecords) {
+    pushVrm({
+      id: `local:${record.id}`,
+      kind: 'vrm',
+      label: record.id === mapped?.id ? `${record.label} (this agent)` : record.label,
+      url: localAvatarUrl(record),
+      local: true,
+      localAvatarId: record.id,
+      // A library model needs no catalog status: the character-kit gate trusts
+      // the host's own `nexus-avatar:` scheme (`isLocalLibraryAvatarUrl`).
+      validationStatus: null,
+    });
+  }
+
   const configuredVrm = readPresenceString(input.presence, 'vrmUrl');
-  if (configuredVrm) {
+  if (configuredVrm && !isLocalLibraryUrl(configuredVrm)) {
     pushVrm({
       id: 'presence:vrm',
       kind: 'vrm',

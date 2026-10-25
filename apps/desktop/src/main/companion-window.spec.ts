@@ -4,6 +4,9 @@ const created: FakeWindow[] = [];
 
 class FakeWindow {
   static destroyCount = 0;
+  private static nextId = 1;
+  /** Stable window handle id (the manager keys tool owners by it). */
+  id = FakeWindow.nextId++;
   focused = false;
   closed = false;
   alwaysOnTop: boolean | null = null;
@@ -353,6 +356,113 @@ describe('companion window manager', () => {
       .filter((s) => s.channel === 'nexus:companion:stt-owner')
       .at(-1);
     expect(ownerLatest?.payload).toMatchObject({ contactId: 've-2', primary: true });
+  });
+});
+
+describe('detached companion tool windows (Deliverable 3)', () => {
+  it('opens one window per (contact, tool) with the scoped hash', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    const tool = m.openTool({ tool: 'motion-feed', contactId: 've-1', agentName: 'Aria' });
+    expect(tool).toEqual({ contactId: 've-1', tool: 'motion-feed' });
+    const url = created.at(-1)!.loadURL.mock.calls[0][0];
+    expect(url).toContain('#companion-tool?');
+    expect(url).toContain('tool=motion-feed');
+    expect(url).toContain('contactId=ve-1');
+    // A tool window must never be treated as a companion (it holds no session).
+    expect(m.openContactIds()).toEqual(['ve-1']);
+  });
+
+  it('refocuses an existing tool window instead of duplicating it', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.openTool({ tool: 'gestures', contactId: 've-1' });
+    const first = created.at(-1)!;
+    const count = created.length;
+    m.openTool({ tool: 'gestures', contactId: 've-1' });
+    expect(created).toHaveLength(count);
+    expect(first.focused).toBe(true);
+  });
+
+  it('keeps each agent\'s tool windows separate', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.open({ contactId: 've-2' });
+    m.openTool({ tool: 'motion-feed', contactId: 've-1' });
+    m.openTool({ tool: 'motion-feed', contactId: 've-2' });
+    expect(created).toHaveLength(4);
+  });
+
+  it('fails closed when the contact has no open companion', () => {
+    const m = manager();
+    expect(m.openTool({ tool: 'motion-feed', contactId: 've-9' })).toBeNull();
+  });
+
+  it('reports which tools are open to the owning companion, per contact', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.open({ contactId: 've-2' });
+    m.openTool({ tool: 'gestures', contactId: 've-1' });
+    const presences = (index: number) =>
+      created[index].sent.filter((s) => s.channel === 'nexus:companion:tool-presence');
+    expect(presences(0).at(-1)?.payload).toMatchObject({
+      contactId: 've-1',
+      open: true,
+      tools: ['gestures'],
+    });
+    // Only the owner is told; a contact with no tool window hears nothing (its
+    // menu simply starts with nothing open rather than a redundant push).
+    expect(presences(1)).toHaveLength(0);
+  });
+
+  it('relays a snapshot only to the owner\'s windows, tagged by contact', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.open({ contactId: 've-2' });
+    m.openTool({ tool: 'motion-feed', contactId: 've-1' });
+    const mine = created.at(-1)!;
+    const otherTool = (() => {
+      m.openTool({ tool: 'motion-feed', contactId: 've-2' });
+      return created.at(-1)!;
+    })();
+    const snapshot = { contactId: 've-1', statusMotions: null, gestures: ['wave'], actionFeed: [] };
+    expect(m.publishToolSnapshot(snapshot)).toBe(true);
+    expect(mine.sent.some((s) => s.channel === 'nexus:companion:tool-snapshot')).toBe(true);
+    expect(otherTool.sent.some((s) => s.channel === 'nexus:companion:tool-snapshot')).toBe(false);
+  });
+
+  it('relays a tool edit back to the owning companion window', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.openTool({ tool: 'status-motions', contactId: 've-1' });
+    const sync = { contactId: 've-1', statusMotions: { thinking: { clip: 'think' } } };
+    expect(m.syncToolState(sync)).toBe(true);
+    expect(created[0].sent.at(-1)).toEqual({ channel: 'nexus:companion:tool-sync', payload: sync });
+  });
+
+  it('returns false syncing to a contact with no companion', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.openTool({ tool: 'status-motions', contactId: 've-1' });
+    expect(m.syncToolState({ contactId: 've-9', statusMotions: null })).toBe(false);
+  });
+
+  it('closes tool windows with their companion', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.openTool({ tool: 'motion-feed', contactId: 've-1' });
+    const tool = created.at(-1)!;
+    m.close('ve-1');
+    expect(tool.closed).toBe(true);
+    expect(m.openContactIds()).toEqual([]);
+  });
+
+  it('closeTool closes one tool and reports nothing when none matches', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.openTool({ tool: 'motion-feed', contactId: 've-1' });
+    expect(m.closeTool('ve-1', 'gestures')).toBe(false);
+    expect(m.closeTool('ve-1', 'motion-feed')).toBe(true);
   });
 });
 

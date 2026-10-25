@@ -131,9 +131,17 @@ export function App() {
       setOpenRoomId(null);
       setView('chat');
     });
+    // Deliverable 2: the companion's avatar gallery links here to map agents to
+    // library models, so a request from any window opens the Settings surface.
+    const offSettings = bridge.onOpenSettings(() => {
+      setShowIdentities(false);
+      setOpenRoomId(null);
+      setShowSettings(true);
+    });
     return () => {
       off();
       offNotify();
+      offSettings();
     };
   }, []);
 

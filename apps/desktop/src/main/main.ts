@@ -6,10 +6,11 @@
  * sandboxed renderer consumes through the preload bridge.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, createReadStream, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostname } from 'node:os';
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, Notification, screen, session, shell, Tray } from 'electron';
+import { Readable } from 'node:stream';
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, Notification, protocol, screen, session, shell, Tray } from 'electron';
 import {
   DESKTOP_APP_ID,
   certificateFingerprints,
@@ -59,6 +60,16 @@ import { buildTrayMenu } from './tray-menu.js';
 import { createBonjourBackend } from './mdns-bonjour.js';
 import { createCompanionWindowManager, defaultCompanionPreloadPath } from './companion-window.js';
 import { createGlobalCursorTracker } from './global-cursor.js';
+import { createLocalAvatarStore } from './local-avatar-store.js';
+import {
+  LOCAL_AVATAR_EXTENSIONS,
+  LOCAL_AVATAR_HOST,
+  LOCAL_AVATAR_MIME,
+  LOCAL_AVATAR_SCHEME,
+  localAvatarFileNameFromPath,
+  normalizeCompanionToolId,
+  type CompanionToolLaunch,
+} from '../shared/ipc.js';
 import { createGlobalPointerSource } from './global-pointer.js';
 import { createCalendarManager } from './calendar-manager.js';
 import { createMeetingsManager } from './meetings-manager.js';
@@ -89,6 +100,8 @@ import {
   type CompanionLaunch,
   type CompanionPresent,
   type CompanionSessionView,
+  type CompanionToolSnapshot,
+  type CompanionToolSync,
   type ConnectionConfigPatch,
   type LocalRunnerSettings,
   type LoginRequest,
@@ -112,6 +125,57 @@ import {
 // directory both the dev renderer URL and the packaged preload path resolve against.
 const __dirname_ = __dirname;
 const isDev = !app.isPackaged;
+
+/**
+ * Register the `nexus-avatar:` scheme as privileged **before** the app is ready.
+ *
+ * The renderer loads library models with `fetch()` (the character kit's own
+ * `loadCachedGltf` path). A plain `file://` URL works once packaged but not in
+ * dev, where the renderer's origin is the Vite http server and Chromium refuses
+ * a `file:` fetch from it. Marking the scheme `standard` + `secure` +
+ * `supportFetchAPI` + `corsEnabled` makes the same `nexus-avatar://avatar/<id>`
+ * URL resolve in both layouts without widening the renderer's origin. Must be
+ * called at module load — `protocol.handle` itself is installed once ready.
+ */
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: LOCAL_AVATAR_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+  },
+]);
+
+/**
+ * Serve one library file for `nexus-avatar://avatar/<id>.<vrm|glb>`.
+ *
+ * The path is reduced to a single `<id>.<ext>` segment (`localAvatarFileNameFromPath`
+ * rejects `..`/separators) and then joined under the store's own library
+ * directory, so a crafted URL can never read outside it. The response is a
+ * streamed `Readable` (Electron's `protocol.handle` contract) with
+ * `Content-Length` so the kit's progress bar reports real bytes.
+ */
+function installLocalAvatarProtocol(): void {
+  protocol.handle(LOCAL_AVATAR_SCHEME, (request) => {
+    try {
+      const url = new URL(request.url);
+      if (url.hostname !== LOCAL_AVATAR_HOST) return new Response('not found', { status: 404 });
+      const fileName = localAvatarFileNameFromPath(url.pathname);
+      if (!fileName) return new Response('not found', { status: 404 });
+      const filePath = join(localAvatarStore.libraryDir(), fileName);
+      if (!existsSync(filePath)) return new Response('not found', { status: 404 });
+      const { size } = statSync(filePath);
+      const stream = Readable.toWeb(createReadStream(filePath)) as ReadableStream<Uint8Array>;
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          'Content-Type': LOCAL_AVATAR_MIME,
+          'Content-Length': String(size),
+        },
+      });
+    } catch {
+      return new Response('bad request', { status: 400 });
+    }
+  });
+}
 
 /**
  * Window / taskbar icon.
@@ -444,6 +508,15 @@ const gpuStt = createGpuSttEngine({
 // several and have a job routed to the first available (or least-busy, or a
 // round-robin) one. Probing never throws; a dead box just drops out of rotation.
 const localModelsStore = createLocalModelsStore();
+
+/**
+ * Local VRM/GLB avatar library (Deliverable 2). Files the user picks are copied
+ * into `userData/avatar-library` and served to the renderer over the
+ * `nexus-avatar:` protocol, so a picked model keeps working after the source
+ * file moves. The store is Electron-free apart from `app.getPath`, so its
+ * add/remove/map behaviour is unit-tested with a temp dir.
+ */
+const localAvatarStore = createLocalAvatarStore();
 
 /**
  * Local-only STT for `stt_phrase` wake words. A wake word must never stream
@@ -1482,6 +1555,87 @@ function registerIpc(): void {
     return closed;
   });
   ipcMain.handle(IPC.companionList, () => companionWindows.openContactIds());
+  // Deliverable 3: open/close a companion context-menu tool ("Motion feed" /
+  // "Gestures" / "Status motions") in its own BrowserWindow, scoped to the
+  // current agent/contact so its per-agent settings never leak across windows.
+  ipcMain.handle(IPC.companionOpenTool, (_e, input: CompanionToolLaunch) => {
+    const tool = normalizeCompanionToolId(input?.tool);
+    const contactId = typeof input?.contactId === 'string' ? input.contactId.trim() : '';
+    if (!tool || !contactId) return null;
+    return companionWindows.openTool({
+      tool,
+      contactId,
+      agentName: typeof input.agentName === 'string' ? input.agentName : null,
+    });
+  });
+  ipcMain.handle(IPC.companionCloseTool, (_e, contactId: string, tool?: string) => {
+    const id = typeof contactId === 'string' ? contactId.trim() : '';
+    if (!id) return false;
+    return companionWindows.closeTool(id, normalizeCompanionToolId(tool) ?? undefined);
+  });
+  // Deliverable 3 relay: a companion publishes the tool-scoped state its detached
+  // tool windows render (tagged per contact), and a tool window pushes a
+  // status-motions edit back to the agent's companion. Both are scoped by
+  // contact id so several agents' windows never cross their settings.
+  ipcMain.handle(IPC.companionToolPublish, (_e, snapshot: CompanionToolSnapshot) => {
+    if (!snapshot || typeof snapshot.contactId !== 'string') return false;
+    return companionWindows.publishToolSnapshot(snapshot);
+  });
+  ipcMain.handle(IPC.companionToolSync, (_e, sync: CompanionToolSync) => {
+    if (!sync || typeof sync.contactId !== 'string') return false;
+    return companionWindows.syncToolState(sync);
+  });
+  // Deliverable 2: the local VRM/GLB avatar library. `pick` opens the native
+  // file dialog and copies the chosen model(s) into the library; `remove` deletes
+  // an entry; `set-mapping` remembers which library avatar one agent renders with.
+  // Every handler returns the whole config so the renderer never has to round-trip.
+  ipcMain.handle(IPC.localAvatarsList, () => localAvatarStore.get());
+  ipcMain.handle(IPC.localAvatarsPick, async () => {
+    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+    const picked = await dialog.showOpenDialog(win!, {
+      title: 'Add a 3D avatar',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: '3D avatar', extensions: [...LOCAL_AVATAR_EXTENSIONS].map((e) => e.replace(/^\./, '')) },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (picked.canceled) return localAvatarStore.get();
+    let config = localAvatarStore.get();
+    // Add each file independently so one bad pick (unsupported / duplicate) does
+    // not discard the rest of a multi-select.
+    for (const filePath of picked.filePaths) {
+      try {
+        config = localAvatarStore.addFile(filePath);
+      } catch (err) {
+        logger.warn('local avatar import skipped', {
+          file: filePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return config;
+  });
+  ipcMain.handle(IPC.localAvatarsRemove, (_e, id: string) =>
+    localAvatarStore.remove(typeof id === 'string' ? id : ''),
+  );
+  ipcMain.handle(IPC.localAvatarsSetMapping, (_e, contactId: string, avatarId: string | null) =>
+    localAvatarStore.setContactMapping(
+      typeof contactId === 'string' ? contactId : '',
+      typeof avatarId === 'string' && avatarId.trim() ? avatarId : null,
+    ),
+  );
+  // Companion (or child) window → main shell: open its Settings surface. The
+  // gallery links here for the client-remembered agent ↔ avatar mapping. Focus
+  // the main window too, so the settings page the user asked for is visible.
+  ipcMain.handle(IPC.openSettings, () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send(IPC.openSettings);
+    return true;
+  });
   ipcMain.handle(IPC.companionSetAlwaysOnTop, (_e, contactId: string, onTop: boolean) =>
     companionWindows.setAlwaysOnTop(contactId, onTop === true),
   );
@@ -1603,6 +1757,10 @@ app.whenReady().then(async () => {
     retention: auditStore.getRetention(),
   });
   applyEnvConnectionOverrides();
+  // Serve locally-stored avatar models over `nexus-avatar:` (Deliverable 2).
+  // `protocol.handle` must run after the app is ready; the scheme privileges were
+  // registered at module load (see `registerSchemesAsPrivileged`).
+  installLocalAvatarProtocol();
   // Deny every session permission the app does not need (geolocation, MIDI, HID,
   // USB, serial, …) without a prompt; keep only media / screen-share / fullscreen
   // for the app's own renderer. Installed before any window exists.

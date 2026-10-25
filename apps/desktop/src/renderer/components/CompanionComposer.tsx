@@ -103,9 +103,15 @@ function Soundwave({ live }: { live: boolean }) {
 
 export type CompanionComposerProps = {
   contactId: string;
+  /**
+   * Turn metadata to attach when the user submits (Deliverable 4): the companion
+   * reports its live avatar pose here so the session-owning window sends it with
+   * the turn. Omitted when no 3D stage is bound.
+   */
+  getTurnContext?: () => Record<string, unknown> | undefined;
 };
 
-export function CompanionComposer({ contactId }: CompanionComposerProps) {
+export function CompanionComposer({ contactId, getTurnContext }: CompanionComposerProps) {
   const [view, setView] = useState<CompanionSessionView | null>(null);
   // A user edit freezes the field so a late partial cannot clobber it.
   const [typed, setTyped] = useState<string | null>(null);
@@ -138,7 +144,15 @@ export function CompanionComposer({ contactId }: CompanionComposerProps) {
   const canSendAudio = view.batchAvailable && !done;
 
   const send = (action: 'submit' | 'cancel' | 'sendAudio') => {
-    void callBridge(bridge, 'companionAction', false, { contactId, action });
+    // Deliverable 4: attach the live pose for the actions that submit a turn, so
+    // the session owner sends "where the avatar stood" with the message. `cancel`
+    // discards the turn, so it carries no context.
+    const browserContext = action === 'cancel' ? undefined : getTurnContext?.();
+    void callBridge(bridge, 'companionAction', false, {
+      contactId,
+      action,
+      ...(browserContext ? { browserContext } : {}),
+    });
   };
   const edit = (text: string) => {
     setTyped(text);

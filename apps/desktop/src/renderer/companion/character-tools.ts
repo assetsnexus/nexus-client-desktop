@@ -73,6 +73,17 @@ export type CompanionStageHost = CharacterToolHostLike & {
    * context menu's "Reset pose" escape hatch and safe to call at any time.
    */
   resetPose?: (reason?: string) => void;
+  /**
+   * Analog locomotion input (WASD keys / a virtual stick). `x`/`z` are
+   * strafe/forward in `[-1, 1]`, `jump` is a rising-edge pulse. `null` clears the
+   * input (e.g. on window blur) so a held key does not keep the rig walking after
+   * focus is lost. Wired to the companion window's keyboard handler.
+   */
+  setMoveInput?: (input: { x?: number; z?: number; yaw?: number; jump?: boolean } | null) => void;
+  /** Max stick speed (m/s): walk gait by default, run while Shift is held. */
+  setAnalogSpeed?: (speed: number) => void;
+  /** Current ground pose + facing, for the outbound turn metadata (Deliverable 4). */
+  getPoseFeedback?: (nearbyRadiusM?: number) => Record<string, unknown> | null;
 };
 
 export type ToolResultLike = {

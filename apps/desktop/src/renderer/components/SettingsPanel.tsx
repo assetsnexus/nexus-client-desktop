@@ -3,6 +3,7 @@ import { LocalModelsPanel } from './LocalModelsPanel.js';
 import { LocalVoicePanel } from './LocalVoicePanel.js';
 import { WakeSettingsPanel } from './WakeSettingsPanel.js';
 import { AudioSettingsPanel } from './AudioSettingsPanel.js';
+import { LocalAvatarsPanel } from './LocalAvatarsPanel.js';
 import { AuditPanel } from './AuditPanel.js';
 import { NexusAppsPanel } from './NexusAppsPanel.js';
 import { CertTrustPanel } from './CertTrustPanel.js';
@@ -771,6 +772,10 @@ export function SettingsPanel({
 
       <ErrorBoundary label="Audio devices">
         <AudioSettingsPanel />
+      </ErrorBoundary>
+
+      <ErrorBoundary label="Local avatars">
+        <LocalAvatarsPanel />
       </ErrorBoundary>
 
       <ErrorBoundary label="Client-tool audit trail">
