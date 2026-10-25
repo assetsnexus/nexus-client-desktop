@@ -64,6 +64,7 @@ export {
   avatarLabelFromFileName,
   isSupportedAvatarFileName,
   isDeviceLocalAvatarUrl,
+  localAvatarCorsHeaders,
   localAvatarFileNameFromPath,
   localAvatarUrl,
   mappedAvatarId,

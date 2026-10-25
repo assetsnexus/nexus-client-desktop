@@ -4,6 +4,7 @@ import {
   avatarKindFromFileName,
   avatarLabelFromFileName,
   isSupportedAvatarFileName,
+  localAvatarCorsHeaders,
   localAvatarFileNameFromPath,
   localAvatarUrl,
   mappedAvatarId,
@@ -129,5 +130,22 @@ describe('serve URLs', () => {
     expect(localAvatarFileNameFromPath('/nested/aria.vrm')).toBeNull();
     expect(localAvatarFileNameFromPath('/notes.txt')).toBeNull();
     expect(localAvatarFileNameFromPath('/')).toBeNull();
+  });
+});
+
+describe('localAvatarCorsHeaders', () => {
+  it('echoes the request Origin so a cross-origin fetch is allowed', () => {
+    const headers = localAvatarCorsHeaders('http://localhost:5280');
+    expect(headers['Access-Control-Allow-Origin']).toBe('http://localhost:5280');
+    expect(headers['Access-Control-Allow-Methods']).toBe('GET, HEAD, OPTIONS');
+    expect(headers.Vary).toBe('Origin');
+  });
+
+  it('falls back to `*` when there is no Origin (packaged file:// is a null origin)', () => {
+    expect(localAvatarCorsHeaders()['Access-Control-Allow-Origin']).toBe('*');
+    expect(localAvatarCorsHeaders(null)['Access-Control-Allow-Origin']).toBe('*');
+    expect(localAvatarCorsHeaders('   ')['Access-Control-Allow-Origin']).toBe('*');
+    // The other headers are always present so a preflight can pass.
+    expect(localAvatarCorsHeaders()['Access-Control-Allow-Headers']).toBe('*');
   });
 });

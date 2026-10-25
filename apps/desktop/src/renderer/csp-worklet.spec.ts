@@ -49,3 +49,23 @@ describe('renderer CSP (AudioWorklet lip-sync)', () => {
     expect(directive('object-src')).toBe("'none'");
   });
 });
+
+/**
+ * The companion's local VRM gallery serves picked models over the host's own
+ * `nexus-avatar:` scheme. That scheme is registered `standard`/`secure`/
+ * `supportFetchAPI`/`corsEnabled`, but CSP still has to name it explicitly:
+ * a bare `connect-src *` matches only http/ws schemes, so without
+ * `nexus-avatar:` in `connect-src` Chromium refuses the loader's `fetch()` with
+ * `blocked=csp` — the model silently never loads. `img-src` is covered too for
+ * the library thumbnail / owner preview. Guard both so a CSP edit cannot
+ * re-break the gallery.
+ */
+describe('renderer CSP (local avatar library scheme)', () => {
+  it('allows nexus-avatar: in connect-src for the model fetch', () => {
+    expect(directive('connect-src').split(/\s+/)).toContain('nexus-avatar:');
+  });
+
+  it('allows nexus-avatar: in img-src for the library preview', () => {
+    expect(directive('img-src').split(/\s+/)).toContain('nexus-avatar:');
+  });
+});

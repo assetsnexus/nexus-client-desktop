@@ -66,6 +66,7 @@ import {
   LOCAL_AVATAR_HOST,
   LOCAL_AVATAR_MIME,
   LOCAL_AVATAR_SCHEME,
+  localAvatarCorsHeaders,
   localAvatarFileNameFromPath,
   normalizeCompanionToolId,
   type CompanionToolLaunch,
@@ -152,27 +153,44 @@ protocol.registerSchemesAsPrivileged([
  * directory, so a crafted URL can never read outside it. The response is a
  * streamed `Readable` (Electron's `protocol.handle` contract) with
  * `Content-Length` so the kit's progress bar reports real bytes.
+ *
+ * Every response — including the error paths — carries the CORS headers from
+ * {@link localAvatarCorsHeaders}: the renderer fetches from a different origin
+ * (the dev http server / the packaged `file://`), so without
+ * `Access-Control-Allow-Origin` Chromium reports a bare `Failed to fetch` and
+ * the model never loads (the scheme is registered `corsEnabled`). An `OPTIONS`
+ * preflight is answered directly, since a browser may preflight the GET.
  */
 function installLocalAvatarProtocol(): void {
   protocol.handle(LOCAL_AVATAR_SCHEME, (request) => {
     try {
+      const origin = request.headers.get('Origin');
+      const cors = localAvatarCorsHeaders(origin);
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: cors });
+      }
       const url = new URL(request.url);
-      if (url.hostname !== LOCAL_AVATAR_HOST) return new Response('not found', { status: 404 });
+      if (url.hostname !== LOCAL_AVATAR_HOST) {
+        return new Response('not found', { status: 404, headers: cors });
+      }
       const fileName = localAvatarFileNameFromPath(url.pathname);
-      if (!fileName) return new Response('not found', { status: 404 });
+      if (!fileName) return new Response('not found', { status: 404, headers: cors });
       const filePath = join(localAvatarStore.libraryDir(), fileName);
-      if (!existsSync(filePath)) return new Response('not found', { status: 404 });
+      if (!existsSync(filePath)) {
+        return new Response('not found', { status: 404, headers: cors });
+      }
       const { size } = statSync(filePath);
       const stream = Readable.toWeb(createReadStream(filePath)) as ReadableStream<Uint8Array>;
       return new Response(stream, {
         status: 200,
         headers: {
+          ...cors,
           'Content-Type': LOCAL_AVATAR_MIME,
           'Content-Length': String(size),
         },
       });
     } catch {
-      return new Response('bad request', { status: 400 });
+      return new Response('bad request', { status: 400, headers: localAvatarCorsHeaders() });
     }
   });
 }

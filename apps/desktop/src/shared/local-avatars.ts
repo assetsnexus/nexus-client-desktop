@@ -71,6 +71,29 @@ export function localAvatarUrl(record: Pick<LocalAvatarRecord, 'id' | 'kind'>): 
 }
 
 /**
+ * CORS response headers for a library file.
+ *
+ * The scheme is registered `corsEnabled`, so a `fetch()` from the renderer is a
+ * **CORS** request (in dev the renderer's origin is the Vite http server; when
+ * packaged it is `file://`). Chromium blocks a cross-origin response that omits
+ * `Access-Control-Allow-Origin`, which made every library model fail with a bare
+ * `TypeError: Failed to fetch` *before* it reached the loader. The kit's own
+ * fetch sends no credentials, so echoing the request `Origin` (with `Vary`) is
+ * safe, and `*` covers a `null` origin (the packaged `file://` layout).
+ *
+ * Pure so the header policy is unit tested without Electron.
+ */
+export function localAvatarCorsHeaders(origin?: string | null): Record<string, string> {
+  const allowOrigin = typeof origin === 'string' && origin.trim() ? origin.trim() : '*';
+  return {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+    'Access-Control-Allow-Headers': '*',
+    Vary: 'Origin',
+  };
+}
+
+/**
  * The file name inside the library directory for a URL path, or null when the
  * path is not a plain single-segment `<id>.vrm|.glb`. The `..`/separator case is
  * rejected here so the protocol handler never resolves outside the library.
