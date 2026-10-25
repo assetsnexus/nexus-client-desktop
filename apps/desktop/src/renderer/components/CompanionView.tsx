@@ -45,16 +45,7 @@ import {
   type CompanionStageHost,
 } from '../companion/character-tools.js';
 import { companionCursorToGazeNdc } from '../companion/companion-cursor.js';
-import {
-  IDLE_MOVE_KEYS,
-  isLocomotionKey,
-  isTypingTarget,
-  isIdleMoveInput,
-  moveInputFromKeys,
-  moveSpeedForKeys,
-  readMoveKeys,
-  type MoveKeys,
-} from '../companion/locomotion-keys.js';
+import { useCompanionLocomotion } from '../companion/use-companion-locomotion.js';
 import { CompanionAvatarGallery } from './CompanionAvatarGallery.js';
 import {
   bridge,
@@ -360,13 +351,6 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   const [openTools, setOpenTools] = useState<CompanionToolId[]>([]);
   const [statusMotions, setStatusMotions] = useState<StatusMotionMap>(() => parseStatusMotions(null));
   const registeredToolsRef = useRef<Set<string>>(new Set());
-  // WASD/Shift/Space state (Deliverable 4). Kept in a ref so the key handlers can
-  // drive the live host without re-rendering the whole companion every keypress.
-  const moveKeysRef = useRef<MoveKeys>({ ...IDLE_MOVE_KEYS });
-  /** Live pressed key codes, cleared on blur. */
-  const pressedKeysRef = useRef<Set<string>>(new Set());
-  /** Whether a non-idle input is currently pushed (skips redundant no-op pushes). */
-  const moveInputPushedRef = useRef(false);
 
   useEffect(() => {
     void bridge.getConnectionConfig().then(setConnection);
@@ -554,65 +538,15 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     };
   }, [stageHost, forcedDebug]);
 
-  /**
-   * WASD / Shift / Space locomotion (Deliverable 4).
-   *
-   * The keyboard only drives the walkable scene (and the shared room scene); the
-   * flat avatar stage has no ground plane, so the listeners are inert without
-   * `setMoveInput`. Key events are filtered so the composer keeps typing (`W` in a
-   * text field must not walk the rig) and so a held key does not keep walking
-   * after the window loses focus.
-   *
-   * `Space` stays a held flag: the locomotion tick consumes it as a rising edge
-   * and the animator plays the `jump` clip on the edge, so a held key cannot
-   * re-fire or leave the rig stuck airborne.
-   */
-  useEffect(() => {
-    const host = stageHost;
-    if (!host?.setMoveInput) return;
-    // Capture the (guarded, non-optional) method so the closures below do not
-    // have to re-narrow the live host on every keypress.
-    const setMoveInput = host.setMoveInput;
-    const push = () => {
-      if (hostGetterRef.current !== host) return;
-      const keys = moveKeysRef.current;
-      host.setAnalogSpeed?.(moveSpeedForKeys(keys));
-      const input = moveInputFromKeys(keys);
-      // Skip a redundant no-op push (every frame of a held idle key).
-      if (isIdleMoveInput(input) && !moveInputPushedRef.current) return;
-      moveInputPushedRef.current = !isIdleMoveInput(input);
-      setMoveInput(input);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!isLocomotionKey(e.code) || isTypingTarget(e.target)) return;
-      // Keep Space from scrolling and WASD from any default page pan.
-      e.preventDefault();
-      moveKeysRef.current = readMoveKeys(pressedKeysRef.current.add(e.code));
-      push();
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (!isLocomotionKey(e.code)) return;
-      pressedKeysRef.current.delete(e.code);
-      moveKeysRef.current = readMoveKeys(pressedKeysRef.current);
-      push();
-    };
-    // Losing focus clears the input so a held key does not walk the rig forever.
-    const clear = () => {
-      pressedKeysRef.current.clear();
-      moveKeysRef.current = { ...IDLE_MOVE_KEYS };
-      setMoveInput({ x: 0, z: 0, yaw: 0, jump: false });
-      moveInputPushedRef.current = false;
-    };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('blur', clear);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('blur', clear);
-      clear();
-    };
-  }, [stageHost]);
+  // Deliverable 4: WASD / Shift / Space locomotion. The listeners live in a hook
+  // so the stage-swap guard (the host owns a `this.controller` method) is
+  // unit-testable; `enabled` is false in room mode, where the shared room stage
+  // owns the camera build and a companion window must not steer a shared avatar.
+  useCompanionLocomotion({
+    host: stageHost,
+    hostRef: hostGetterRef,
+    enabled: !launch.roomId,
+  });
 
   // Cycle status gestures while the agent is working (only when the editor is on).
   useAgentStatusMotions({
@@ -1231,11 +1165,17 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   // not own the mic never shows the composer, so captures never compete.
   const showComposer = dictate && !voiceStatus.active && sttPrimary;
   /**
-   * Deliverable 4: whether the mounted stage is the walkable scene (flat stage
-   * with scene mode on, or a shared room). Only then do WASD/Shift/Space mean
-   * anything, so the on-screen hint is shown only here.
+   * Deliverable 4: whether this companion's window can be **steered** by the
+   * keyboard (flat walkable scene with scene mode on). Only then do WASD/Shift/
+   * Space mean anything, so the on-screen hint is shown only here.
+   *
+   * Room mode is deliberately excluded: the shared room stage drives its
+   * occupants through `ClusterRoomViewer` (the build/party camera), so a single
+   * companion window must not steer a shared avatar — and the 3D<->picture
+   * toggle is inert there for the same reason (the room, not one agent's choice,
+   * owns the render). This mirrors `useCompanionLocomotion`'s `enabled`.
    */
-  const walkable = Boolean(launch.roomId) || (!launch.roomId && debugEnabled.sceneMode && !isImageAvatar);
+  const walkable = !launch.roomId && debugEnabled.sceneMode && !isImageAvatar;
 
   return (
     <MotionFeedProvider host={stageHost}>
