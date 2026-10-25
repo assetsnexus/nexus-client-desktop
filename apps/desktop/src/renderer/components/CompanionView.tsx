@@ -428,12 +428,13 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
     };
   }, [stageHost, launch.contactId]);
 
-  // Wider, configurable gaze cone: the companion tracks the cursor across the
-  // whole screen, so the tight library default (head ~8° of actual turn) reads as
-  // "barely moves". The **eyes** get the companion-surface cones (70° yaw / 30°
-  // pitch) — wider than the head so the irises lead it and keep converging on the
-  // same target after the head hits its own clamp. Bound to the live host so a
-  // scene/flat swap re-applies it.
+  // Gaze cone: the companion tracks the cursor across the whole screen, so the
+  // tight library default (head ~8° of actual turn) reads as "barely moves". The
+  // **head** cone is user-configurable and wide; the **eyes** use the anatomical
+  // companion cones (28° yaw / 20° pitch), and the *applied* iris rotation is
+  // further capped inside character-kit (26° / 18°) so a far target can never
+  // slide the iris out of the eye opening. Bound to the live host so a scene/flat
+  // swap re-applies it.
   useEffect(() => {
     const host = stageHost;
     if (!host?.setGazeLimits) return;
