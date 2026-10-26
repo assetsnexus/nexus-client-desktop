@@ -114,6 +114,23 @@ describe('resolveWakeSendConversationId', () => {
     expect(resolveWakeSendConversationId('   ', 'thread-store')).toBe('thread-store');
   });
 
+  it('uses the store only while it still belongs to the wake contact', () => {
+    const same = { storeContactId: 'agent-1', expectedContactId: 'agent-1' };
+    expect(resolveWakeSendConversationId(null, 'thread-store', same)).toBe('thread-store');
+  });
+
+  it('drops a store id that belongs to a different contact', () => {
+    // The user switched panels between the wake and the send: that thread is
+    // another agent's, so addressing it would post the wake sentence there.
+    const other = { storeContactId: 'agent-2', expectedContactId: 'agent-1' };
+    expect(resolveWakeSendConversationId(null, 'thread-store', other)).toBeUndefined();
+  });
+
+  it('keeps a bound id even when the store has moved to another contact', () => {
+    const other = { storeContactId: 'agent-2', expectedContactId: 'agent-1' };
+    expect(resolveWakeSendConversationId('thread-wake', 'thread-store', other)).toBe('thread-wake');
+  });
+
   it('yields undefined (not an empty string) when neither is known', () => {
     expect(resolveWakeSendConversationId(null, null)).toBeUndefined();
     expect(resolveWakeSendConversationId(undefined, undefined)).toBeUndefined();

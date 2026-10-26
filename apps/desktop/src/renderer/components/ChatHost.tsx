@@ -522,10 +522,12 @@ export function ChatHost({
         if (!blob || blob.size === 0) return false;
         const audio = await blobToInlineAudio(blob, 'voice-message.wav');
         const result = await chat.sendMessage('Voice message', {
-          // Same wake-bound thread as the transcript path above.
+          // Same wake-bound thread as the transcript path above, and the same
+          // ownership check on the store fallback.
           conversationId: resolveWakeSendConversationId(
             conversationIdRef.current,
             chat.getState().conversationId,
+            { storeContactId: chat.getState().selectedAgentId, expectedContactId: contactId },
           ),
           contactId,
           attachments: [audio],
@@ -579,10 +581,12 @@ export function ChatHost({
         // hold: the main chat view may have moved on (or `openContact` failed
         // while the companion kept the wake's conversation), and a send with no
         // address at all is exactly the "No conversation or room to send to"
-        // preflight failure.
+        // preflight failure. The store fallback is dropped when it belongs to a
+        // different contact, so a wake never posts into another agent's thread.
         const conversationId = resolveWakeSendConversationId(
           conversationIdRef.current,
           chat.getState().conversationId,
+          { storeContactId: chat.getState().selectedAgentId, expectedContactId: contactId },
         );
         await chat.sendMessage(text, {
           contactId,
@@ -722,6 +726,7 @@ export function ChatHost({
       let conversationId = resolveWakeSendConversationId(
         conversationIdRef.current,
         chat.getState().conversationId,
+        { storeContactId: chat.getState().selectedAgentId, expectedContactId: target.contactId },
       ) ?? null;
       if (!conversationId) {
         const binding = await bindWakeThread(chat, target.contactId);

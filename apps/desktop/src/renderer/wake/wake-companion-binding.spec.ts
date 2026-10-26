@@ -93,7 +93,11 @@ function harness(input: {
       sent.push({
         contactId,
         text,
-        conversationId: resolveWakeSendConversationId(conversationIdRef.current, storeConversationId),
+        conversationId: resolveWakeSendConversationId(
+          conversationIdRef.current,
+          storeConversationId,
+          { storeContactId: target.contactId, expectedContactId: contactId },
+        ),
       });
     },
     enqueue: () => undefined,

@@ -85,10 +85,25 @@ export async function bindWakeThread(
  * resumed, while the store may since have been re-pointed by an unrelated panel
  * switch. Falling back to the store keeps a widget/chat wake working when the
  * binding was skipped (it is only set on a successful resume).
+ *
+ * The store fallback is **ownership-checked** when both identities are known. A
+ * store id is only the wake's thread if the store's active panel is pointed at
+ * the same contact; otherwise it belongs to another agent (the user switched
+ * panels between the wake and the send) and using it would deliver the wake's
+ * sentence into the wrong conversation. Mismatched ids are dropped — the caller
+ * then surfaces "no address" instead of mis-addressing the message.
  */
 export function resolveWakeSendConversationId(
   bound: string | null | undefined,
   storeConversationId: string | null | undefined,
+  context?: { storeContactId?: string | null; expectedContactId?: string | null },
 ): string | undefined {
-  return trimId(bound) || trimId(storeConversationId) || undefined;
+  const own = trimId(bound);
+  if (own) return own;
+  const store = trimId(storeConversationId);
+  if (!store) return undefined;
+  const storeContact = trimId(context?.storeContactId);
+  const expected = trimId(context?.expectedContactId);
+  if (storeContact && expected && storeContact !== expected) return undefined;
+  return store;
 }
