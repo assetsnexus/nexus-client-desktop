@@ -40,11 +40,16 @@ export const COMPANION_HASH_PREFIX = 'companion';
  */
 export const COMPANION_WINDOW_TITLE_FALLBACK = 'Nexus Companion';
 
-/** Prefix on a resolved OS window title (`Nexus · Rune`). */
-export const COMPANION_WINDOW_TITLE_PREFIX = 'Nexus';
-
 /**
- * The OS window caption for a companion/tool window.
+ * The OS window caption for a companion window: **just the agent's name**
+ * (`Rune`), with no app prefix.
+ *
+ * A companion *is* the agent — it is a dedicated window showing one agent (or one
+ * room), not a tab of this app — so the caption that names it is the name itself;
+ * a `Nexus · ` prefix only eats caption width on the small side window and pushes
+ * the part the user cares about out of the taskbar/ALT-TAB elision. Detached tool
+ * windows keep their `<Tool> · <Agent>` form (see
+ * {@link companionToolWindowTitle}) because there the tool is the qualifier.
  *
  * The launch title is only a *hint*: it is frozen at window-create time, so a
  * companion opened before the region resolved a name would keep a generic caption
@@ -58,8 +63,7 @@ export const COMPANION_WINDOW_TITLE_PREFIX = 'Nexus';
 export function companionWindowTitle(
   ...candidates: ReadonlyArray<string | null | undefined>
 ): string {
-  const label = resolveCompanionLabelOrNull(...candidates);
-  return label ? `${COMPANION_WINDOW_TITLE_PREFIX} · ${label}` : COMPANION_WINDOW_TITLE_FALLBACK;
+  return resolveCompanionLabelOrNull(...candidates) ?? COMPANION_WINDOW_TITLE_FALLBACK;
 }
 
 /**
@@ -194,9 +198,10 @@ export type CompanionLaunch = {
  *
  * The shared label rule returns `Companion` as the last-resort literal, and the
  * companion renderer seeds its fallback contact's `name` with exactly that (see
- * `CompanionView`). Re-reporting it would therefore set the OS caption to
- * `Nexus · Companion`, which is no better than the neutral `Nexus Companion` —
- * so a report filters it out and lets a real name arrive later instead.
+ * `CompanionView`). Re-reporting it would therefore set the OS caption to the
+ * bare floor literal, which is no better than the neutral
+ * `Nexus Companion` — so a report filters it out and lets a real name arrive
+ * later instead.
  */
 export function isReportableCompanionLabel(value: unknown): boolean {
   if (typeof value !== 'string') return false;

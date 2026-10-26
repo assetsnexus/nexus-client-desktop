@@ -515,13 +515,13 @@ describe('companion window titles', () => {
     expect(created[0].title).toBe('Nexus Companion');
 
     expect(m.retitle({ contactId: 've-1', titles: [null, 'Aria'] })).toBe(true);
-    expect(created[0].title).toBe('Nexus · Aria');
+    expect(created[0].title).toBe('Aria');
   });
 
   it('titles the window from the launch hint when one is usable', () => {
     const m = manager();
     m.open({ contactId: 've-1', title: 'Aria' });
-    expect(created[0].title).toBe('Nexus · Aria');
+    expect(created[0].title).toBe('Aria');
   });
 
   it('refreshes the title when an already-open companion is reopened', () => {
@@ -537,17 +537,17 @@ describe('companion window titles', () => {
     expect(second.opened).toBe(false);
     expect(created).toHaveLength(1);
     expect(created[0].loadURL).toHaveBeenCalledTimes(1);
-    expect(created[0].title).toBe('Nexus · Aria');
+    expect(created[0].title).toBe('Aria');
   });
 
   it('rejects an id-shaped reported title and keeps the good name', () => {
     const m = manager();
     m.open({ contactId: 've-1', title: 'Aria' });
-    expect(created[0].title).toBe('Nexus · Aria');
+    expect(created[0].title).toBe('Aria');
 
     // A raw region id is an address, not a name: it must not replace the caption.
     expect(m.retitle({ contactId: 've-1', titles: ['1792316062792-nm26u6zve'] })).toBe(true);
-    expect(created[0].title).toBe('Nexus · Aria');
+    expect(created[0].title).toBe('Aria');
     expect(created[0].title).not.toContain('1792316062792');
   });
 
@@ -556,10 +556,10 @@ describe('companion window titles', () => {
     m.open({ contactId: 've-1', title: 'Aria' });
     // A transient failed lookup resolves to no label; the caption must survive.
     expect(m.retitle({ contactId: 've-1', titles: [null, ''] })).toBe(true);
-    expect(created[0].title).toBe('Nexus · Aria');
+    expect(created[0].title).toBe('Aria');
   });
 
-  it('ignores the in-app floor literal so it never becomes `Nexus · Companion`', () => {
+  it('ignores the in-app floor literal so it never becomes a caption', () => {
     const m = manager();
     m.open({ contactId: 've-1' });
     expect(created[0].title).toBe('Nexus Companion');
@@ -569,19 +569,19 @@ describe('companion window titles', () => {
     expect(created[0].title).toBe('Nexus Companion');
     // ...and a real name arriving later still wins.
     m.retitle({ contactId: 've-1', titles: ['Aria'] });
-    expect(created[0].title).toBe('Nexus · Aria');
+    expect(created[0].title).toBe('Aria');
   });
 
   it('titles a room companion with the room name, not the focused agent', () => {
     const m = manager();
     m.open({ contactId: 've-1', roomId: 'room-1', roomTitle: 'Writers', title: 'Aria' });
-    expect(created[0].title).toBe('Nexus · Writers');
+    expect(created[0].title).toBe('Writers');
   });
 
   it('falls back to the focused agent when the room has no usable name', () => {
     const m = manager();
     m.open({ contactId: 've-1', roomId: 'room-1', title: 'Aria' });
-    expect(created[0].title).toBe('Nexus · Aria');
+    expect(created[0].title).toBe('Aria');
   });
 
   it('re-titles a room companion from a live report', () => {
@@ -589,7 +589,7 @@ describe('companion window titles', () => {
     m.open({ contactId: 've-1', roomId: 'room-1' });
     expect(created[0].title).toBe('Nexus Companion');
     m.retitle({ contactId: 've-1', titles: ['Writers'] });
-    expect(created[0].title).toBe('Nexus · Writers');
+    expect(created[0].title).toBe('Writers');
   });
 
   it('reports false for an unknown contact or a closed window', () => {

@@ -167,8 +167,8 @@ describe('parseCompanionHash rejection', () => {
 });
 
 describe('companion window titles (one caption rule for main + renderer)', () => {
-  it('composes the OS caption as `Nexus · <Name>`', () => {
-    expect(companionWindowTitle('Aria')).toBe('Nexus · Aria');
+  it('composes the OS caption as the agent name alone', () => {
+    expect(companionWindowTitle('Aria')).toBe('Aria');
   });
 
   it('falls back to the app-neutral literal when nothing human-readable exists', () => {
@@ -178,7 +178,7 @@ describe('companion window titles (one caption rule for main + renderer)', () =>
   it('never lets an id-shaped candidate become a caption', () => {
     expect(companionWindowTitle('1792316062792-nm26u6zve')).toBe(COMPANION_WINDOW_TITLE_FALLBACK);
     // A later real name still wins over an id-shaped first candidate.
-    expect(companionWindowTitle('1792316062792-nm26u6zve', 'Aria')).toBe('Nexus · Aria');
+    expect(companionWindowTitle('1792316062792-nm26u6zve', 'Aria')).toBe('Aria');
   });
 
   it('orders candidates: room name first for a room companion', () => {
@@ -213,7 +213,7 @@ describe('companion window titles (one caption rule for main + renderer)', () =>
       expect(isReportableCompanionLabel('Aria')).toBe(true);
     });
 
-    it('rejects the in-app floor literal so it never becomes `Nexus · Companion`', () => {
+    it('rejects the in-app floor literal so it never becomes a caption', () => {
       expect(isReportableCompanionLabel('Companion')).toBe(false);
     });
 
