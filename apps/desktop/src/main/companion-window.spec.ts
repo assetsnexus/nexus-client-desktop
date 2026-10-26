@@ -365,6 +365,58 @@ describe('companion window manager', () => {
       .at(-1);
     expect(ownerLatest?.payload).toMatchObject({ contactId: 've-2', primary: true });
   });
+
+  it('re-sends the last session view when a window finishes loading late', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    const view = {
+      contactId: 've-1',
+      status: 'listening' as const,
+      preview: 'half a sentence',
+      buffer: '',
+      cloudTranscription: false,
+      batchDurationMs: 0,
+      batchAvailable: false,
+      sendingAudio: false,
+      retranscribing: false,
+      message: null,
+      engineLabel: 'On-device',
+      agentName: 'Aria',
+    };
+    // The wake turn was already running when the window opened, so the create-time
+    // push went to a renderer that had not subscribed yet.
+    expect(m.pushSession('ve-1', view)).toBe(true);
+    const before = created[0].sent.filter((s) => s.channel === 'nexus:companion:session').length;
+    created[0].emitContents('did-finish-load');
+    const after = created[0].sent.filter((s) => s.channel === 'nexus:companion:session');
+    // Without the replay the companion rendered no STT strip at all.
+    expect(after.length).toBeGreaterThan(before);
+    expect(after.at(-1)?.payload).toMatchObject({ contactId: 've-1', preview: 'half a sentence' });
+  });
+
+  it('does not replay a stale session view into a re-opened companion', () => {
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    m.pushSession('ve-1', {
+      contactId: 've-1',
+      status: 'submitted',
+      preview: 'old turn',
+      buffer: 'old turn',
+      cloudTranscription: false,
+      batchDurationMs: 0,
+      batchAvailable: true,
+      sendingAudio: false,
+      retranscribing: false,
+      message: null,
+      engineLabel: null,
+      agentName: 'Aria',
+    });
+    m.close('ve-1');
+    m.open({ contactId: 've-1' });
+    const sessions = created[1].sent.filter((s) => s.channel === 'nexus:companion:session');
+    // A fresh window must not show the previous window's finished turn.
+    expect(sessions).toEqual([]);
+  });
 });
 
 describe('detached companion tool windows (Deliverable 3)', () => {

@@ -61,6 +61,8 @@ import {
   type DesktopConnectionConfig,
 } from '../bridge.js';
 import { CompanionComposer } from './CompanionComposer.js';
+import { bindCompanionThread } from '../companion/thread-binding.js';
+import { showsDictationStrip } from '../../shared/companion-strip.js';
 import { CompanionRoomStage } from './CompanionRoomStage.js';
 import {
   buildAvatarChoices,
@@ -292,6 +294,20 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
    */
   const [present, setPresent] = useState<CompanionPresent | null>(null);
   const [dictate, setDictate] = useState(launch.autoStart === false);
+  /**
+   * The conversation this window is actually bound to.
+   *
+   * Kept in state (not read live from `chat.getState()` at render time) so a
+   * binding made by the wake path or by the initial link re-renders the
+   * transcript/composer against the bound thread. Reading the store inline left
+   * `ThreadView` on `null` whenever the store update landed after the render that
+   * showed the pane — and it made the pane's binding depend on `contact`, which is
+   * loaded asynchronously (a contacts-fetch failure passed `null` even though the
+   * launch carried a valid conversation).
+   */
+  const [boundConversationId, setBoundConversationId] = useState<string | null>(
+    launch.conversationId ?? null,
+  );
   /**
    * Single-owner STT election. Exactly one companion may capture the mic; main
    * pushes each window's role here. A window that is *not* primary keeps its
@@ -627,49 +643,25 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
         );
       }
       if (cancelled) return;
-      // Link to the *same* thread the main chat view shows. `openContact` now
-      // resumes the latest active conversation for the contact (creating one
-      // only when none exists), so opening a companion no longer forks a new
-      // session. This is deliberately separate from contact loading: a link
-      // failure degrades to the transcript-less stage instead of blanking the
-      // avatar stage (the window stays usable and the 3D/voice surface mounts).
+      // Link to the *same* thread the main chat view shows. Binding goes through
+      // the shared helper rather than a bare `reopenConversation` (which only
+      // flips the server-side status and leaves this window's chat store
+      // unbound): it reads the wake's thread, rehydrates it (that is what sets
+      // `conversationId` here), and falls back to `openContact` — resuming the
+      // contact's latest active thread and creating one only when none exists, so
+      // opening a companion never forks a session. This is deliberately separate
+      // from contact loading: a link failure degrades to the transcript-less
+      // stage instead of blanking the avatar stage.
       try {
-        if (launch.conversationId) {
-          await nextChat.reopenConversation(launch.conversationId);
-        } else {
-          await nextChat.openContact(launch.contactId);
-        }
+        const binding = await bindCompanionThread(nextChat, {
+          contactId: launch.contactId,
+          conversationId: launch.conversationId,
+        });
         if (cancelled) return;
+        if (binding.conversationId) setBoundConversationId(binding.conversationId);
         setConversationError(null);
-        // Show the *same* thread the main chat view has: pull the shared
-        // conversation's turns so the companion's transcript mirrors it rather
-        // than appearing empty. Best-effort — a history read that fails (or a
-        // thread the viewer cannot read) leaves the stage intact.
-        const linkedId = nextChat.getState().conversationId;
-        if (linkedId) {
-          try {
-            const messages = await nextChat.listMessages(linkedId, { limit: 60 });
-            if (!cancelled) {
-              nextChat.rehydrateTurns(
-                (messages as Array<Record<string, unknown>>).map((m) => ({
-                  id: m.id as string | undefined,
-                  role: String(m.role || 'assistant'),
-                  content: String(m.content ?? m.text ?? ''),
-                  toolCalls: Array.isArray(m.toolCalls)
-                    ? (m.toolCalls as Array<Record<string, unknown>>)
-                    : undefined,
-                  attachments: m.attachments as never,
-                  createdAt: (m.createdAt as string) || null,
-                  senderId: (m.senderId as string) || null,
-                  senderName: (m.senderName as string) || null,
-                })),
-                { conversationId: linkedId, detachStream: true },
-              );
-            }
-          } catch {
-            // Keep whatever turns already streamed in.
-          }
-        }
+        // A binding that could not load the thread's turns leaves the stage
+        // intact; the composer is still bound to a real conversation.
       } catch (err) {
         if (!cancelled) {
           setConversationError(err instanceof Error ? err.message : 'could not open the agent');
@@ -1073,12 +1065,32 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
 
   // A wake may resolve a different (latest active) conversation than the one this
   // window opened with; follow it so the composer sends to the right thread.
+  // Binding through the helper (rehydrate under the target id) is what actually
+  // sets this window's `conversationId` — `reopenConversation` alone only touched
+  // the server-side status, which left the composer unbound and produced
+  // "No conversation or room to send to" on the next send.
   useEffect(() => {
     const conversationId = present?.conversationId ?? null;
     if (!conversationId || !chat) return;
-    if (conversationId === chat.getState().conversationId) return;
-    void chat.reopenConversation(conversationId).catch(() => undefined);
-  }, [present?.conversationId, present?.token, chat]);
+    if (conversationId === boundConversationId) return;
+    let cancelled = false;
+    void bindCompanionThread(chat, {
+      contactId: launch.contactId,
+      conversationId,
+    })
+      .then((binding) => {
+        if (cancelled) return;
+        if (binding.conversationId) setBoundConversationId(binding.conversationId);
+        setConversationError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setConversationError(err instanceof Error ? err.message : 'could not resume the conversation');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [present?.conversationId, present?.token, chat, launch.contactId, boundConversationId]);
 
   const preview = latestTranscriptPreview(turns);
   /**
@@ -1162,8 +1174,10 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   }, [showCarousel, resolved?.choice.pictureIndex, avatarPref?.pictureIndex, carouselPictures]);
   // The composer is the STT surface when a wake handed dictation here and the
   // realtime call is not live (voice mode owns the capture). A window that does
-  // not own the mic never shows the composer, so captures never compete.
-  const showComposer = dictate && !voiceStatus.active && sttPrimary;
+  // not own the mic never shows the composer, so captures never compete. The
+  // gate lives in `showsDictationStrip` so the wake → strip contract is pinned by
+  // a unit test instead of only by this expression.
+  const showComposer = showsDictationStrip({ dictate, sttPrimary, voiceActive: voiceStatus.active });
   /**
    * Deliverable 4: whether this companion's window can be **steered** by the
    * keyboard (flat walkable scene with scene mode on). Only then do WASD/Shift/
@@ -1428,7 +1442,13 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
                   turns={turns}
                   streaming={streaming}
                   chat={chat}
-                  conversationId={contact?.id ? (chat.getState().conversationId ?? null) : null}
+                  // The thread this window bound to (not `contact && store`): a
+                  // contact row can legitimately be missing (cold open, failed
+                  // contact fetch) while the launch already carries a valid
+                  // conversation, and the store read raced the binding. Passing
+                  // null there made the threaded tools and the send preflight see
+                  // no address at all.
+                  conversationId={boundConversationId}
                   empty="Transcript will appear here."
                 />
               )}

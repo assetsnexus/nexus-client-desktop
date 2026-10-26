@@ -75,6 +75,17 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
   let sttOwner: string | null = null;
   /** Bumped on every election change so a repeat switch still re-applies. */
   let sttToken = 0;
+  /**
+   * The latest wake-dictation session view per contact.
+   *
+   * A freshly opened companion subscribes to the session channel *after* the
+   * create-time push, so that first (and possibly only) view was dropped — the
+   * window then showed no STT strip at all even though the session-owning window
+   * was already capturing. Keeping the last view per contact and re-sending it on
+   * `did-finish-load` makes the mirror independent of that mount race, exactly as
+   * the STT election already is.
+   */
+  const lastSessions = new Map<string, CompanionSessionView>();
 
   /**
    * Send the **current** election to every open companion, unconditionally.
@@ -223,13 +234,22 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     // owner, so the mic follows the window the user is looking at.
     win.on('focus', () => applyElection(launch.contactId, 'focus'));
     // A renderer that (re)loads subscribes to the ownership channel *after* the
-    // open-time push, so re-state the current election once it is listening.
-    win.webContents.on('did-finish-load', () => broadcastElection('opened'));
+    // open-time push, so re-state the current election once it is listening — and
+    // re-send the last session view for the same reason: without it a companion
+    // that opened while a wake turn was already running showed no STT strip.
+    win.webContents.on('did-finish-load', () => {
+      broadcastElection('opened');
+      const last = lastSessions.get(launch.contactId);
+      if (last) win.webContents.send(IPC.companionSession, last);
+    });
     // The companion runs the same preload bridge, so it needs the same guards.
     options.harden?.(win.webContents);
     win.on('closed', () => {
       windows.delete(launch.contactId);
       pinned.delete(launch.contactId);
+      // The mirrored view belonged to a window that no longer exists; keeping it
+      // would replay a stale turn into the next window opened for this contact.
+      lastSessions.delete(launch.contactId);
       // The closed window may have owned the mic: release ownership (or hand it
       // to the next open companion) so a survivor is not left display-only.
       if (sttOwner === launch.contactId) {
@@ -496,8 +516,13 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
      * Push a wake-dictation session view into an open companion so its STT
      * preview + composer reflect the live turn. No-op (false) when the companion
      * is not open.
+     *
+     * The view is remembered per contact so a window that (re)loads — or one that
+     * opened while the turn was already running — still receives it on
+     * `did-finish-load` instead of showing an empty strip.
      */
     pushSession(contactId: string, view: CompanionSessionView): boolean {
+      lastSessions.set(contactId, view);
       const win = windows.get(contactId);
       if (!win || win.isDestroyed()) return false;
       win.webContents.send(IPC.companionSession, view);

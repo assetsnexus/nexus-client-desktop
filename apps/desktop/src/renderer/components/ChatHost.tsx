@@ -28,6 +28,7 @@ import { setToolAuditContext, resolveToolAuditContext } from '../tools/audit-con
 import { createIncomingWatcher, resolveSenderName } from '../notifications/incoming.js';
 import { resolveCompanionLabelOrNull } from '../../shared/companion-label.js';
 import { createWakeChatRouter } from '../wake/router.js';
+import { bindWakeThread, resolveWakeSendConversationId } from '../wake/thread-binding.js';
 import type { SessionState } from '../wake/session.js';
 import { createPreviewUtteranceSource } from '../wake/utterance.js';
 import { createCloudTranscriber, resolveWakeTranscriber } from '../wake/stt-transcriber.js';
@@ -468,33 +469,24 @@ export function ChatHost({
         // + voice" for exactly this agent.
         setWakeTarget({ contactId: target.contactId, agentId: target.agentId, agentName, avatarUrl });
         // Resume the agent's most recent thread instead of always allocating a
-        // new conversation, so a wake lands where the user last spoke. `openLatest`
-        // falls back to creating one when there is no active thread.
-        const contactRef = chat.getState().contacts.find((c) => c.id === target.contactId) ?? {
-          id: target.contactId,
-        };
-        let conversationId: string | null = chat.getState().conversationId ?? null;
-        try {
-          const opened = await chat.openLatest(contactRef as never);
-          conversationId = opened.conversationId || conversationId;
-        } catch {
-          // Fall back to whatever thread is already open; a hard failure is
-          // surfaced by the send step rather than blocking the wake.
-        }
+        // new conversation, so a wake lands where the user last spoke. A failed
+        // resume falls back to `openContact` (same thread, or the one conversation
+        // created when the contact has none) — the wake must never proceed
+        // unaddressed, which is what surfaced as "No conversation or room to send
+        // to" in the companion.
+        const binding = await bindWakeThread(chat, target.contactId);
+        const conversationId = binding.conversationId ?? chat.getState().conversationId ?? null;
+        // Remember it for the *session*, not just for this presentation: the
+        // mirrored companion composer submits through `send`, which must target
+        // this same thread even when the chat store has since moved on.
+        if (conversationId) conversationIdRef.current = conversationId;
         if (mode === 'companion') {
-          if (conversationId) conversationIdRef.current = conversationId;
-          // Read the one-click "companion + voice" link: it decides whether the
-          // companion runs its own realtime call (voice mode) or becomes the
-          // *dictation* surface (this renderer owns the session and mirrors it).
-          const voiceMode = await bridge
-            .wakeGetSettings()
-            .then((s) => s.companionOnWake)
-            .catch(() => false);
-          // Hand the activation to the already-open companion without a reload
-          // (so a live realtime call survives); only open a window when none
-          // exists. `dictate` tells the companion which surface it is.
-          // `callBridge` falls back to "no live companion" on a preload that
-          // predates the channel, so the wake degrades to `companionOpen`.
+          // A wake-driven companion is the wake's *dictation* surface: this
+          // renderer owns the shared mic graph, batch recorder and local GPU STT,
+          // and mirrors the live turn into the companion strip. `companionOnWake`
+          // no longer selects a surface here — voice-call mode is an opt-in toggle
+          // inside the companion, and reading it as "the companion owns the mic"
+          // is what left the wake with no capture at all.
           const presented = await callBridge(
             bridge,
             'companionPresent',
@@ -504,7 +496,7 @@ export function ChatHost({
               conversationId,
               agentId: target.agentId,
               phrase: target.phrase,
-              dictate: !voiceMode,
+              dictate: true,
               token: Date.now(),
             },
           );
@@ -515,14 +507,12 @@ export function ChatHost({
               agentId: target.agentId,
               title: resolveCompanionLabelOrNull(target.agentName),
               avatarUrl: agentRow?.avatarUrl ?? null,
-              // A realtime call only auto-starts in voice mode; dictation mode
-              // opens in the STT preview with voice a toggle.
-              autoStart: voiceMode,
+              // Dictation, not an auto-started call: the companion opens in the
+              // STT preview and voice is a toggle the user opts into.
+              autoStart: false,
             });
           }
-          // Voice mode owns the capture (the call); dictation mode runs the
-          // session here and mirrors it into the companion strip.
-          return { dictate: !voiceMode };
+          return { dictate: true };
         }
         return { dictate: true };
       },
@@ -532,7 +522,11 @@ export function ChatHost({
         if (!blob || blob.size === 0) return false;
         const audio = await blobToInlineAudio(blob, 'voice-message.wav');
         const result = await chat.sendMessage('Voice message', {
-          conversationId: chat.getState().conversationId ?? undefined,
+          // Same wake-bound thread as the transcript path above.
+          conversationId: resolveWakeSendConversationId(
+            conversationIdRef.current,
+            chat.getState().conversationId,
+          ),
           contactId,
           attachments: [audio],
           ...(browserContext ? { browserContext } : {}),
@@ -581,7 +575,15 @@ export function ChatHost({
         });
       },
       send: async ({ contactId, text, browserContext }) => {
-        const conversationId = chat.getState().conversationId ?? undefined;
+        // Target the thread the wake resolved, not whatever the store happens to
+        // hold: the main chat view may have moved on (or `openContact` failed
+        // while the companion kept the wake's conversation), and a send with no
+        // address at all is exactly the "No conversation or room to send to"
+        // preflight failure.
+        const conversationId = resolveWakeSendConversationId(
+          conversationIdRef.current,
+          chat.getState().conversationId,
+        );
         await chat.sendMessage(text, {
           contactId,
           conversationId,
@@ -705,21 +707,29 @@ export function ChatHost({
   }, [wakeSession]);
 
   /**
-   * Open the wake session's agent in the immersive companion window in voice
-   * mode (the companion's realtime voice session owns listening). Used by the
-   * widget's "Open now" button; the router does the same inline when
-   * `companionOnWake` is on and the wake fires.
+   * Open the wake session's agent in the immersive companion window, as the
+   * wake's *dictation* surface (the companion renders the STT strip this window
+   * mirrors; its realtime call is a toggle the user opts into). Used by the
+   * widget's "Open now" button; the router does the same inline when the wake
+   * resolves to companion mode.
    */
   const openWakeCompanion = useCallback(
     async (target: { contactId: string; agentId: string | null; agentName: string | null; avatarUrl: string | null }) => {
       if (!chat) return;
-      // Hand the live wake session to the companion (it renders the STT preview +
-      // composer straight away) instead of starting a separate realtime call:
-      // voice mode is a toggle the user opts into, not the wake default.
-      // Prefer the conversation the wake resolved; fall back to whatever thread the
-      // chat already has open so the launch is still bound to a conversation rather
-      // than opening an unaddressed window.
-      const conversationId = conversationIdRef.current ?? chat.getState().conversationId ?? null;
+      // Address the wake's thread, resolving it if this activation has not bound
+      // one yet — an unaddressed companion opens fine but cannot send. Binding
+      // resumes the latest thread (creating one only when the contact has none).
+      let conversationId = resolveWakeSendConversationId(
+        conversationIdRef.current,
+        chat.getState().conversationId,
+      ) ?? null;
+      if (!conversationId) {
+        const binding = await bindWakeThread(chat, target.contactId);
+        if (binding.conversationId) {
+          conversationIdRef.current = binding.conversationId;
+          conversationId = binding.conversationId;
+        }
+      }
       const presented = await callBridge(bridge, 'companionPresent', false, {
         contactId: target.contactId,
         conversationId,
