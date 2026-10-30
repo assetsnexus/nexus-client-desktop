@@ -10,6 +10,7 @@
  */
 
 import { AUDIT_LOCALE_MESSAGES } from './locales-audit.js';
+import { CHAT_CACHE_LOCALE_MESSAGES } from './locales-chat-cache.js';
 
 export const SUPPORTED_LOCALES = [
   'en',
@@ -206,6 +207,15 @@ const en = {
   'settings.audit.args': 'Arguments (redacted)',
   'settings.audit.result': 'Result (redacted)',
   'settings.audit.error': 'Error',
+
+  // Durable chat cache (metadata only)
+  'settings.chatCache': 'Chat cache',
+  'settings.chatCache.help':
+    'Conversation lists and short message previews are cached locally so the chat opens instantly after a reload; message bodies are always refetched. The cache is wiped whenever you sign out.',
+  'settings.chatCache.maxBytes': 'Keep cache under',
+  'settings.chatCache.usage': 'Using {used} across {entries} entries',
+  'settings.chatCache.evicted': '{count} evicted',
+  'settings.chatCache.clear': 'Clear chat cache',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -1897,6 +1907,7 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
 // already declares the keys above; the other locales pick them up here.
 for (const locale of SUPPORTED_LOCALES) {
   Object.assign(DICTIONARIES[locale], AUDIT_LOCALE_MESSAGES[locale]);
+  Object.assign(DICTIONARIES[locale], CHAT_CACHE_LOCALE_MESSAGES[locale]);
 }
 
 export const EN_MESSAGES = en;

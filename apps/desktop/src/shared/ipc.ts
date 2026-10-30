@@ -1108,6 +1108,17 @@ export type AuditSnapshot = {
   sizeBytes: number;
 };
 
+// ─── Durable chat cache (metadata only) ─────────────────────────────────────
+export type {
+  ChatCacheSettings,
+  ChatCacheStats,
+} from './chat-cache.js';
+export {
+  CHAT_CACHE_MAX_MIB_CHOICES,
+  DEFAULT_CHAT_CACHE_MAX_BYTES,
+  BYTES_PER_MIB as CHAT_CACHE_BYTES_PER_MIB,
+} from './chat-cache.js';
+
 /** Storage explorer (Phase 2): a thin, serializable view of the region data. */
 export type StorageWorkspaceRow = {
   id: string;
@@ -1598,6 +1609,21 @@ export type NexusBridge = {
   auditSnapshot(filter?: import('./audit.js').AuditFilter): Promise<AuditSnapshot>;
   /** Update the retention window; the main process re-trims immediately. */
   auditSetRetention(retention: Partial<import('./audit.js').AuditRetention>): Promise<AuditSnapshot>;
+  /**
+   * Durable, metadata-only chat cache. The renderer's chat panel injects this as
+   * its `ChatCacheAdapter`, so a reload renders the list + thread skeletons
+   * instantly while bodies are refetched via the delta. Values are opaque
+   * strings; the byte bound + LRU live in the main process.
+   */
+  chatCacheGet(key: string): Promise<string | null>;
+  chatCacheSet(key: string, value: string): Promise<void>;
+  chatCacheDelete(key: string): Promise<void>;
+  chatCacheKeys(): Promise<string[]>;
+  /** Wipe every cached entry (logout / identity switch). */
+  chatCacheClear(): Promise<void>;
+  chatCacheStats(): Promise<import('./chat-cache.js').ChatCacheStats>;
+  /** Persist the byte cap; main re-trims immediately and returns fresh stats. */
+  chatCacheSetMaxBytes(maxBytes: number): Promise<import('./chat-cache.js').ChatCacheStats>;
   // Storage explorer (Phase 2).
   storageWorkspaces(): Promise<StorageWorkspaceRow[]>;
   storageFolderList(workspaceId: string, parentFolderId?: string | null): Promise<StorageFolderRow[]>;
@@ -1944,6 +1970,13 @@ export const IPC = {
   toolsRun: 'nexus:tools:run',
   auditSnapshot: 'nexus:audit:snapshot',
   auditSetRetention: 'nexus:audit:set-retention',
+  chatCacheGet: 'nexus:chat-cache:get',
+  chatCacheSet: 'nexus:chat-cache:set',
+  chatCacheDelete: 'nexus:chat-cache:delete',
+  chatCacheKeys: 'nexus:chat-cache:keys',
+  chatCacheClear: 'nexus:chat-cache:clear',
+  chatCacheStats: 'nexus:chat-cache:stats',
+  chatCacheSetMaxBytes: 'nexus:chat-cache:set-max-bytes',
   storageWorkspaces: 'nexus:storage:workspaces',
   storageFolderList: 'nexus:storage:folder-list',
   storageListFiles: 'nexus:storage:list-files',

@@ -9,13 +9,18 @@ import {
 } from './logout.js';
 
 describe('planLogout', () => {
-  it('keeps all local data when switching user without unmounting', () => {
-    expect(planLogout({ kind: 'switch_user', unmount: false })).toEqual(['end_session']);
+  it('keeps local data but drops the regenerable chat cache when switching user', () => {
+    // The metadata-only chat cache is regenerable server data, so it is dropped
+    // on every sign-out; nothing user-authored is touched.
+    expect(planLogout({ kind: 'switch_user', unmount: false })).toEqual([
+      'clear_chat_cache',
+      'end_session',
+    ]);
   });
 
   it('stops sync and clears mounts when switching user with unmounting', () => {
     const plan = planLogout({ kind: 'switch_user', unmount: true });
-    expect(plan).toEqual(['stop_sync', 'unmount_all', 'end_session']);
+    expect(plan).toEqual(['stop_sync', 'unmount_all', 'clear_chat_cache', 'end_session']);
     // The destructive full-teardown steps must NOT run on a keep-data switch.
     expect(plan).not.toContain('clear_identity_store');
     expect(plan).not.toContain('clear_secure_store');
@@ -27,6 +32,7 @@ describe('planLogout', () => {
     // Ordering matters: stop the scheduler before unmounting, and end the session last.
     expect(LOGOUT_STEP_ORDER[0]).toBe('stop_sync');
     expect(LOGOUT_STEP_ORDER[LOGOUT_STEP_ORDER.length - 1]).toBe('end_session');
+    expect(LOGOUT_STEP_ORDER).toContain('clear_chat_cache');
   });
 });
 

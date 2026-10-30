@@ -44,6 +44,7 @@ import { createLocalModelsStore } from './local-models-store.js';
 import { createToolsStore } from './tools-store.js';
 import { createLogger } from './logger.js';
 import { createAuditStore } from './audit-store.js';
+import { createChatCacheStore } from './chat-cache-store.js';
 import { createToolAuditor } from './tool-audit.js';
 import { filterAuditEntries, auditFacets } from '../shared/audit.js';
 import { createStorageManager } from './storage-manager.js';
@@ -314,6 +315,13 @@ const auditStore = createAuditStore({
 // Audit sink wired at the tool choke point. The store is passed in (never the
 // renderer), so nothing an agent can reach can read, mutate or truncate it.
 const toolAuditor = createToolAuditor({ audit: auditStore, logger });
+// Durable, metadata-only chat cache (conversation list + short turn previews).
+// The renderer's chat panel injects it as its `ChatCacheAdapter`; the byte bound
+// is user-configurable from Settings and defaults to 100 MiB.
+const chatCacheStore = createChatCacheStore({
+  filePath: join(dataDir, 'chat-cache', 'chat-cache.json'),
+  logger,
+});
 
 /**
  * Redirect the client at a locally-running region node + portal for testing.
@@ -862,6 +870,9 @@ const logoutManager = createLogoutManager({
   clearWakeQueue: async () => {
     wakeManager.setQueue([]);
   },
+  clearChatCache: async () => {
+    chatCacheStore.clear();
+  },
   clearIdentityStore: () => {
     identityManager.reset();
   },
@@ -1383,6 +1394,26 @@ function registerIpc(): void {
   ipcMain.handle(IPC.auditSetRetention, (_e, patch: Partial<import('../shared/audit.js').AuditRetention>) => {
     auditStore.setRetention(patch ?? {});
     return buildAuditSnapshot({});
+  });
+
+  // Durable, metadata-only chat cache. The renderer's chat panel injects this
+  // as its `ChatCacheAdapter`; values are opaque strings and the byte bound /
+  // LRU live in the main process. No agent-facing tool reaches these channels.
+  ipcMain.handle(IPC.chatCacheGet, (_e, key: string) => chatCacheStore.get(String(key ?? '')));
+  ipcMain.handle(IPC.chatCacheSet, (_e, key: string, value: string) => {
+    chatCacheStore.set(String(key ?? ''), String(value ?? ''));
+  });
+  ipcMain.handle(IPC.chatCacheDelete, (_e, key: string) => {
+    chatCacheStore.delete(String(key ?? ''));
+  });
+  ipcMain.handle(IPC.chatCacheKeys, () => chatCacheStore.keys());
+  ipcMain.handle(IPC.chatCacheClear, () => {
+    chatCacheStore.clear();
+  });
+  ipcMain.handle(IPC.chatCacheStats, () => chatCacheStore.stats());
+  ipcMain.handle(IPC.chatCacheSetMaxBytes, (_e, maxBytes: number) => {
+    chatCacheStore.setSettings({ maxBytes: Number(maxBytes) });
+    return chatCacheStore.stats();
   });
 
   // Storage explorer (Phase 2).

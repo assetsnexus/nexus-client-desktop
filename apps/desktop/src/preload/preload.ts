@@ -85,6 +85,15 @@ const bridge: NexusBridge = {
   // channel exists (see `shared/ipc.ts`); the store is main-process only.
   auditSnapshot: (filter) => ipcRenderer.invoke(IPC.auditSnapshot, filter),
   auditSetRetention: (retention) => ipcRenderer.invoke(IPC.auditSetRetention, retention),
+  // Durable metadata-only chat cache. The store is main-process only; these
+  // channels are the renderer's `ChatCacheAdapter` surface.
+  chatCacheGet: (key) => ipcRenderer.invoke(IPC.chatCacheGet, key),
+  chatCacheSet: (key, value) => ipcRenderer.invoke(IPC.chatCacheSet, key, value),
+  chatCacheDelete: (key) => ipcRenderer.invoke(IPC.chatCacheDelete, key),
+  chatCacheKeys: () => ipcRenderer.invoke(IPC.chatCacheKeys),
+  chatCacheClear: () => ipcRenderer.invoke(IPC.chatCacheClear),
+  chatCacheStats: () => ipcRenderer.invoke(IPC.chatCacheStats),
+  chatCacheSetMaxBytes: (maxBytes) => ipcRenderer.invoke(IPC.chatCacheSetMaxBytes, maxBytes),
   storageWorkspaces: () => ipcRenderer.invoke(IPC.storageWorkspaces),
   storageFolderList: (workspaceId, parentFolderId) =>
     ipcRenderer.invoke(IPC.storageFolderList, workspaceId, parentFolderId),

@@ -40,6 +40,13 @@ export type LogoutStep =
   | 'clear_sync_bindings'
   /** Drop queued wake transcripts (`wake-queue.json`). */
   | 'clear_wake_queue'
+  /**
+   * Wipe the durable metadata-only chat cache (conversation list + short turn
+   * previews). Regenerable server-derived data, so it is dropped on every
+   * sign-out — a switch-user logout must not leave one account's previews on a
+   * device another account now uses.
+   */
+  | 'clear_chat_cache'
   /** Remove this account from the multi-identity store. */
   | 'clear_identity_store'
   /** Delete secrets from the secure store (token, device keys, PIN). */
@@ -53,6 +60,7 @@ export const LOGOUT_STEP_ORDER: readonly LogoutStep[] = [
   'unmount_all',
   'clear_sync_bindings',
   'clear_wake_queue',
+  'clear_chat_cache',
   'clear_identity_store',
   'clear_secure_store',
   'end_session',
@@ -64,10 +72,16 @@ export const LOGOUT_STEP_ORDER: readonly LogoutStep[] = [
  * - `switch_user` with `unmount: false` keeps *everything* except the session.
  * - `switch_user` with `unmount: true` additionally stops + clears the mounts.
  * - `permanent` runs the full teardown.
+ *
+ * The metadata-only chat cache is dropped on BOTH branches: it is regenerable
+ * server-derived data (never user-authored local data), so keeping it past a
+ * sign-out only leaves one account's previews on a device another may use.
  */
 export function planLogout(choice: LogoutChoice): LogoutStep[] {
   if (choice.kind === 'switch_user') {
-    return choice.unmount ? ['stop_sync', 'unmount_all', 'end_session'] : ['end_session'];
+    return choice.unmount
+      ? ['stop_sync', 'unmount_all', 'clear_chat_cache', 'end_session']
+      : ['clear_chat_cache', 'end_session'];
   }
   return [...LOGOUT_STEP_ORDER];
 }
@@ -83,6 +97,8 @@ export function stepLabel(step: LogoutStep): string {
       return 'Remove sync bindings';
     case 'clear_wake_queue':
       return 'Delete queued voice transcripts';
+    case 'clear_chat_cache':
+      return 'Clear cached chat metadata';
     case 'clear_identity_store':
       return 'Forget local accounts';
     case 'clear_secure_store':

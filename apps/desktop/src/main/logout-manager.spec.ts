@@ -20,6 +20,7 @@ function harness(opts: { failOn?: string[] } = {}): Harness {
     unmountAll: async () => track('unmountAll'),
     clearSyncBindings: async () => track('clearSyncBindings'),
     clearWakeQueue: async () => track('clearWakeQueue'),
+    clearChatCache: async () => track('clearChatCache'),
     clearIdentityStore: () => track('clearIdentityStore'),
     clearSecureStore: async () => track('clearSecureStore'),
     endSession: async () => track('endSession'),
@@ -31,18 +32,18 @@ const stepOf = (results: LogoutStepResult[], step: LogoutStepResult['step']) =>
   results.find((r) => r.step === step);
 
 describe('createLogoutManager — switch user (keep local data)', () => {
-  it('only ends the session and keeps every local datum', async () => {
+  it('only ends the session + drops the chat cache, keeping every local datum', async () => {
     const h = harness();
     const report = await createLogoutManager(h.deps).run({ kind: 'switch_user', unmount: false });
     expect(report.ok).toBe(true);
-    expect(h.calls).toEqual(['endSession']);
+    expect(h.calls).toEqual(['clearChatCache', 'endSession']);
   });
 
   it('stops sync and unmounts when the user also asked to unmount', async () => {
     const h = harness();
     const report = await createLogoutManager(h.deps).run({ kind: 'switch_user', unmount: true });
     expect(report.ok).toBe(true);
-    expect(h.calls).toEqual(['stopSync', 'unmountAll', 'endSession']);
+    expect(h.calls).toEqual(['stopSync', 'unmountAll', 'clearChatCache', 'endSession']);
     // Identity / secure store / wake queue must survive a keep-data switch.
     expect(h.calls).not.toContain('clearIdentityStore');
     expect(h.calls).not.toContain('clearSecureStore');
@@ -69,6 +70,7 @@ describe('createLogoutManager — permanent logout', () => {
       'unmountAll',
       'clearSyncBindings',
       'clearWakeQueue',
+      'clearChatCache',
       'clearIdentityStore',
       'clearSecureStore',
       'endSession',

@@ -5,6 +5,7 @@ import { WakeSettingsPanel } from './WakeSettingsPanel.js';
 import { AudioSettingsPanel } from './AudioSettingsPanel.js';
 import { LocalAvatarsPanel } from './LocalAvatarsPanel.js';
 import { AuditPanel } from './AuditPanel.js';
+import { ChatCachePanel } from './ChatCachePanel.js';
 import { NexusAppsPanel } from './NexusAppsPanel.js';
 import { CertTrustPanel } from './CertTrustPanel.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
@@ -780,6 +781,10 @@ export function SettingsPanel({
 
       <ErrorBoundary label="Client-tool audit trail">
         <AuditPanel />
+      </ErrorBoundary>
+
+      <ErrorBoundary label="Chat cache">
+        <ChatCachePanel />
       </ErrorBoundary>
 
       <section style={section}>

@@ -25,6 +25,8 @@ export type LogoutManagerDeps = {
   unmountAll: () => Promise<void>;
   clearSyncBindings: () => Promise<void>;
   clearWakeQueue: () => Promise<void>;
+  /** Wipe the durable metadata-only chat cache (regenerable server data). */
+  clearChatCache: () => Promise<void>;
   /** Clear the multi-identity store entirely. */
   clearIdentityStore: () => void | Promise<void>;
   /** Delete secrets (token, device keys, PIN) from the secure store. */
@@ -55,6 +57,9 @@ export function createLogoutManager(deps: LogoutManagerDeps): LogoutManager {
           break;
         case 'clear_wake_queue':
           await deps.clearWakeQueue();
+          break;
+        case 'clear_chat_cache':
+          await deps.clearChatCache();
           break;
         case 'clear_identity_store':
           await deps.clearIdentityStore();

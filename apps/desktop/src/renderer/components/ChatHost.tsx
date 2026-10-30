@@ -25,6 +25,7 @@ import {
 import { DEFAULT_DESKTOP_TOOLS, AUDIO_TOOLS, localCommandTools } from '../tools/descriptors.js';
 import { resolveOrgLogoUrl } from '../../shared/org-logo.js';
 import { setToolAuditContext, resolveToolAuditContext } from '../tools/audit-context.js';
+import { createDesktopChatCacheAdapter } from '../chat-cache-adapter.js';
 import { createIncomingWatcher, resolveSenderName } from '../notifications/incoming.js';
 import { resolveCompanionLabelOrNull } from '../../shared/companion-label.js';
 import { createWakeChatRouter } from '../wake/router.js';
@@ -233,6 +234,10 @@ export function ChatHost({
         client: nextClient,
         features: { adminPanels: false },
         publicFilesBaseUrl: apiBaseUrl,
+        // Durable, metadata-only cache (main-process file store via IPC) so a
+        // reload renders the conversation list + thread skeletons instantly.
+        cacheAdapter: createDesktopChatCacheAdapter(),
+        cacheScope: identity.userId ?? null,
       });
       if (!cancelled) {
         setClient(nextClient);
