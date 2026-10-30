@@ -302,6 +302,12 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
   async function downloadLink(fileId: string): Promise<StorageDownloadLink> {
     const sender = await options.getSender();
     const raw = await sender.send('anx.storage.presign.get', { fileId });
+    // A *failed* presign command is not the same as "the backend cannot sign".
+    // Falling back to the region proxy URL on a failure would point at a path
+    // the host may never answer, hanging a preview / drag-download forever
+    // instead of reporting the error. Surface the failure and only use the
+    // proxy when the backend genuinely returned no presigned url.
+    assertOk(raw, 'anx.storage.presign.get');
     const body = unwrapEnvelope(raw);
     const url = typeof body.url === 'string' && body.url ? body.url : null;
     if (url) return { url, presigned: true };
