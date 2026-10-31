@@ -149,12 +149,40 @@ const DISCOVERABLE_TOOLS = new Set([
   'character_list_clothes',
 ]);
 
+/**
+ * Plan §P6b/§P6c — the ambient mood a turn carries is now decided *server-side*
+ * by the emotion engine and delivered as turn metadata / an `emotion_state`
+ * activity. Pinning `character_set_mood` on every send therefore invites the main
+ * chat model to emit a **visible** mood tool call, which is exactly what this
+ * rail must not do (it would add a tool row and fight the engine's mood).
+ *
+ * With the engine active the tool stays *available* (a discoverable tool the
+ * model may still reach for) but is no longer pinned onto every turn.
+ */
+const MOOD_TOOLS_OWNED_BY_ENGINE = new Set(['character_set_mood']);
+
 export function isImmediateCharacterToolName(name: string): boolean {
   return IMMEDIATE_TOOLS.has(normalizeToolName(name));
 }
 
-export function characterToolAvailability(name: string): 'pinned' | 'discoverable' {
-  return DISCOVERABLE_TOOLS.has(normalizeToolName(name)) ? 'discoverable' : 'pinned';
+export type CharacterToolAvailabilityOptions = {
+  /**
+   * True when the agent's emotion profile drives ambient mood server-side
+   * (`emotionProfile.enabled`). Demotes `character_set_mood` from `pinned` to
+   * `discoverable` so the model does not emit a visible mood tool call.
+   */
+  emotionEngineActive?: boolean;
+};
+
+export function characterToolAvailability(
+  name: string,
+  opts: CharacterToolAvailabilityOptions = {},
+): 'pinned' | 'discoverable' {
+  const normalized = normalizeToolName(name);
+  if (opts.emotionEngineActive === true && MOOD_TOOLS_OWNED_BY_ENGINE.has(normalized)) {
+    return 'discoverable';
+  }
+  return DISCOVERABLE_TOOLS.has(normalized) ? 'discoverable' : 'pinned';
 }
 
 /** `character.play_gesture` → `character_play_gesture` (and pass through). */
@@ -165,6 +193,7 @@ export function normalizeToolName(name: string): string {
 /** Build the descriptor list from a character-kit schema array. */
 export function buildCharacterToolDescriptors(
   schemas: readonly CharacterToolSchema[],
+  opts: CharacterToolAvailabilityOptions = {},
 ): CharacterToolDescriptor[] {
   return schemas
     .map((schema) => {
@@ -176,7 +205,7 @@ export function buildCharacterToolDescriptors(
         name,
         description: description || `Character tool ${name}`,
         parameters: (fn.parameters ?? { type: 'object', properties: {} }) as Record<string, unknown>,
-        availability: characterToolAvailability(name),
+        availability: characterToolAvailability(name, opts),
       } satisfies CharacterToolDescriptor;
     })
     .filter((d): d is CharacterToolDescriptor => d !== null);
@@ -234,8 +263,9 @@ export function registerCharacterTools(
   schemas: readonly CharacterToolSchema[],
   host: () => CharacterToolHostLike | null,
   register: (descriptor: CharacterToolDescriptor, handler: (args: unknown) => unknown) => void,
+  opts: CharacterToolAvailabilityOptions = {},
 ): string[] {
-  const descriptors = buildCharacterToolDescriptors(schemas);
+  const descriptors = buildCharacterToolDescriptors(schemas, opts);
   for (const descriptor of descriptors) {
     register(descriptor, (args: unknown) => executeCharacterTool(host(), descriptor.name, args));
   }

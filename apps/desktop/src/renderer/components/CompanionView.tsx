@@ -18,6 +18,7 @@ import {
   readPresenceFromProfile,
   type ChatContact,
   type ChatTurn,
+  type CompanionState,
   type NexusChat,
   type ParticipantPresenceV1,
 } from '@nexus/chat-react';
@@ -270,6 +271,12 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   const [contact, setContact] = useState<ChatContact | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [streaming, setStreaming] = useState(false);
+  /**
+   * Plan §P6c — the framework-free companion slice (mood / phase / beat). Kept in
+   * React state here (rather than read off `chat`) because the desktop companion
+   * window must re-render on a *silent* mood shift that produced no new turn.
+   */
+  const [companionState, setCompanionState] = useState<CompanionState | null>(null);
   /**
    * A conversation link failure (e.g. the agent is not ours to resume) must not
    * blank the stage — the companion still renders the agent's avatar and voice
@@ -565,11 +572,15 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   });
 
   // Cycle status gestures while the agent is working (only when the editor is on).
+  // §P6c — pass the live emotion mood so a `worried` / `annoyed` agent does not
+  // snap back to `neutral` when its thinking beat ends.
   useAgentStatusMotions({
     host: stageHost as CompanionStageHost | null,
     agentStatus: streaming ? { state: 'thinking' } : null,
     motions: statusMotions,
     enabled: debugEnabled.statusMotions,
+    emotionMood: companionState?.presenceMood ?? null,
+    defaultMood: companionState?.defaultMood ?? null,
   });
 
   const apiBaseUrl = connection?.regionUrl ?? '';
@@ -603,6 +614,9 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       const state = nextChat.getState();
       setTurns(state.turns);
       setStreaming(Boolean(state.streaming));
+      // §P6c — mirror the companion slice so a mood-only change re-renders the
+      // stage even though `turns` did not grow.
+      setCompanionState(state.companionState ?? null);
     });
 
     // The launch already carries everything the stage needs (id, title, avatar),

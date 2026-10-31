@@ -94,6 +94,25 @@ describe('characterToolAvailability', () => {
     expect(characterToolAvailability('scene_list_objects')).toBe('discoverable');
     expect(characterToolAvailability('character_list_gestures')).toBe('discoverable');
   });
+
+  // Plan §P6b/§P6c — with the server-side emotion engine active, the ambient mood
+  // is delivered as turn metadata, so the model must not be nudged into emitting
+  // a visible `character_set_mood` tool call.
+  it('demotes character_set_mood when the emotion engine owns ambient mood', () => {
+    expect(characterToolAvailability('character_set_mood')).toBe('pinned');
+    expect(
+      characterToolAvailability('character_set_mood', { emotionEngineActive: true }),
+    ).toBe('discoverable');
+  });
+
+  it('does not demote unrelated tools when the engine is active', () => {
+    expect(
+      characterToolAvailability('character_play_gesture', { emotionEngineActive: true }),
+    ).toBe('pinned');
+    expect(
+      characterToolAvailability('scene_list_objects', { emotionEngineActive: true }),
+    ).toBe('discoverable');
+  });
 });
 
 describe('buildCharacterToolDescriptors', () => {
