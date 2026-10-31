@@ -5,6 +5,8 @@ import {
   createRegionCommandClient,
   findChatContact,
   blobToInlineAudio,
+  type ActivityEvent,
+  type ActivityEventData,
   type ChatIdentitySession,
   type NexusChat,
   type SdkToHostMessage,
@@ -250,6 +252,46 @@ export function ChatHost({
       cancelled = true;
     };
   }, [apiBaseUrl, identity]);
+
+  /**
+   * A background agent turn (self-wake / reminder) writes a message with no
+   * per-conversation stream, so the state-diff watcher below never sees it in the
+   * focused panel. The user-inbox activity event is the only signal; report it to
+   * main so an unattended window still raises the OS card (and the row updates
+   * live, handled inside `NexusChatApp`).
+   */
+  const reportInboxNotification = useCallback(
+    (event: ActivityEvent) => {
+      const data = (event?.data || {}) as Partial<ActivityEventData>;
+      const conversationId = typeof data.conversationId === 'string' ? data.conversationId : null;
+      const unreadDelta = typeof data.unreadDelta === 'number' ? data.unreadDelta : 0;
+      const kind = typeof data.kind === 'string' ? data.kind : '';
+      if (!conversationId) return;
+      if (!unreadDelta && kind !== 'message' && kind !== 'new_message') return;
+      const agentId = typeof data.agentId === 'string' ? data.agentId : null;
+      const panel = chat?.getState().panels?.[chat.getState().activePanelIndex];
+      const contact = chat
+        ? findChatContact(chat.getState().contacts, agentId ?? panel?.contactId ?? null)
+        : undefined;
+      const senderName = resolveSenderName({
+        agentName: contact?.name ?? null,
+        conversationTitle: null,
+      });
+      void bridge.notifyIncoming({
+        // A stored message id dedupes across a replay; a preview-only beat falls
+        // back to a synthetic id so it still raises exactly one card.
+        messageId:
+          data.messageId || `activity:${conversationId}:${data.preview ?? kind}:${Date.now()}`,
+        conversationId,
+        contactId: contact?.id ?? panel?.contactId ?? null,
+        agentId: contact?.agentId ?? agentId,
+        senderName,
+        preview: data.preview ?? null,
+        title: senderName,
+      });
+    },
+    [bridge, chat],
+  );
 
   // Report inbound assistant messages to the main process, which raises an OS
   // notification when the window is unattended. The watcher owns the "is this
@@ -918,6 +960,7 @@ export function ChatHost({
         identities={identities}
         features={{ adminPanels: false }}
         tools={registeredTools}
+        onInboxEvent={reportInboxNotification}
         slots={{
           // Mirror the companion affordance into the chat header, immediately
           // left of the built-in Config button, instead of floating it over the
