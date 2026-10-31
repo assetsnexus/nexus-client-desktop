@@ -37,9 +37,19 @@ export type LocalAvatarsConfig = {
    * remembers its own agent's model, instead of one global avatar for everyone.
    */
   contactMappings: Record<string, string>;
+  /**
+   * Library avatar used for **every agent that has no model of its own** — no
+   * per-contact mapping and no configured `presence.vrmUrl`. Unset (`null`) means
+   * "no default": such an agent falls back to its profile picture as before.
+   */
+  defaultAvatarId: string | null;
 };
 
-export const DEFAULT_LOCAL_AVATARS: LocalAvatarsConfig = { avatars: [], contactMappings: {} };
+export const DEFAULT_LOCAL_AVATARS: LocalAvatarsConfig = {
+  avatars: [],
+  contactMappings: {},
+  defaultAvatarId: null,
+};
 
 /** File extensions the library accepts, in picker order. */
 export const LOCAL_AVATAR_EXTENSIONS = ['.vrm', '.glb'] as const;
@@ -206,7 +216,14 @@ export function normalizeLocalAvatarsConfig(raw: unknown): LocalAvatarsConfig {
       avatars.push(record);
     }
   }
-  return { avatars, contactMappings: normalizeContactMappings(raw.contactMappings) };
+  // A default that points at a removed/unknown model is dropped (kept as null)
+  // so the fallback never resolves to nothing.
+  const defaultId = typeof raw.defaultAvatarId === 'string' ? raw.defaultAvatarId.trim() : '';
+  return {
+    avatars,
+    contactMappings: normalizeContactMappings(raw.contactMappings),
+    defaultAvatarId: defaultId && seen.has(defaultId) ? defaultId : null,
+  };
 }
 
 /** The library avatar a contact is mapped to, or null when unmapped/missing. */
@@ -218,6 +235,25 @@ export function mappedAvatarId(
   const id = config.contactMappings[contactId];
   if (!id) return null;
   return config.avatars.some((a) => a.id === id) ? id : null;
+}
+
+/** The configured default library avatar (present in the library), or null. */
+export function defaultAvatarId(
+  config: LocalAvatarsConfig | null | undefined,
+): string | null {
+  if (!config) return null;
+  const id = config.defaultAvatarId;
+  if (!id) return null;
+  return config.avatars.some((a) => a.id === id) ? id : null;
+}
+
+/** The default library record (present in the library), or null. */
+export function defaultLocalAvatar(
+  config: LocalAvatarsConfig | null | undefined,
+): LocalAvatarRecord | null {
+  const id = defaultAvatarId(config);
+  if (!id || !config) return null;
+  return config.avatars.find((a) => a.id === id) ?? null;
 }
 
 /**
@@ -236,14 +272,26 @@ export function pruneContactMappings(config: LocalAvatarsConfig): {
     if (known.has(avatarId)) contactMappings[contactId] = avatarId;
     else changed = true;
   }
-  return { config: { avatars: config.avatars, contactMappings }, changed };
+  const defaultAvatarId =
+    typeof config.defaultAvatarId === 'string' && known.has(config.defaultAvatarId)
+      ? config.defaultAvatarId
+      : null;
+  if (config.defaultAvatarId && !defaultAvatarId) changed = true;
+  return {
+    config: { avatars: config.avatars, contactMappings, defaultAvatarId },
+    changed,
+  };
 }
 
-/** Config with one library avatar removed and its mappings pruned. */
+/** Config with one library avatar removed and its mappings + default pruned. */
 export function removeLocalAvatar(config: LocalAvatarsConfig, id: string): LocalAvatarsConfig {
   const avatars = config.avatars.filter((a) => a.id !== id);
   if (avatars.length === config.avatars.length) return config;
-  return pruneContactMappings({ avatars, contactMappings: config.contactMappings }).config;
+  return pruneContactMappings({
+    avatars,
+    contactMappings: config.contactMappings,
+    defaultAvatarId: config.defaultAvatarId,
+  }).config;
 }
 
 /** The library record a contact is mapped to (and that still exists), or null. */

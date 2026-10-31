@@ -57,8 +57,24 @@ import type {
 // `LocalAvatarsConfig` in method signatures, which a bare `export type … from`
 // does not bring into scope.
 import type { LocalAvatarsConfig } from './local-avatars.js';
+// Same reason: `UiSettings.appDefaultTts` is typed with it below.
+import type { AppDefaultTtsSettings } from './tts.js';
 
 export type { RegionEnvironment } from './sandbox-environment.js';
+
+/** Re-exported so renderer sections import the TTS contract from the bridge. */
+export {
+  DEFAULT_APP_DEFAULT_TTS,
+  normalizeAppDefaultTts,
+  resolveAppDefaultTts,
+  summarizeTtsCapabilities,
+  ttsModelSupportsVoiceSample,
+  ttsVoiceSelectMode,
+} from './tts.js';
+export type {
+  AppDefaultTtsSettings,
+  TtsModelCapabilitySummary,
+} from './tts.js';
 
 export type {
   LocalAvatarKind,
@@ -156,8 +172,14 @@ export {
   COMPANION_GAP_MAX_PX,
   COMPANION_GAP_MIN_PX,
   COMPANION_PLACEMENT_MODES,
+  COMPANION_SIZE_MAX,
+  COMPANION_SIZE_MIN,
+  COMPANION_SIZE_PRESET_IDS,
+  COMPANION_SIZE_PRESETS,
   DEFAULT_COMPANION_PLACEMENT_SETTINGS,
+  DEFAULT_COMPANION_WINDOW_SIZE,
   normalizeCompanionPlacementSettings,
+  normalizeCompanionWindowSize,
 } from './companion-placement.js';
 export {
   contactOverrideFor,
@@ -170,6 +192,8 @@ export type { ContactOverride, ContactOverrides } from './contact-overrides.js';
 export type {
   CompanionPlacementMode,
   CompanionPlacementSettings,
+  CompanionSizePreset,
+  CompanionWindowSize,
   PlacementPoint,
   PlacementRect,
 } from './companion-placement.js';
@@ -237,6 +261,13 @@ export type UiSettings = {
    * global settings above.
    */
   contactOverrides: ContactOverrides;
+  /**
+   * App-default TTS model + voice, used by any agent that has no voice of its
+   * own (and by the "speak new messages" path when enabled). Chosen from the
+   * TTS models the signed-in subscription entitles, so it never hardcodes a
+   * provider.
+   */
+  appDefaultTts: AppDefaultTtsSettings;
   /** Audio device preferences: primary/allowed speakers + primary/wake microphones. */
   audio: AudioSettings;
 };
@@ -1978,6 +2009,11 @@ export type NexusBridge = {
   /** Remember (or clear, with `null`) the library avatar one agent renders with. */
   localAvatarsSetMapping(contactId: string, avatarId: string | null): Promise<LocalAvatarsConfig>;
   /**
+   * Remember (or clear, with `null`) the library avatar used for every agent
+   * that has no model of its own.
+   */
+  localAvatarsSetDefault(avatarId: string | null): Promise<LocalAvatarsConfig>;
+  /**
    * Ask the main shell window to open its Settings surface (the gallery links
    * here to configure client-remembered agent ↔ avatar mappings). Resolves true
    * when the request was delivered.
@@ -2245,6 +2281,7 @@ export const IPC = {
   localAvatarsPick: 'nexus:local-avatars:pick',
   localAvatarsRemove: 'nexus:local-avatars:remove',
   localAvatarsSetMapping: 'nexus:local-avatars:set-mapping',
+  localAvatarsSetDefault: 'nexus:local-avatars:set-default',
   /** Companion/child window → main shell: open the Settings surface. */
   openSettings: 'nexus:shell:open-settings',
   calendarListEvents: 'nexus:calendar:list-events',

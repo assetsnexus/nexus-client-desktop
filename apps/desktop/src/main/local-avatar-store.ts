@@ -42,6 +42,11 @@ export type LocalAvatarStore = {
   remove(id: string): LocalAvatarsConfig;
   /** Set (or clear, with `null`) the library avatar one contact is mapped to. */
   setContactMapping(contactId: string, avatarId: string | null): LocalAvatarsConfig;
+  /**
+   * Set (or clear, with `null`) the library avatar used for every agent without
+   * a model of its own. Throws when the id is not in the library.
+   */
+  setDefaultAvatar(avatarId: string | null): LocalAvatarsConfig;
 };
 
 function uniqueId(base: string, taken: Set<string>): string {
@@ -61,7 +66,7 @@ export function createLocalAvatarStore(options?: {
   const libDir = options?.libraryDir ?? join(app.getPath('userData'), 'avatar-library');
 
   const read = (): LocalAvatarsConfig => {
-    if (!existsSync(path)) return { avatars: [], contactMappings: {} };
+    if (!existsSync(path)) return { ...DEFAULT_LOCAL_AVATARS };
     try {
       const raw = JSON.parse(readFileSync(path, 'utf8')) as unknown;
       const config = normalizeLocalAvatarsConfig(raw);
@@ -75,9 +80,11 @@ export function createLocalAvatarStore(options?: {
       for (const [contactId, avatarId] of Object.entries(config.contactMappings)) {
         if (known.has(avatarId)) contactMappings[contactId] = avatarId;
       }
-      return { avatars, contactMappings };
+      const defaultAvatarId =
+        config.defaultAvatarId && known.has(config.defaultAvatarId) ? config.defaultAvatarId : null;
+      return { avatars, contactMappings, defaultAvatarId };
     } catch {
-      return { avatars: [], contactMappings: {} };
+      return { ...DEFAULT_LOCAL_AVATARS };
     }
   };
 
@@ -128,6 +135,7 @@ export function createLocalAvatarStore(options?: {
       const next: LocalAvatarsConfig = {
         avatars: [...current.avatars, record],
         contactMappings: current.contactMappings,
+        defaultAvatarId: current.defaultAvatarId,
       };
       write(next);
       return next;
@@ -164,7 +172,32 @@ export function createLocalAvatarStore(options?: {
           throw new Error('That avatar is not in your library.');
         } else mappings[key] = value;
       }
-      const next: LocalAvatarsConfig = { avatars: current.avatars, contactMappings: mappings };
+      const next: LocalAvatarsConfig = {
+        avatars: current.avatars,
+        contactMappings: mappings,
+        defaultAvatarId: current.defaultAvatarId,
+      };
+      write(next);
+      return next;
+    },
+
+    setDefaultAvatar(avatarId) {
+      const current = read();
+      let nextId: string | null = null;
+      if (avatarId !== null) {
+        const value = avatarId.trim();
+        if (value) {
+          if (!current.avatars.some((a) => a.id === value)) {
+            throw new Error('That avatar is not in your library.');
+          }
+          nextId = value;
+        }
+      }
+      const next: LocalAvatarsConfig = {
+        avatars: current.avatars,
+        contactMappings: current.contactMappings,
+        defaultAvatarId: nextId,
+      };
       write(next);
       return next;
     },

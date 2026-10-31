@@ -21,6 +21,7 @@ import {
   bridge,
   callBridge,
   hasBridgeMethod,
+  DEFAULT_LOCAL_AVATARS,
   type LocalAvatarsConfig,
   type WakeAgentRow,
 } from '../bridge.js';
@@ -89,7 +90,7 @@ export function LocalAvatarsPanel() {
     if (!available) return;
     let cancelled = false;
     void callBridge<LocalAvatarsConfig | null>(bridge, 'localAvatarsList', null).then((next) => {
-      if (!cancelled) setConfig(next ?? { avatars: [], contactMappings: {} });
+      if (!cancelled) setConfig(next ?? { ...DEFAULT_LOCAL_AVATARS });
     });
     // The agent list is the same one the wake settings use (owned + shared), so a
     // mapping can be created for any agent a wake can address.

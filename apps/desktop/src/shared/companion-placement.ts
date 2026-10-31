@@ -12,6 +12,63 @@
  * window rects, and this file decides where the window goes.
  */
 
+import { COMPANION_DEFAULT_SIZE, COMPANION_MIN_SIZE } from './companion.js';
+
+/**
+ * Size of a newly opened companion window.
+ *
+ * Three named presets cover the realistic range from a narrow "phone at the
+ * side" strip to a roomy stage; `custom` lets the user dial an exact pixel size
+ * (still clamped to the display and to {@link COMPANION_SIZE_MIN} so the avatar
+ * and the expandable chat stay usable).
+ */
+export type CompanionSizePreset = 'compact' | 'standard' | 'large' | 'custom';
+
+/**
+ * Preset dimensions, smallest to largest. `standard` is the app default and is
+ * sourced from {@link COMPANION_DEFAULT_SIZE} so the two can never drift.
+ */
+export const COMPANION_SIZE_PRESETS: Record<
+  Exclude<CompanionSizePreset, 'custom'>,
+  { width: number; height: number }
+> = {
+  compact: { width: 380, height: 480 },
+  standard: { ...COMPANION_DEFAULT_SIZE },
+  large: { width: 760, height: 980 },
+};
+
+export const COMPANION_SIZE_PRESET_IDS: readonly CompanionSizePreset[] = [
+  'compact',
+  'standard',
+  'large',
+  'custom',
+];
+
+/** Effective size of a companion window: a named preset, or explicit pixels. */
+export type CompanionWindowSize = {
+  preset: CompanionSizePreset;
+  /** Effective width; equals the preset's when `preset !== 'custom'`. */
+  width: number;
+  /** Effective height; equals the preset's when `preset !== 'custom'`. */
+  height: number;
+};
+
+/**
+ * Smallest companion the user may request. Mirrors {@link COMPANION_MIN_SIZE}
+ * (the `BrowserWindow` minimum) so a custom size can never be clamped up by
+ * Electron *after* it was positioned — which would push a bottom-right window
+ * off-screen.
+ */
+export const COMPANION_SIZE_MIN = { ...COMPANION_MIN_SIZE };
+
+/** Largest companion the user may request (a sane upper bound, not a hard OS one). */
+export const COMPANION_SIZE_MAX = { width: 1600, height: 1400 } as const;
+
+export const DEFAULT_COMPANION_WINDOW_SIZE: CompanionWindowSize = {
+  preset: 'standard',
+  ...COMPANION_SIZE_PRESETS.standard,
+};
+
 /** Where a newly opened companion window should appear. */
 export type CompanionPlacementMode =
   | 'bottom-right'
@@ -51,6 +108,11 @@ export type CompanionPlacementSettings = {
    * the background never steals focus from what the user is doing.
    */
   bringMainToFront: boolean;
+  /**
+   * Size of a newly opened companion window (a named preset, or custom pixels).
+   * Applies to the next open, never mutating a window the user already resized.
+   */
+  windowSize: CompanionWindowSize;
 };
 
 export const DEFAULT_COMPANION_PLACEMENT_SETTINGS: CompanionPlacementSettings = {
@@ -60,6 +122,7 @@ export const DEFAULT_COMPANION_PLACEMENT_SETTINGS: CompanionPlacementSettings = 
   gapPx: 16,
   rememberPerAgent: false,
   bringMainToFront: false,
+  windowSize: { ...DEFAULT_COMPANION_WINDOW_SIZE },
 };
 
 export const COMPANION_GAP_MIN_PX = 0;
@@ -79,6 +142,46 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
 
 function isMode(value: unknown): value is CompanionPlacementMode {
   return typeof value === 'string' && (COMPANION_PLACEMENT_MODES as readonly string[]).includes(value);
+}
+
+function isSizePreset(value: unknown): value is CompanionSizePreset {
+  return (
+    typeof value === 'string' &&
+    (COMPANION_SIZE_PRESET_IDS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Coerce a persisted/patched window-size block into an effective size.
+ *
+ * A named preset always resolves to its canonical dimensions (so a stale
+ * persisted `width` cannot drift from the preset the user picked); `custom`
+ * takes the stored pixels, clamped into the allowed range. An unknown preset
+ * falls back to the app default.
+ */
+export function normalizeCompanionWindowSize(raw: unknown): CompanionWindowSize {
+  const value = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const preset = isSizePreset(value.preset)
+    ? value.preset
+    : DEFAULT_COMPANION_WINDOW_SIZE.preset;
+  if (preset === 'custom') {
+    return {
+      preset,
+      width: clampNumber(
+        value.width,
+        DEFAULT_COMPANION_WINDOW_SIZE.width,
+        COMPANION_SIZE_MIN.width,
+        COMPANION_SIZE_MAX.width,
+      ),
+      height: clampNumber(
+        value.height,
+        DEFAULT_COMPANION_WINDOW_SIZE.height,
+        COMPANION_SIZE_MIN.height,
+        COMPANION_SIZE_MAX.height,
+      ),
+    };
+  }
+  return { preset, ...COMPANION_SIZE_PRESETS[preset] };
 }
 
 /**
@@ -102,6 +205,7 @@ export function normalizeCompanionPlacementSettings(raw: unknown): CompanionPlac
     ),
     rememberPerAgent: bool('rememberPerAgent'),
     bringMainToFront: bool('bringMainToFront'),
+    windowSize: normalizeCompanionWindowSize(value.windowSize),
   };
 }
 

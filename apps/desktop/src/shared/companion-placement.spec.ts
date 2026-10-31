@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  COMPANION_SIZE_MAX,
+  COMPANION_SIZE_MIN,
+  COMPANION_SIZE_PRESETS,
   DEFAULT_COMPANION_PLACEMENT_SETTINGS,
+  DEFAULT_COMPANION_WINDOW_SIZE,
   avoidOverlap,
   clampToWorkArea,
   computeCompanionBounds,
@@ -39,8 +43,40 @@ describe('normalizeCompanionPlacementSettings', () => {
       gapPx: 200,
       rememberPerAgent: false,
       bringMainToFront: false,
+      windowSize: { ...DEFAULT_COMPANION_WINDOW_SIZE },
     });
     expect(normalizeCompanionPlacementSettings({ gapPx: -5 }).gapPx).toBe(0);
+  });
+
+  it('resolves a named size preset to its canonical dimensions', () => {
+    // A stale persisted width must not survive a preset switch, and the two
+    // non-custom presets must come from the one canonical map.
+    expect(
+      normalizeCompanionPlacementSettings({
+        windowSize: { preset: 'compact', width: 9999, height: 9999 },
+      }).windowSize,
+    ).toEqual({ preset: 'compact', ...COMPANION_SIZE_PRESETS.compact });
+    expect(
+      normalizeCompanionPlacementSettings({ windowSize: { preset: 'large' } }).windowSize,
+    ).toEqual({ preset: 'large', ...COMPANION_SIZE_PRESETS.large });
+  });
+
+  it('clamps a custom size into the allowed range', () => {
+    expect(
+      normalizeCompanionPlacementSettings({
+        windowSize: { preset: 'custom', width: 10, height: 99999 },
+      }).windowSize,
+    ).toEqual({
+      preset: 'custom',
+      width: COMPANION_SIZE_MIN.width,
+      height: COMPANION_SIZE_MAX.height,
+    });
+  });
+
+  it('falls back to the standard preset for an unknown size', () => {
+    expect(normalizeCompanionPlacementSettings({ windowSize: { preset: 'huge' } }).windowSize).toEqual(
+      { ...DEFAULT_COMPANION_WINDOW_SIZE },
+    );
   });
 
   it('defaults to bottom-right without stealing focus', () => {

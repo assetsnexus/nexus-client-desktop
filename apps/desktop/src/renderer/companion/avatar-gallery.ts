@@ -24,6 +24,7 @@ import {
 import {
   localAvatarUrl,
   mappedLocalAvatar,
+  defaultLocalAvatar,
   type LocalAvatarRecord,
   type LocalAvatarsConfig,
 } from '../../shared/local-avatars.js';
@@ -250,19 +251,31 @@ export function buildAvatarChoices(input: {
 
   // The agent's *mapped* library avatar leads the 3D tiles, so the model the
   // user deliberately pinned to this agent is the one that wins the fallback
-  // order (and the one the gallery highlights when nothing is stored). The other
-  // library entries follow, newest last.
+  // order (and the one the gallery highlights when nothing is stored). When the
+  // agent has no model of its own (no mapping, no configured VRM), the user's
+  // configured **library default** leads instead — that is the whole point of the
+  // default: an agent without a model renders as a real 3D avatar rather than
+  // falling back to a profile picture. The other library entries follow.
   const local = input.localAvatars ?? null;
   const mapped = mappedLocalAvatar(local, input.contact?.id);
+  const configuredVrm = readPresenceString(input.presence, 'vrmUrl');
+  const agentVrm = configuredVrm && !isLocalLibraryUrl(configuredVrm) ? configuredVrm : null;
+  const fallbackDefault = mapped || agentVrm ? null : defaultLocalAvatar(local);
+  const leadRecord = mapped ?? fallbackDefault;
   const localRecords: LocalAvatarRecord[] = (local?.avatars ?? []).slice();
-  if (mapped) {
-    localRecords.sort((a, b) => (a.id === mapped.id ? -1 : b.id === mapped.id ? 1 : 0));
+  if (leadRecord) {
+    localRecords.sort((a, b) => (a.id === leadRecord.id ? -1 : b.id === leadRecord.id ? 1 : 0));
   }
   for (const record of localRecords) {
     pushVrm({
       id: `local:${record.id}`,
       kind: 'vrm',
-      label: record.id === mapped?.id ? `${record.label} (this agent)` : record.label,
+      label:
+        record.id === mapped?.id
+          ? `${record.label} (this agent)`
+          : record.id === fallbackDefault?.id
+            ? `${record.label} (default)`
+            : record.label,
       url: localAvatarUrl(record),
       local: true,
       localAvatarId: record.id,
@@ -272,7 +285,6 @@ export function buildAvatarChoices(input: {
     });
   }
 
-  const configuredVrm = readPresenceString(input.presence, 'vrmUrl');
   if (configuredVrm && !isLocalLibraryUrl(configuredVrm)) {
     pushVrm({
       id: 'presence:vrm',

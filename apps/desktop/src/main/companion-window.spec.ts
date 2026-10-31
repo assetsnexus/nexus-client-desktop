@@ -450,6 +450,17 @@ describe('companion window manager', () => {
 describe('companion spawn placement', () => {
   const work = { x: 0, y: 0, width: 1920, height: 1080 };
   const displays = () => ({ primaryWorkArea: work, targetWorkArea: work, allWorkAreas: [work] });
+  /** A placement block with the default size, so tests only state what they vary. */
+  const placement = (
+    over: Partial<import('../shared/companion-placement.js').CompanionPlacementSettings> = {},
+  ) => ({
+    mode: 'bottom-right' as const,
+    gapPx: 16,
+    rememberPerAgent: false,
+    bringMainToFront: false,
+    windowSize: { preset: 'standard' as const, width: 560, height: 740 },
+    ...over,
+  });
 
   it('passes an explicit x/y rather than letting Electron centre the window', () => {
     const m = manager({ getDisplays: displays });
@@ -475,7 +486,7 @@ describe('companion spawn placement', () => {
   it('honours a non-default placement mode from settings', () => {
     const m = manager({
       getDisplays: displays,
-      getPlacement: () => ({ mode: 'top-left', gapPx: 20, rememberPerAgent: false, bringMainToFront: false }),
+      getPlacement: () => placement({ mode: 'top-left', gapPx: 20 }),
     });
     m.open({ contactId: 've-1' });
     const { x, y } = created[0].options as Record<string, number>;
@@ -486,7 +497,7 @@ describe('companion spawn placement', () => {
   it('reopens a remembered agent at its last position', () => {
     const m = manager({
       getDisplays: displays,
-      getPlacement: () => ({ mode: 'remember-last', gapPx: 16, rememberPerAgent: true, bringMainToFront: false }),
+      getPlacement: () => placement({ mode: 'remember-last', rememberPerAgent: true }),
       getRememberedPosition: () => ({ x: 300, y: 240 }),
     });
     m.open({ contactId: 've-1' });
@@ -497,7 +508,7 @@ describe('companion spawn placement', () => {
   it('clamps a remembered position that is now off every display', () => {
     const m = manager({
       getDisplays: displays,
-      getPlacement: () => ({ mode: 'remember-last', gapPx: 16, rememberPerAgent: true, bringMainToFront: false }),
+      getPlacement: () => placement({ mode: 'remember-last', rememberPerAgent: true }),
       getRememberedPosition: () => ({ x: 99_999, y: 500 }),
     });
     m.open({ contactId: 've-1' });
@@ -511,7 +522,7 @@ describe('companion spawn placement', () => {
     const saved: Array<{ contactId: string; x: number; y: number }> = [];
     const m = manager({
       getDisplays: displays,
-      getPlacement: () => ({ mode: 'remember-last', gapPx: 16, rememberPerAgent: true, bringMainToFront: false }),
+      getPlacement: () => placement({ mode: 'remember-last', rememberPerAgent: true }),
       rememberPosition: (contactId, point) => saved.push({ contactId, ...point }),
     });
     m.open({ contactId: 've-1' });
@@ -541,12 +552,51 @@ describe('companion spawn placement', () => {
   it('places a companion right of the main window and flips left when it overflows', () => {
     const m = manager({
       getDisplays: displays,
-      getPlacement: () => ({ mode: 'right-of-main', gapPx: 16, rememberPerAgent: false, bringMainToFront: false }),
+      getPlacement: () => placement({ mode: 'right-of-main' }),
       getMainBounds: () => ({ x: 100, y: 120, width: 800, height: 600 }),
     });
     m.open({ contactId: 've-1' });
     const { x } = created[0].options as Record<string, number>;
     expect(x).toBe(100 + 800 + 16);
+  });
+
+  it('opens at the configured size preset', () => {
+    const m = manager({
+      getDisplays: displays,
+      getPlacement: () =>
+        placement({ windowSize: { preset: 'compact', width: 380, height: 480 } }),
+    });
+    m.open({ contactId: 've-1' });
+    const { width, height } = created[0].options as Record<string, number>;
+    expect({ width, height }).toEqual({ width: 380, height: 480 });
+  });
+
+  it('opens at a custom size, clamped by the display work area', () => {
+    const small = { x: 0, y: 0, width: 500, height: 600 };
+    const m = manager({
+      getDisplays: () => ({ primaryWorkArea: small, targetWorkArea: small, allWorkAreas: [small] }),
+      getPlacement: () =>
+        placement({ windowSize: { preset: 'custom', width: 1600, height: 1400 } }),
+    });
+    m.open({ contactId: 've-1' });
+    const { width, height } = created[0].options as Record<string, number>;
+    // A custom size larger than the display would spawn off-screen; it is
+    // clamped to the work area so the whole window stays reachable.
+    expect(width).toBe(500);
+    expect(height).toBe(600);
+  });
+
+  it('never lets a custom size drop below the Electron minimum', () => {
+    const m = manager({
+      getDisplays: displays,
+      // A hand-edited/legacy block: normalize clamps it, and the manager also
+      // floors at COMPANION_MIN_SIZE so a bottom-right window is not nudged.
+      getPlacement: () => placement({ windowSize: { preset: 'custom', width: 10, height: 10 } }),
+    });
+    m.open({ contactId: 've-1' });
+    const { width, height } = created[0].options as Record<string, number>;
+    expect(width).toBe(380);
+    expect(height).toBe(480);
   });
 });
 

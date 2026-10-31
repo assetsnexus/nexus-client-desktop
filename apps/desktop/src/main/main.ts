@@ -1902,6 +1902,11 @@ function registerIpc(): void {
       typeof avatarId === 'string' && avatarId.trim() ? avatarId : null,
     ),
   );
+  ipcMain.handle(IPC.localAvatarsSetDefault, (_e, avatarId: string | null) =>
+    localAvatarStore.setDefaultAvatar(
+      typeof avatarId === 'string' && avatarId.trim() ? avatarId : null,
+    ),
+  );
   // Companion (or child) window → main shell: open its Settings surface. The
   // gallery links here for the client-remembered agent ↔ avatar mapping. Focus
   // the main window too, so the settings page the user asked for is visible.

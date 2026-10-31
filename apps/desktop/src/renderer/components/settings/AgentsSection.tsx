@@ -27,16 +27,13 @@ import {
   contactTtsNeedsSetup,
   getContactTts,
   listAudioModels,
-  listTtsVoices,
   setContactTts,
   type AudioModelListItem,
   type ContactTtsView,
-  type TtsVoiceListItem,
 } from '@nexus/chat-core';
 import {
   bridge,
   COMPANION_PLACEMENT_MODES,
-  placementModeForContact,
   type CompanionPlacementMode,
   type ContactOverride,
   type ContactOverrides,
@@ -51,6 +48,8 @@ import {
 } from '../../../shared/wake.js';
 import { useI18n, type MessageKey } from '../../i18n/index.js';
 import { createDesktopCommandClient, type DesktopIdentity } from './desktopCommandClient.js';
+import { TtsVoicePicker, TtsVoiceSampleField } from './TtsVoicePicker.js';
+import { ttsModelSupportsVoiceSample } from '../../../shared/tts.js';
 import {
   Field,
   SectionCard,
@@ -81,8 +80,9 @@ type PerAgent = {
   ttsVoiceId: string;
   ttsBusy: boolean;
   ttsError: string | null;
-  voices: TtsVoiceListItem[];
-  voicesLoading: boolean;
+  /** Pending WAV clone sample for the selected model (null = none attached). */
+  sampleRef: { bucketId: string; objectKey: string } | null;
+  sampleTranscript: string;
 };
 
 function blankPerAgent(view: ContactTtsView | null): PerAgent {
@@ -92,8 +92,8 @@ function blankPerAgent(view: ContactTtsView | null): PerAgent {
     ttsVoiceId: view?.ttsVoicePreset ?? '',
     ttsBusy: false,
     ttsError: null,
-    voices: [],
-    voicesLoading: false,
+    sampleRef: view?.voiceSampleRef ?? null,
+    sampleTranscript: view?.voiceSampleTranscript ?? '',
   };
 }
 
@@ -105,6 +105,9 @@ export function AgentsSection() {
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({});
   const [overrides, setOverrides] = useState<ContactOverrides>({});
   const [wake, setWake] = useState<WakeSettings | null>(null);
+  /** The global companion placement mode a per-agent override inherits. */
+  const [globalPlacementMode, setGlobalPlacementMode] =
+    useState<CompanionPlacementMode>('bottom-right');
   const [ttsModels, setTtsModels] = useState<AudioModelListItem[]>([]);
   const [state, setState] = useState<Record<string, PerAgent>>({});
   const [client, setClient] = useState<ReturnType<typeof createDesktopCommandClient> | null>(null);
@@ -130,6 +133,7 @@ export function AgentsSection() {
         setAgents(list);
         setWake(wakeSettings);
         setOverrides(ui.contactOverrides ?? {});
+        setGlobalPlacementMode(ui.companionPlacement.mode);
 
         if (auth.status === 'signed_in') {
           const identity: DesktopIdentity = {
@@ -217,34 +221,50 @@ export function AgentsSection() {
     }));
   }, []);
 
-  const loadVoices = useCallback(
-    async (contactId: string, modelId: string) => {
-      if (!client || !modelId) {
-        update(contactId, { voices: [] });
-        return;
-      }
-      update(contactId, { voicesLoading: true });
-      try {
-        const result = await listTtsVoices(client, { modelId });
-        update(contactId, { voices: result.voices, voicesLoading: false });
-      } catch {
-        update(contactId, { voices: [], voicesLoading: false });
-      }
-    },
-    [client, update],
+  /** The selected model's own capabilities decide whether a sample is offered. */
+  const modelSupportsSample = useCallback(
+    (modelId: string) =>
+      ttsModelSupportsVoiceSample(ttsModels.find((m) => m.id === modelId)?.capabilities),
+    [ttsModels],
   );
 
   const saveTts = useCallback(
     async (contactId: string) => {
       if (!client) return;
       const row = state[contactId];
-      if (!row?.ttsModelId) return;
+      if (!row) return;
+      // An empty model means "inherit the app default" — clearing the override
+      // is exactly that, so route through Clear instead of sending an empty
+      // model id the region would reject.
+      if (!row.ttsModelId) {
+        update(contactId, { ttsBusy: true, ttsError: null });
+        try {
+          const view = await clearContactTts(client, { agentId: contactId });
+          update(contactId, {
+            tts: view,
+            ttsModelId: '',
+            ttsVoiceId: '',
+            sampleRef: null,
+            sampleTranscript: '',
+            ttsBusy: false,
+          });
+        } catch (err) {
+          update(contactId, {
+            ttsBusy: false,
+            ttsError: err instanceof Error ? err.message : t('settings.agents.tts.failed'),
+          });
+        }
+        return;
+      }
       update(contactId, { ttsBusy: true, ttsError: null });
       try {
         const view = await setContactTts(client, {
           agentId: contactId,
           ttsModelId: row.ttsModelId,
           ttsVoicePreset: row.ttsVoiceId || null,
+          voiceSampleRef: row.sampleRef,
+          voiceSampleTranscript: row.sampleTranscript.trim() || null,
+          clearVoiceSample: !row.sampleRef,
         });
         update(contactId, { tts: view, ttsBusy: false });
       } catch (err) {
@@ -263,7 +283,14 @@ export function AgentsSection() {
       update(contactId, { ttsBusy: true, ttsError: null });
       try {
         const view = await clearContactTts(client, { agentId: contactId });
-        update(contactId, { tts: view, ttsModelId: '', ttsVoiceId: '', voices: [], ttsBusy: false });
+        update(contactId, {
+          tts: view,
+          ttsModelId: '',
+          ttsVoiceId: '',
+          sampleRef: null,
+          sampleTranscript: '',
+          ttsBusy: false,
+        });
       } catch (err) {
         update(contactId, {
           ttsBusy: false,
@@ -294,7 +321,7 @@ export function AgentsSection() {
 
   // The global placement mode the per-agent override inherits (shown in the
   // "inherit" option so the user sees what the default actually is).
-  const inheritMode = placementModeForContact({ overrides: {}, contactId: null, globalMode: 'bottom-right' });
+  const inheritMode = globalPlacementMode;
 
   return (
     <SectionCard title={t('settings.agents')} help={t('settings.agents.help')}>
@@ -314,7 +341,11 @@ export function AgentsSection() {
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {/* Avatar from the local library. */}
-              <Field label={t('settings.agents.avatar')} rowStyle={{ ...agentField, flex: 1, minWidth: 180 }}>
+              <Field
+                label={t('settings.agents.avatar')}
+                hint={t('settings.agents.avatar.fallback')}
+                rowStyle={{ ...agentField, flex: 1, minWidth: 180 }}
+              >
                 <select
                   style={settingsInput}
                   value={avatarValue}
@@ -380,53 +411,37 @@ export function AgentsSection() {
               <span style={settingsHint}>{t('settings.agents.wakeAliases.help')}</span>
             </div>
 
-            {/* Reply voice (contact-level TTS override). */}
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <Field label={t('settings.agents.ttsModel')} rowStyle={{ ...agentField, flex: 1, minWidth: 180 }}>
-                <select
-                  style={settingsInput}
-                  value={row.ttsModelId}
-                  disabled={row.ttsBusy || !client}
-                  onChange={(e) => {
-                    update(agent.contactId, { ttsModelId: e.target.value });
-                    void loadVoices(agent.contactId, e.target.value);
-                  }}
-                >
-                  <option value="">{t('settings.agents.tts.inherit')}</option>
-                  {runnableTtsModels.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.displayName || m.id}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label={t('settings.agents.ttsVoice')} rowStyle={{ ...agentField, flex: 1, minWidth: 180 }}>
-                <select
-                  style={settingsInput}
-                  value={row.ttsVoiceId}
-                  disabled={row.ttsBusy || !row.voices.length}
-                  onChange={(e) => update(agent.contactId, { ttsVoiceId: e.target.value })}
-                >
-                  <option value="">
-                    {row.voicesLoading
-                      ? t('settings.loading')
-                      : row.voices.length
-                        ? t('settings.agents.ttsVoice.default')
-                        : t('settings.agents.ttsVoice.none')}
-                  </option>
-                  {row.voices.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.title || v.id}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
+            {/* Reply voice (contact-level TTS override). Same picker as the app
+                default, so a voice behaves identically here and there — plus the
+                WAV voice-clone sample for models that support it. */}
+            <TtsVoicePicker
+              client={client}
+              models={runnableTtsModels}
+              modelId={row.ttsModelId}
+              voiceId={row.ttsVoiceId}
+              disabled={row.ttsBusy}
+              noneLabel={t('settings.agents.tts.inherit')}
+              voiceSampleRef={row.sampleRef}
+              voiceSampleTranscript={row.sampleTranscript}
+              onModelChange={(modelId) => update(agent.contactId, { ttsModelId: modelId })}
+              onVoiceChange={(voiceId) => update(agent.contactId, { ttsVoiceId: voiceId })}
+            />
+            <TtsVoiceSampleField
+              client={client}
+              disabled={row.ttsBusy}
+              supportsSample={modelSupportsSample(row.ttsModelId)}
+              canSet={row.tts?.canSetVoiceSample !== false}
+              currentRef={row.sampleRef}
+              transcript={row.sampleTranscript}
+              onRefChange={(ref) => update(agent.contactId, { sampleRef: ref })}
+              onTranscriptChange={(text) => update(agent.contactId, { sampleTranscript: text })}
+              onClear={() => update(agent.contactId, { sampleRef: null, sampleTranscript: '' })}
+            />
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 style={settingsButton}
-                disabled={row.ttsBusy || !row.ttsModelId || !client}
+                disabled={row.ttsBusy || !client}
                 onClick={() => void saveTts(agent.contactId)}
               >
                 {t('settings.agents.tts.save')}

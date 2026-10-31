@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createMessageSpeaker, type SpeakController } from './speak.js';
+import { createMessageSpeaker, type SpeakController, type SpeakTurnFactory } from './speak.js';
 
 function controllerOf(overrides: Partial<SpeakController> = {}): SpeakController {
   return {
@@ -17,7 +17,12 @@ function factoryOf(impl?: SpeakController) {
     if (!byAgent.has(key)) byAgent.set(key, impl ?? controllerOf());
     return byAgent.get(key) as SpeakController;
   });
-  return { factory, byAgent };
+  return { factory: factory as unknown as SpeakTurnFactory, byAgent };
+}
+
+/** Flush the microtask chain a speak() pass walks (controller creation awaits). */
+async function flush(times = 6): Promise<void> {
+  for (let i = 0; i < times; i += 1) await Promise.resolve();
 }
 
 describe('createMessageSpeaker', () => {
@@ -25,9 +30,14 @@ describe('createMessageSpeaker', () => {
     const { factory, byAgent } = factoryOf();
     const speaker = createMessageSpeaker({ createSpeakTurn: factory });
     speaker.speak('hello', 'agent-1');
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(factory).toHaveBeenCalledWith({ agentId: 'agent-1' });
+    await flush();
+    expect(factory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'agent-1',
+        fallbackModelId: null,
+        fallbackVoiceId: null,
+      }),
+    );
     expect(byAgent.get('agent-1')?.speak).toHaveBeenCalledWith('hello');
   });
 
@@ -35,11 +45,9 @@ describe('createMessageSpeaker', () => {
     const { factory } = factoryOf();
     const speaker = createMessageSpeaker({ createSpeakTurn: factory });
     speaker.speak('one', 'agent-1');
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     speaker.speak('two', 'agent-1');
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     expect(factory).toHaveBeenCalledTimes(1);
   });
 
@@ -47,7 +55,7 @@ describe('createMessageSpeaker', () => {
     const { factory } = factoryOf();
     const speaker = createMessageSpeaker({ createSpeakTurn: factory });
     speaker.speak('   ', 'agent-1');
-    await Promise.resolve();
+    await flush();
     expect(factory).not.toHaveBeenCalled();
   });
 
@@ -64,12 +72,11 @@ describe('createMessageSpeaker', () => {
     const { factory, byAgent } = factoryOf(first);
     const speaker = createMessageSpeaker({ createSpeakTurn: factory });
     speaker.speak('first', 'a');
-    await Promise.resolve();
+    await flush();
     speaker.speak('second', 'a');
     speaker.cancel();
     resolveFirst();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     // The replaced text never reached the controller (cancel cleared the queue).
     expect(byAgent.get('a')?.speak).toHaveBeenCalledTimes(1);
     expect(byAgent.get('a')?.speak).toHaveBeenCalledWith('first');
@@ -84,12 +91,9 @@ describe('createMessageSpeaker', () => {
     const { factory, byAgent } = factoryOf(failing);
     const speaker = createMessageSpeaker({ createSpeakTurn: factory });
     speaker.speak('first', 'a');
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     speaker.speak('second', 'a');
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     expect(byAgent.get('a')?.speak).toHaveBeenCalledTimes(2);
   });
 
@@ -106,11 +110,119 @@ describe('createMessageSpeaker', () => {
     const { factory } = factoryOf(first);
     const speaker = createMessageSpeaker({ createSpeakTurn: factory });
     speaker.speak('one', 'a');
-    await Promise.resolve();
+    await flush();
     expect(speaker.isBusy()).toBe(true);
     resolveFirst();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     expect(speaker.isBusy()).toBe(false);
+  });
+
+  it('passes the app-default model + voice to a new agent controller', async () => {
+    const { factory } = factoryOf();
+    const speaker = createMessageSpeaker({
+      createSpeakTurn: factory,
+      resolveFallback: () => ({ modelId: 'fish-s1', voiceId: 'ref-42' }),
+    });
+    speaker.speak('hi', 'agent-7');
+    await flush();
+    expect(factory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'agent-7',
+        fallbackModelId: 'fish-s1',
+        fallbackVoiceId: 'ref-42',
+      }),
+    );
+  });
+
+  it('carries the app-default clone sample onto a new agent controller', async () => {
+    const { factory } = factoryOf();
+    const speaker = createMessageSpeaker({
+      createSpeakTurn: factory,
+      resolveFallback: () => ({
+        modelId: 'fish-s1',
+        voiceId: null,
+        voiceSampleRef: { bucketId: 'ws', objectKey: 'a.wav' },
+        voiceSampleTranscript: 'words',
+      }),
+    });
+    speaker.speak('hi', 'agent-7');
+    await flush();
+    expect(factory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fallbackVoiceSampleRef: { bucketId: 'ws', objectKey: 'a.wav' },
+        fallbackVoiceSampleTranscript: 'words',
+      }),
+    );
+  });
+
+  it('resolves the fallback fresh per new agent (settings change applies)', async () => {
+    const { factory } = factoryOf();
+    let fallback: { modelId: string; voiceId: string | null } = { modelId: 'm1', voiceId: 'v1' };
+    const speaker = createMessageSpeaker({
+      createSpeakTurn: factory,
+      resolveFallback: () => fallback,
+    });
+    speaker.speak('one', 'a');
+    await flush();
+    fallback = { modelId: 'm2', voiceId: 'v2' };
+    speaker.speak('two', 'b');
+    await flush();
+    expect(factory).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        agentId: 'a',
+        fallbackModelId: 'm1',
+        fallbackVoiceId: 'v1',
+      }),
+    );
+    expect(factory).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        agentId: 'b',
+        fallbackModelId: 'm2',
+        fallbackVoiceId: 'v2',
+      }),
+    );
+  });
+
+  it('forgets a cached fallback across reset() (identity switch)', async () => {
+    const { factory } = factoryOf();
+    let fallback: { modelId: string; voiceId: string | null } = { modelId: 'm1', voiceId: 'v1' };
+    const speaker = createMessageSpeaker({
+      createSpeakTurn: factory,
+      resolveFallback: () => fallback,
+    });
+    speaker.speak('one', 'a');
+    await flush();
+    speaker.reset();
+    fallback = { modelId: 'm2', voiceId: null };
+    speaker.speak('two', 'a');
+    await flush();
+    expect(factory).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        agentId: 'a',
+        fallbackModelId: 'm2',
+        fallbackVoiceId: null,
+      }),
+    );
+  });
+
+  it('still speaks when the fallback read fails', async () => {
+    const { factory } = factoryOf();
+    const speaker = createMessageSpeaker({
+      createSpeakTurn: factory,
+      resolveFallback: () => {
+        throw new Error('settings unavailable');
+      },
+    });
+    speaker.speak('hello', 'a');
+    await flush();
+    expect(factory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'a',
+        fallbackModelId: null,
+        fallbackVoiceId: null,
+      }),
+    );
   });
 });

@@ -21,7 +21,7 @@ function makeModel(dir: string, name: string): string {
 describe('createLocalAvatarStore', () => {
   it('starts empty and copies a picked model into the library', () => {
     const { store, libraryDir } = makeStore();
-    expect(store.get()).toEqual({ avatars: [], contactMappings: {} });
+    expect(store.get()).toEqual({ avatars: [], contactMappings: {}, defaultAvatarId: null });
 
     const source = makeModel(join(libraryDir, '..'), 'Aria.VRM');
     const next = store.addFile(source);
@@ -85,7 +85,7 @@ describe('createLocalAvatarStore', () => {
     const { store, path } = makeStore();
     store.get();
     writeFileSync(path, '{ not json');
-    expect(store.get()).toEqual({ avatars: [], contactMappings: {} });
+    expect(store.get()).toEqual({ avatars: [], contactMappings: {}, defaultAvatarId: null });
     // A subsequent write repairs the file.
     const model = join(path, '..', 'Aria.vrm');
     writeFileSync(model, 'glTF');

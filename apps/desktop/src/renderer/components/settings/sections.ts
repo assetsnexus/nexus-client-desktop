@@ -7,6 +7,7 @@
  * can render before any section is opened.
  */
 
+import { createContext, useContext } from 'react';
 import type { MessageKey } from '../../i18n/index.js';
 
 export type SettingsSectionId =
@@ -73,3 +74,16 @@ export const SETTINGS_NAV: readonly SettingsNavEntry[] = [
 ];
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = 'general';
+
+/**
+ * Lets a section deep-link to another (e.g. the Companion section's "wake
+ * words"/"notifications" links). The shell provides the setter; a section with
+ * no provider (a unit test rendering one section alone) gets a no-op, so the
+ * link still renders and simply does nothing.
+ */
+export const SettingsNavContext = createContext<(id: SettingsSectionId) => void>(() => {});
+
+/** The section-navigation callback, safe to call without a provider. */
+export function useSettingsNav(): (id: SettingsSectionId) => void {
+  return useContext(SettingsNavContext);
+}

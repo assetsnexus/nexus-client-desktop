@@ -17,6 +17,19 @@ import {
 
 const contact = { id: 've-1', name: 'Aria', avatarUrl: 'https://cdn/a.png' };
 
+/** A minimal local avatar library record (the gallery reads id/label/kind). */
+function record(id: string, label: string) {
+  return {
+    id,
+    label,
+    kind: 'vrm' as const,
+    filePath: `/lib/${id}.vrm`,
+    fileName: `${id}.vrm`,
+    sizeBytes: 1,
+    addedAt: 0,
+  };
+}
+
 function asset(over: Partial<CompanionAvatarAsset>): CompanionAvatarAsset {
   return { id: 'asset-1', kind: 'vrm', url: 'https://cdn/model.vrm', ...over };
 }
@@ -86,6 +99,53 @@ describe('companion avatar gallery — choices', () => {
     expect(buildAvatarChoices({ contact }).map((c) => c.kind)).toEqual(['image']);
     expect(buildAvatarChoices({ contact: { id: 'x', name: 'X' } })).toEqual([]);
     expect(buildAvatarChoices({ contact: null })).toEqual([]);
+  });
+
+  it('leads with the library default when an agent has no model of its own', () => {
+    const library = {
+      avatars: [record('aria', 'Aria'), record('kira', 'Kira')],
+      contactMappings: {},
+      defaultAvatarId: 'kira',
+    };
+    const choices = buildAvatarChoices({ contact, localAvatars: library });
+    // The default model is the first 3D tile (and labelled as the default), so an
+    // agent with no VRM still resolves to a real 3D avatar rather than the image.
+    const vrm = choices.filter((c) => c.kind === 'vrm');
+    expect(vrm[0]).toMatchObject({ local: true, localAvatarId: 'kira', label: 'Kira (default)' });
+    expect(resolveAvatarSelection(choices, null)?.choice.kind).toBe('vrm');
+  });
+
+  it('prefers an agent-specific mapping over the library default', () => {
+    const library = {
+      avatars: [record('aria', 'Aria'), record('kira', 'Kira')],
+      contactMappings: { [contact.id]: 'aria' },
+      defaultAvatarId: 'kira',
+    };
+    const choices = buildAvatarChoices({ contact, localAvatars: library });
+    // The image still leads (a profile picture exists); the *first 3D tile* is
+    // the agent's own mapping, not the library default.
+    const vrm = choices.filter((c) => c.kind === 'vrm');
+    expect(vrm[0]).toMatchObject({ localAvatarId: 'aria', label: 'Aria (this agent)' });
+    expect(vrm[1]).toMatchObject({ localAvatarId: 'kira', label: 'Kira' });
+  });
+
+  it('does not apply the default when the agent already has its own VRM', () => {
+    const library = {
+      avatars: [record('kira', 'Kira')],
+      contactMappings: {},
+      defaultAvatarId: 'kira',
+    };
+    const choices = buildAvatarChoices({
+      contact,
+      presence: { v: 1, vrmUrl: 'https://cdn/agent.vrm' },
+      localAvatars: library,
+    });
+    // The library entry is still offered (it is a selectable model), but it is
+    // *not* promoted or labelled as the fallback default — the agent's own VRM
+    // keeps that role, so nothing here claims "Kira (default)".
+    const vrm = choices.filter((c) => c.kind === 'vrm');
+    expect(vrm.map((c) => c.id)).toEqual(['local:kira', 'presence:vrm']);
+    expect(vrm.some((c) => /\(default\)$/.test(c.label))).toBe(false);
   });
 
   it('classifies avatar model kinds (only vrm is an avatar; gestures are not)', () => {

@@ -88,13 +88,32 @@ describe('normalizeLocalAvatarsConfig', () => {
   });
 
   it('returns an empty config for anything that is not an object', () => {
-    expect(normalizeLocalAvatarsConfig(undefined)).toEqual({ avatars: [], contactMappings: {} });
+    expect(normalizeLocalAvatarsConfig(undefined)).toEqual({
+      avatars: [],
+      contactMappings: {},
+      defaultAvatarId: null,
+    });
     expect(normalizeContactMappings([1, 2])).toEqual({});
+  });
+
+  it('keeps a default avatar only while it is still in the library', () => {
+    expect(
+      normalizeLocalAvatarsConfig({ avatars: [record()], defaultAvatarId: 'aria' }).defaultAvatarId,
+    ).toBe('aria');
+    // A dangling default (its file was removed) must not survive as a ghost.
+    expect(
+      normalizeLocalAvatarsConfig({ avatars: [record()], defaultAvatarId: 'gone' }).defaultAvatarId,
+    ).toBeNull();
+    expect(normalizeLocalAvatarsConfig({ avatars: [record()] }).defaultAvatarId).toBeNull();
   });
 });
 
 describe('mappings', () => {
-  const config = { avatars: [record()], contactMappings: { 'agent-a': 'aria', 'agent-b': 'gone' } };
+  const config = {
+    avatars: [record()],
+    contactMappings: { 'agent-a': 'aria', 'agent-b': 'gone' },
+    defaultAvatarId: null,
+  };
 
   it('resolves a mapping only when the target is still in the library', () => {
     expect(mappedAvatarId(config, 'agent-a')).toBe('aria');

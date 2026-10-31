@@ -21,7 +21,18 @@ export type SpeakController = {
   cancel(): Promise<void> | void;
 };
 
-export type SpeakTurnFactory = (input: { agentId: string | null }) => SpeakController;
+export type SpeakTurnFactory = (input: {
+  agentId: string | null;
+  /**
+   * App-default model/voice for an agent with no voice of its own. Applied by
+   * the injected controller only when the contact has no model of its own.
+   */
+  fallbackModelId?: string | null;
+  fallbackVoiceId?: string | null;
+  /** App-default WAV clone sample, used only while the fallback model is in effect. */
+  fallbackVoiceSampleRef?: { bucketId: string; objectKey: string } | null;
+  fallbackVoiceSampleTranscript?: string | null;
+}) => SpeakController;
 
 export type MessageSpeaker = ReturnType<typeof createMessageSpeaker>;
 
@@ -30,7 +41,29 @@ export type MessageSpeaker = ReturnType<typeof createMessageSpeaker>;
  * agent whose previous turn is still playing replaces its pending text (a burst
  * of replies reads as the latest one, not a backlog).
  */
-export function createMessageSpeaker(deps: { createSpeakTurn: SpeakTurnFactory }) {
+export function createMessageSpeaker(deps: {
+  createSpeakTurn: SpeakTurnFactory;
+  /**
+   * Current app-default voice (model + voice) for an agent with no voice of its
+   * own. Read fresh when a controller is first created for an agent, so a change
+   * made in settings applies to the next new message without rebuilding chat;
+   * `reset()` drops the cached controllers on an identity switch.
+   */
+  resolveFallback?: () =>
+    | {
+        modelId: string | null;
+        voiceId: string | null;
+        voiceSampleRef?: { bucketId: string; objectKey: string } | null;
+        voiceSampleTranscript?: string | null;
+      }
+    | null
+    | Promise<{
+        modelId: string | null;
+        voiceId: string | null;
+        voiceSampleRef?: { bucketId: string; objectKey: string } | null;
+        voiceSampleTranscript?: string | null;
+      } | null>;
+}) {
   const controllers = new Map<string, SpeakController>();
   /** Per-agent pending text; the newest message wins over an unstarted older one. */
   const pending = new Map<string, string>();
@@ -40,11 +73,30 @@ export function createMessageSpeaker(deps: { createSpeakTurn: SpeakTurnFactory }
 
   const keyOf = (agentId: string | null): string => agentId ?? '__default__';
 
-  function controllerFor(agentId: string | null): SpeakController {
+  async function controllerFor(agentId: string | null): Promise<SpeakController> {
     const key = keyOf(agentId);
     let controller = controllers.get(key);
     if (!controller) {
-      controller = deps.createSpeakTurn({ agentId });
+      let fallback: {
+        modelId: string | null;
+        voiceId: string | null;
+        voiceSampleRef?: { bucketId: string; objectKey: string } | null;
+        voiceSampleTranscript?: string | null;
+      } | null = null;
+      try {
+        fallback = (await deps.resolveFallback?.()) ?? null;
+      } catch {
+        // A settings read failure must not stop playback: speak with the agent's
+        // own voice (the controller then reports needs_setup if it has none).
+        fallback = null;
+      }
+      controller = deps.createSpeakTurn({
+        agentId,
+        fallbackModelId: fallback?.modelId ?? null,
+        fallbackVoiceId: fallback?.voiceId ?? null,
+        fallbackVoiceSampleRef: fallback?.voiceSampleRef ?? null,
+        fallbackVoiceSampleTranscript: fallback?.voiceSampleTranscript ?? null,
+      });
       controllers.set(key, controller);
     }
     return controller;
@@ -61,7 +113,8 @@ export function createMessageSpeaker(deps: { createSpeakTurn: SpeakTurnFactory }
         pending.delete(agentId);
         if (!text) continue;
         try {
-          await controllerFor(agentId === '__default__' ? null : agentId).speak(text);
+          const controller = await controllerFor(agentId === '__default__' ? null : agentId);
+          await controller.speak(text);
         } catch {
           // A failed TTS turn (no model configured, device busy) must not wedge
           // the queue: drop it and move on to the next message.

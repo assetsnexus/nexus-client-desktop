@@ -253,6 +253,8 @@ const bridge: NexusBridge = {
   localAvatarsRemove: (id) => ipcRenderer.invoke(IPC.localAvatarsRemove, id),
   localAvatarsSetMapping: (contactId, avatarId) =>
     ipcRenderer.invoke(IPC.localAvatarsSetMapping, contactId, avatarId),
+  localAvatarsSetDefault: (avatarId) =>
+    ipcRenderer.invoke(IPC.localAvatarsSetDefault, avatarId),
   openSettings: () => ipcRenderer.invoke(IPC.openSettings),
   onOpenSettings: (listener) => {
     const handler = () => listener();

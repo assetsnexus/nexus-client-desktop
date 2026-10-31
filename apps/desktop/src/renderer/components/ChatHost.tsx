@@ -30,6 +30,7 @@ import { setToolAuditContext, resolveToolAuditContext } from '../tools/audit-con
 import { createDesktopChatCacheAdapter } from '../chat-cache-adapter.js';
 import { createIncomingWatcher, resolveSenderName } from '../notifications/incoming.js';
 import { createMessageSpeaker } from '../notifications/speak.js';
+import { resolveAppDefaultTts } from '../../shared/tts.js';
 import { resolveCompanionLabelOrNull } from '../../shared/companion-label.js';
 import { createWakeChatRouter } from '../wake/router.js';
 import { bindWakeThread, resolveWakeSendConversationId } from '../wake/thread-binding.js';
@@ -188,9 +189,26 @@ export function ChatHost({
   useEffect(() => {
     if (!chat) return;
     const speaker = createMessageSpeaker({
-      createSpeakTurn: ({ agentId }) =>
+      // The app-default voice is read fresh per new agent controller so a pick
+      // made in settings applies without rebuilding the chat client.
+      resolveFallback: async () => {
+        const settings = await bridge.getUiSettings().catch(() => null);
+        return resolveAppDefaultTts(settings?.appDefaultTts ?? null);
+      },
+      createSpeakTurn: ({        agentId,
+        fallbackModelId,
+        fallbackVoiceId,
+        fallbackVoiceSampleRef,
+        fallbackVoiceSampleTranscript,
+      }) =>
         typeof chat.createSpeakTurn === 'function'
-          ? chat.createSpeakTurn({ agentId })
+          ? chat.createSpeakTurn({
+              agentId,
+              fallbackModelId,
+              fallbackVoiceId,
+              fallbackVoiceSampleRef,
+              fallbackVoiceSampleTranscript,
+            })
           : { speak: async () => undefined, cancel: () => undefined },
     });
     messageSpeakerRef.current = speaker;

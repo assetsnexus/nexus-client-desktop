@@ -30,6 +30,7 @@ import { SecuritySection } from './settings/SecuritySection.js';
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_NAV,
+  SettingsNavContext,
   type SettingsSectionId,
 } from './settings/sections.js';
 import { WakeSettingsPanel } from './WakeSettingsPanel.js';
@@ -183,22 +184,24 @@ export function SettingsPanel({
 
         <div style={detail}>
           <ErrorBoundary key={activeEntry.id} label={t(activeEntry.labelKey)}>
-            {active === 'general' ? <GeneralSection /> : null}
-            {active === 'notifications' ? <NotificationsSection /> : null}
-            {active === 'companion' ? <CompanionSection /> : null}
-            {active === 'agents' ? <AgentsSection /> : null}
-            {active === 'wake' ? <WakeSettingsPanel /> : null}
-            {active === 'localAi' ? <LocalAiSection /> : null}
-            {active === 'integrations' ? <IntegrationsSection /> : null}
-            {active === 'security' ? <SecuritySection /> : null}
-            {active === 'connection' ? (
-              <ConnectionSection
-                connection={connection}
-                onConnectionChange={onConnectionChange}
-                onClose={onClose}
-              />
-            ) : null}
-            {active === 'developer' ? <DeveloperSection /> : null}
+            <SettingsNavContext.Provider value={setActive}>
+              {active === 'general' ? <GeneralSection /> : null}
+              {active === 'notifications' ? <NotificationsSection /> : null}
+              {active === 'companion' ? <CompanionSection /> : null}
+              {active === 'agents' ? <AgentsSection /> : null}
+              {active === 'wake' ? <WakeSettingsPanel /> : null}
+              {active === 'localAi' ? <LocalAiSection /> : null}
+              {active === 'integrations' ? <IntegrationsSection /> : null}
+              {active === 'security' ? <SecuritySection /> : null}
+              {active === 'connection' ? (
+                <ConnectionSection
+                  connection={connection}
+                  onConnectionChange={onConnectionChange}
+                  onClose={onClose}
+                />
+              ) : null}
+              {active === 'developer' ? <DeveloperSection /> : null}
+            </SettingsNavContext.Provider>
           </ErrorBoundary>
         </div>
       </div>

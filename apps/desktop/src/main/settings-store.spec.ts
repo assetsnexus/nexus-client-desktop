@@ -23,6 +23,7 @@ describe('createSettingsStore — ui settings', () => {
       gapPx: 16,
       rememberPerAgent: false,
       bringMainToFront: false,
+      windowSize: { preset: 'standard', width: 560, height: 740 },
     });
   });
 
@@ -30,7 +31,13 @@ describe('createSettingsStore — ui settings', () => {
     const path = tempFile();
     const store = createSettingsStore(path);
     const next = store.setUiSettings({
-      companionPlacement: { mode: 'center', gapPx: 24, rememberPerAgent: true, bringMainToFront: true },
+      companionPlacement: {
+        mode: 'center',
+        gapPx: 24,
+        rememberPerAgent: true,
+        bringMainToFront: true,
+        windowSize: { preset: 'compact', width: 999, height: 999 },
+      },
     });
     expect(next.companionPlacement.mode).toBe('center');
     expect(createSettingsStore(path).getUiSettings().companionPlacement).toEqual({
@@ -38,6 +45,9 @@ describe('createSettingsStore — ui settings', () => {
       gapPx: 24,
       rememberPerAgent: true,
       bringMainToFront: true,
+      // A named preset always resolves to its canonical pixels, never the
+      // stale values that were submitted alongside it.
+      windowSize: { preset: 'compact', width: 380, height: 480 },
     });
     // A bogus mode falls back to the default rather than reaching the window code.
     writeFileSync(path, JSON.stringify({ ui: { companionPlacement: { mode: 'moon', gapPx: -3 } } }), 'utf8');
@@ -139,5 +149,119 @@ describe('createSettingsStore — ui settings', () => {
     });
     expect(next.companionAvatar.gazeYawMaxDeg).toBe(60);
     expect(next.companionAvatar.gazePitchMaxDeg).toBe(8);
+  });
+
+  it('defaults the app reply voice to off and unset', () => {
+    const ui = createSettingsStore(tempFile()).getUiSettings();
+    expect(ui.appDefaultTts).toEqual({
+      enabled: false,
+      modelId: null,
+      voiceId: null,
+      voiceSampleRef: null,
+      voiceSampleTranscript: null,
+    });
+  });
+
+  it('persists an app reply voice choice', () => {
+    const path = tempFile();
+    const next = createSettingsStore(path).setUiSettings({
+      appDefaultTts: {
+        enabled: true,
+        modelId: 'fish-s1',
+        voiceId: 'ref-42',
+        voiceSampleRef: null,
+        voiceSampleTranscript: null,
+      },
+    });
+    expect(next.appDefaultTts).toEqual({
+      enabled: true,
+      modelId: 'fish-s1',
+      voiceId: 'ref-42',
+      voiceSampleRef: null,
+      voiceSampleTranscript: null,
+    });
+    expect(createSettingsStore(path).getUiSettings().appDefaultTts).toEqual({
+      enabled: true,
+      modelId: 'fish-s1',
+      voiceId: 'ref-42',
+      voiceSampleRef: null,
+      voiceSampleTranscript: null,
+    });
+  });
+
+  it('persists an app reply voice clone sample', () => {
+    const path = tempFile();
+    const next = createSettingsStore(path).setUiSettings({
+      appDefaultTts: {
+        enabled: true,
+        modelId: 'fish-s1',
+        voiceId: null,
+        voiceSampleRef: { bucketId: 'ws', objectKey: 'a.wav' },
+        voiceSampleTranscript: 'words',
+      },
+    });
+    expect(next.appDefaultTts).toEqual({
+      enabled: true,
+      modelId: 'fish-s1',
+      voiceId: null,
+      voiceSampleRef: { bucketId: 'ws', objectKey: 'a.wav' },
+      voiceSampleTranscript: 'words',
+    });
+  });
+
+  it('drops an app reply voice with no model, keeping a disabled pick', () => {
+    // A voice without a model is meaningless (the voice list belongs to a model).
+    expect(
+      createSettingsStore(tempFile()).setUiSettings({
+        appDefaultTts: {
+          enabled: true,
+          modelId: null,
+          voiceId: 'orphan',
+          voiceSampleRef: null,
+          voiceSampleTranscript: null,
+        },
+      }).appDefaultTts,
+    ).toEqual({
+      enabled: true,
+      modelId: null,
+      voiceId: null,
+      voiceSampleRef: null,
+      voiceSampleTranscript: null,
+    });
+    // A disabled block still keeps model + voice so re-enabling restores them.
+    const path = tempFile();
+    expect(
+      createSettingsStore(path).setUiSettings({
+        appDefaultTts: {
+          enabled: false,
+          modelId: 'm',
+          voiceId: 'v',
+          voiceSampleRef: null,
+          voiceSampleTranscript: null,
+        },
+      }).appDefaultTts,
+    ).toEqual({
+      enabled: false,
+      modelId: 'm',
+      voiceId: 'v',
+      voiceSampleRef: null,
+      voiceSampleTranscript: null,
+    });
+  });
+
+  it('repairs a hand-edited app reply voice block', () => {
+    const path = tempFile();
+    writeFileSync(
+      path,
+      JSON.stringify({ ui: { appDefaultTts: { enabled: 'yes', modelId: 42, voiceId: '' } } }),
+      'utf8',
+    );
+    expect(createSettingsStore(path).getUiSettings().appDefaultTts).toEqual({
+      enabled: false,
+      modelId: null,
+      voiceId: null,
+      voiceSampleRef: null,
+      voiceSampleTranscript: null,
+    });
   });
 });

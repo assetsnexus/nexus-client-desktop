@@ -17,7 +17,6 @@ import { join } from 'node:path';
 import {
   buildCompanionHash,
   buildCompanionToolHash,
-  COMPANION_DEFAULT_SIZE,
   COMPANION_MIN_SIZE,
   companionLabelCandidates,
   companionToolWindowTitle,
@@ -106,6 +105,24 @@ function resolveDisplays(options: CompanionWindowOptions): {
       ? screen.getDisplayMatching(mainBounds).workArea
       : primaryWorkArea;
   return { primaryWorkArea, targetWorkArea, allWorkAreas };
+}
+
+/**
+ * Resolve the size a newly opened companion should use: the user's configured
+ * preset/custom pixels, falling back to the built-in default when placement
+ * settings are unavailable. Never smaller than {@link COMPANION_MIN_SIZE} — a
+ * window Electron would refuse to shrink below would otherwise be repositioned
+ * out of the corner it was placed in.
+ */
+function resolveCompanionSize(options: CompanionWindowOptions): { width: number; height: number } {
+  const placement = options.getPlacement
+    ? options.getPlacement()
+    : DEFAULT_COMPANION_PLACEMENT_SETTINGS;
+  const size = normalizeCompanionPlacementSettings(placement).windowSize;
+  return {
+    width: Math.max(COMPANION_MIN_SIZE.width, size.width),
+    height: Math.max(COMPANION_MIN_SIZE.height, size.height),
+  };
 }
 
 export type CompanionWindowManager = ReturnType<typeof createCompanionWindowManager>;
@@ -339,7 +356,7 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
       return { opened: false, contactId: launch.contactId };
     }
 
-    const { width, height } = COMPANION_DEFAULT_SIZE;
+    const { width, height } = resolveCompanionSize(options);
     const { targetWorkArea } = resolveDisplays(options);
     const size = { width: Math.min(width, targetWorkArea.width), height: Math.min(height, targetWorkArea.height) };
     const { x, y } = resolveSpawn(launch.contactId, size);
