@@ -73,6 +73,8 @@ import {
   localAvatarCorsHeaders,
   localAvatarFileNameFromPath,
   normalizeCompanionToolId,
+  placementModeForContact,
+  shouldOpenCompanionForContact,
   type CompanionToolLaunch,
 } from '../shared/ipc.js';
 import { createGlobalPointerSource } from './global-pointer.js';
@@ -477,6 +479,14 @@ const companionWindows = createCompanionWindowManager({
   // `right-of-main`), and the per-agent remembered spot — all read fresh per open
   // so a settings change applies to the next companion without a restart.
   getPlacement: () => settings.getUiSettings().companionPlacement,
+  getContactPlacementMode: (contactId) => {
+    const ui = settings.getUiSettings();
+    return placementModeForContact({
+      overrides: ui.contactOverrides,
+      contactId,
+      globalMode: ui.companionPlacement.mode,
+    });
+  },
   getMainBounds: () => {
     if (!mainWindow || mainWindow.isDestroyed()) return null;
     return mainWindow.getBounds();
@@ -1385,19 +1395,30 @@ function registerIpc(): void {
         return { raised: false, speak: false };
       }
       const raised = notificationManager.notify(payload, { force: opts?.force === true });
+      const ui = settings.getUiSettings();
       const actions = resolveMessageActions({
-        settings: settings.getUiSettings().notifications,
+        settings: ui.notifications,
         raised,
         hasAgent: Boolean(payload.agentId || payload.contactId),
       });
       // Auto-open: pop the sender's companion so an unattended message is not
       // missed. Placement (incl. `bringMainToFront`) is applied by the shared
       // open path, so an auto-open lands exactly where a manual popout would.
-      if (actions.openCompanion && (payload.contactId || payload.agentId)) {
-        const contactId = payload.contactId ?? payload.agentId;
+      // The per-agent override can opt one agent out (or in) independently of the
+      // global switch — an explicit per-agent choice always wins.
+      const contactId = payload.contactId ?? payload.agentId;
+      const allowOpen =
+        actions.openCompanion &&
+        (payload.contactId || payload.agentId) &&
+        shouldOpenCompanionForContact({
+          overrides: ui.contactOverrides,
+          contactId,
+          globalOpen: true,
+        });
+      if (allowOpen && contactId) {
         try {
           openCompanionWindow({
-            contactId: contactId as string,
+            contactId,
             conversationId: payload.conversationId,
             agentId: payload.agentId,
           });

@@ -74,6 +74,12 @@ export type CompanionWindowOptions = {
   /** Persist a contact's position after the user drags/resizes its companion. */
   rememberPosition?: (contactId: string, point: PlacementPoint) => void;
   /**
+   * Per-agent placement-mode override. Returns a mode to use **instead of** the
+   * global one for this contact, or null to use the global setting. Lets one
+   * agent's companion land elsewhere without changing every other agent.
+   */
+  getContactPlacementMode?: (contactId: string) => CompanionPlacementSettings['mode'] | null;
+  /**
    * Work area + all display work areas. Injectable so the placement math is
    * testable without a real multi-monitor setup; defaults to Electron `screen`.
    */
@@ -157,8 +163,11 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     const settings = normalizeCompanionPlacementSettings(placement);
     const { targetWorkArea, allWorkAreas } = resolveDisplays(options);
     const remembered = options.getRememberedPosition?.(contactId) ?? null;
+    // A per-agent override wins over the global mode, so one agent's companion
+    // can live in a different corner without changing the default for the rest.
+    const mode = options.getContactPlacementMode?.(contactId) ?? settings.mode;
     return computeCompanionBounds({
-      mode: settings.mode,
+      mode,
       size,
       workArea: targetWorkArea,
       mainBounds: options.getMainBounds?.() ?? null,

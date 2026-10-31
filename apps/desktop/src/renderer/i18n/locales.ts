@@ -12,6 +12,7 @@
 import { AUDIT_LOCALE_MESSAGES } from './locales-audit.js';
 import { CHAT_CACHE_LOCALE_MESSAGES } from './locales-chat-cache.js';
 import { NOTIFICATIONS_LOCALE_MESSAGES } from './locales-notifications.js';
+import { SETTINGS_LOCALE_MESSAGES } from './locales-settings.js';
 
 export const SUPPORTED_LOCALES = [
   'en',
@@ -245,6 +246,170 @@ const en = {
   'settings.chatCache.usage': 'Using {used} across {entries} entries',
   'settings.chatCache.evicted': '{count} evicted',
   'settings.chatCache.clear': 'Clear chat cache',
+
+  // Settings shell + per-section copy. The English values live here (so
+  // `MessageKey` and `EN_MESSAGES` see them); the per-locale translations are
+  // merged from `locales-settings.ts`.
+  'settings.nav.general': 'General',
+  'settings.nav.notifications': 'Notifications',
+  'settings.nav.companion': 'Companion',
+  'settings.nav.agents': 'Agents',
+  'settings.nav.wake': 'Wake words',
+  'settings.nav.localAi': 'Local AI',
+  'settings.nav.integrations': 'Integrations',
+  'settings.nav.security': 'Security',
+  'settings.nav.connection': 'Connection',
+  'settings.nav.developer': 'Developer',
+  'settings.loading': 'Loading…',
+  'settings.general.help': 'Choose the interface language for this app.',
+  'settings.companion.help': 'How the 3D agent companion looks and where it appears on screen.',
+  'settings.agents.help':
+    'Override avatar, voice, wake nickname and companion behaviour for a single agent.',
+  'settings.wake.help': 'Wake an agent with a spoken word and choose what a wake does.',
+  'settings.localAi.help': 'On-device models, speech, and audio device routing.',
+  'settings.integrations.help': 'Nexus apps, trusted certificates, and your LAN asset agents.',
+  'settings.security.help': 'Lock the interface behind a PIN after a period of inactivity.',
+  'settings.connection.help': 'The region, gateway and portal this desktop connects to.',
+  'settings.developer.help':
+    'Workspaces, local command skills, the audit trail and the chat cache.',
+  'settings.notifications.suppressWhenLocked.on': 'on — locked cards show no content',
+  'settings.notifications.suppressWhenLocked.off':
+    'off — content is shown even while locked',
+  'settings.appLock': 'App lock',
+  'settings.appLock.help':
+    'Lock the interface behind a PIN after a period of inactivity. The lock hides the screen only — it never blocks sign-in, 2FA, or any secure operation.',
+  'settings.appLock.enable': 'Lock the app after inactivity',
+  'settings.appLock.needPin': '(set a PIN first)',
+  'settings.appLock.timeout': 'Lock after (minutes of inactivity)',
+  'settings.appLock.minuteOne': '1 minute',
+  'settings.appLock.minutes': '{count} minutes',
+  'settings.appLock.replacePin': 'Replace PIN',
+  'settings.appLock.setPin': 'Set a PIN ({min}–12 digits)',
+  'settings.appLock.replacePinAction': 'Replace PIN',
+  'settings.appLock.setPinAction': 'Set PIN',
+  'settings.appLock.removePin': 'Remove PIN',
+  'settings.appLock.lockNow': 'Lock now',
+  'settings.appLock.armed': 'Armed · locks after {minutes} min',
+  'settings.appLock.notArmed': 'Not armed',
+  'settings.appLock.recovery': 'Forgot the PIN? Sign out or switch user to clear it.',
+  'settings.companion.avatar': 'Companion avatar',
+  'settings.companion.avatar.help':
+    'How the 3D agent companion behaves. The avatar follows your cursor while it stays in the companion window, and keeps tracking across the whole screen once the pointer leaves it.',
+  'settings.companion.clickNod': 'Nod when clicked',
+  'settings.companion.clickNod.help': '— play a nod gesture when you click the companion.',
+  'settings.companion.clickNodGesture': 'Click nod gesture',
+  'settings.companion.clickNodGesture.help':
+    'Clip id from the agent’s gesture pack (e.g. nod, agree).',
+  'settings.companion.gazeYaw': 'Head turn range — {deg}°',
+  'settings.companion.gazeYaw.help':
+    'How far the head/neck turn toward the cursor (10–60°). Raise it if tracking feels stiff as your cursor crosses the screen.',
+  'settings.companion.gazePitch': 'Head tilt range — {deg}°',
+  'settings.companion.gazePitch.help': 'How far the head nods up/down toward the cursor (8–40°).',
+  'settings.companion.placement': 'Companion placement',
+  'settings.companion.placement.help':
+    'Where a newly opened companion window appears. Overlap is avoided by shifting the window until it fits, and a remembered position is re-clamped when a monitor is disconnected.',
+  'settings.companion.placement.mode': 'Default position',
+  'settings.companion.placement.mode.bottomRight': 'Bottom right',
+  'settings.companion.placement.mode.bottomLeft': 'Bottom left',
+  'settings.companion.placement.mode.topRight': 'Top right',
+  'settings.companion.placement.mode.topLeft': 'Top left',
+  'settings.companion.placement.mode.center': 'Center',
+  'settings.companion.placement.mode.rightOfMain': 'Right of the main window',
+  'settings.companion.placement.mode.rememberLast': 'Remember last position',
+  'settings.companion.placement.gap': 'Edge margin — {px} px',
+  'settings.companion.placement.gap.help': 'Distance kept from the screen edge.',
+  'settings.companion.placement.rememberPerAgent': 'Remember a separate position per agent',
+  'settings.companion.placement.rememberPerAgent.help':
+    'Used by “Remember last position” and per-agent overrides.',
+  'settings.companion.placement.bringMainToFront': 'Bring the main window forward',
+  'settings.companion.placement.bringMainToFront.help':
+    'Raise the main window whenever a companion opens automatically.',
+  'settings.companion.debug': 'Companion debug',
+  'settings.companion.debug.help':
+    'Developer surfaces for the 3D agent companion. All off by default; a normal companion window stays clean.',
+  'settings.companion.debug.motionFeed': 'Motion feed panel',
+  'settings.companion.debug.motionFeed.help': 'Live action feed (source / status / Δ / op / detail).',
+  'settings.companion.debug.gestureTest': 'Gesture tester',
+  'settings.companion.debug.gestureTest.help': 'Play any loaded clip, or run all one-shots.',
+  'settings.companion.debug.statusMotions': 'Status motions editor',
+  'settings.companion.debug.statusMotions.help':
+    'Clips cycled while the agent is thinking / writing.',
+  'settings.companion.debug.sceneMode': 'Walkable scene',
+  'settings.companion.debug.sceneMode.help':
+    'Ground grid + room bounds so walk / approach is visible.',
+  'settings.companion.debug.forceHint':
+    'You can also force all of these on with ?companionDebug=1 in the companion window URL.',
+  'settings.agents': 'Agents',
+  'settings.agents.shared': 'shared',
+  'settings.agents.empty': 'No agents are available yet. Sign in and add an agent first.',
+  'settings.agents.avatar': 'Avatar',
+  'settings.agents.avatar.default': 'Default (the agent’s own)',
+  'settings.agents.placement': 'Companion position',
+  'settings.agents.placement.inherit': 'Use default ({mode})',
+  'settings.agents.wakeAliases': 'Wake nicknames',
+  'settings.agents.wakeAliases.help':
+    'Extra phrases that wake this agent, in addition to its name.',
+  'settings.agents.ttsModel': 'Reply voice model',
+  'settings.agents.ttsVoice': 'Reply voice',
+  'settings.agents.tts.inherit': 'Use default',
+  'settings.agents.ttsVoice.default': 'Default voice',
+  'settings.agents.ttsVoice.none': 'No voices',
+  'settings.agents.tts.save': 'Save voice',
+  'settings.agents.tts.clear': 'Clear voice',
+  'settings.agents.tts.effective': 'Effective: {model} · {voice}',
+  'settings.agents.tts.failed': 'Could not save the voice.',
+  'settings.agents.openCompanion': 'Open this agent’s companion on new messages',
+  'settings.connection': 'Connection',
+  'settings.connection.region': 'Region node',
+  'settings.connection.gateway': 'Gateway (optional — defaults to region)',
+  'settings.connection.gateway.placeholder': 'same as region node',
+  'settings.connection.portal': 'Portal (optional — for redirects)',
+  'settings.connection.portal.placeholder': 'region may advertise its own',
+  'settings.connection.customCa': 'Custom CA (PEM, for local/self-signed region nodes)',
+  'settings.connection.save': 'Save connection',
+  'settings.connection.saving': 'Saving…',
+  'settings.connection.saved': 'Saved',
+  'settings.connection.runner': 'Local GPU runner (BYOK)',
+  'settings.connection.runner.help':
+    'Expose this machine’s local model server to your agents. The runner serves a loopback TLS proxy registered with the region as a BYOK edge_gpu_sidecar provider, so your agents can use your own GPU without buying cloud tokens.',
+  'settings.connection.runner.enabled': 'Run the local runner while signed in',
+  'settings.connection.runner.name': 'Label in the model picker',
+  'settings.connection.runner.upstream': 'Upstream local server (OpenAI-compatible)',
+  'settings.connection.runner.scope': 'Scope',
+  'settings.connection.runner.scope.user': 'user (private)',
+  'settings.connection.runner.scope.org': 'org (shared with members)',
+  'settings.connection.runner.notRunning': 'not running',
+  'settings.connection.runner.registered': 'registered',
+  'settings.connection.runner.registeredWith': 'registered · {id}',
+  'settings.connection.runner.notRegistered': 'not registered',
+  'settings.connection.runner.cert': 'loopback cert {fingerprint}… · expires {expires}',
+  'settings.connection.runner.register': 'Register with region',
+  'settings.connection.runner.stop': 'Stop',
+  'settings.connection.runner.failed': 'registration failed',
+  'settings.integrations.nexusApps': 'Nexus apps',
+  'settings.integrations.certificates': 'Trusted certificates',
+  'settings.integrations.lanAgents': 'LAN asset agents',
+  'settings.integrations.lanAgents.help':
+    'Asset nodes announce themselves on the local network over mDNS (_anx._tcp). When enabled, the desktop prefers the direct LAN/intranet path to your own asset agents instead of routing through the region. Peers from another region are never trusted.',
+  'settings.integrations.lanAgents.prefer': 'Prefer the local path to my asset agents',
+  'settings.integrations.lanAgents.hostsRooms': 'hosts rooms',
+  'settings.integrations.lanAgents.none': 'No matching asset agents found on this network.',
+  'settings.integrations.lanAgents.scan': 'Scan now',
+  'settings.integrations.lanAgents.scanning': 'Scanning…',
+  'settings.integrations.lanAgents.region': 'region {region}',
+  'settings.integrations.lanAgents.regionForeign': 'region {region} · {count} foreign ignored',
+  'settings.localAi.models': 'Local models',
+  'settings.localAi.speech': 'Local speech models',
+  'settings.localAi.audio': 'Audio devices',
+  'settings.workspaces': 'Agent workspaces',
+  'settings.workspaces.help':
+    'Directories the agent may read or write. Enforced in the main process — paths outside these roots (including symlink escapes) are refused.',
+  'settings.workspaces.remove': 'Remove',
+  'settings.workspaces.empty': 'No workspaces yet.',
+  'settings.workspaces.add': 'Add',
+  'settings.commands': 'Local command skills',
+  'settings.commands.help':
+    'Per-OS commands the agent may run, exposed as client tools. The CPU + GPU load skill ships by default (read-only).',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -1938,6 +2103,7 @@ for (const locale of SUPPORTED_LOCALES) {
   Object.assign(DICTIONARIES[locale], AUDIT_LOCALE_MESSAGES[locale]);
   Object.assign(DICTIONARIES[locale], CHAT_CACHE_LOCALE_MESSAGES[locale]);
   Object.assign(DICTIONARIES[locale], NOTIFICATIONS_LOCALE_MESSAGES[locale]);
+  Object.assign(DICTIONARIES[locale], SETTINGS_LOCALE_MESSAGES[locale]);
 }
 
 export const EN_MESSAGES = en;

@@ -35,6 +35,7 @@ import type {
 } from './wake.js';
 import type { AppLockSettings, AppLockState } from './app-lock.js';
 import type { CompanionPlacementSettings } from './companion-placement.js';
+import type { ContactOverrides } from './contact-overrides.js';
 import type {
   NotificationListInput,
   NotificationListResult,
@@ -152,10 +153,20 @@ export {
   isSafeExternalUrl,
 } from './nexus-apps.js';
 export {
+  COMPANION_GAP_MAX_PX,
+  COMPANION_GAP_MIN_PX,
   COMPANION_PLACEMENT_MODES,
   DEFAULT_COMPANION_PLACEMENT_SETTINGS,
   normalizeCompanionPlacementSettings,
 } from './companion-placement.js';
+export {
+  contactOverrideFor,
+  normalizeContactOverride,
+  normalizeContactOverrides,
+  placementModeForContact,
+  shouldOpenCompanionForContact,
+} from './contact-overrides.js';
+export type { ContactOverride, ContactOverrides } from './contact-overrides.js';
 export type {
   CompanionPlacementMode,
   CompanionPlacementSettings,
@@ -219,6 +230,13 @@ export type UiSettings = {
    * also brings the main window forward.
    */
   companionPlacement: CompanionPlacementSettings;
+  /**
+   * Per-agent overrides that have nowhere else to live: a companion placement
+   * mode for one agent, and whether that agent may pop its companion on an
+   * unattended message. Keyed by chat contact id; absent entries inherit the
+   * global settings above.
+   */
+  contactOverrides: ContactOverrides;
   /** Audio device preferences: primary/allowed speakers + primary/wake microphones. */
   audio: AudioSettings;
 };

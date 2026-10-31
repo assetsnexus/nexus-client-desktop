@@ -1,0 +1,3159 @@
+/**
+ * Settings UI translations (left-nav shell + per-section copy).
+ *
+ * The settings surface used to be a single stacked scroll of hardcoded English.
+ * Restructuring it into a left nav with per-section files made every string
+ * visible again, so this module carries the copy for the shell, the new
+ * per-agent section, and the previously-hardcoded blocks (app lock, companion
+ * avatar/placement/debug, connection + local GPU runner, integrations/LAN
+ * agents, workspaces + local command skills).
+ *
+ * Kept in a separate module (rather than inlined into `locales.ts`) so the
+ * settings rework lands without restructuring the shared dictionary file. The
+ * keys are part of the English source dictionary; `locales.ts` merges these
+ * per-locale blocks into `DICTIONARIES` so the i18n registry invariants hold
+ * (every locale covers every English key).
+ *
+ * COPY NOTES:
+ *  - Product names stay as-is (`Nexus`, `BYOK`, `OpenAI`, `mDNS`, `edge_gpu_sidecar`).
+ *  - `{name}` placeholders are interpolated by `translate()`; keep them intact.
+ */
+
+import type { Locale } from './locales.js';
+
+export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = {
+  en: {
+    // Left-nav section labels + one-line section help.
+    'settings.nav.general': 'General',
+    'settings.nav.notifications': 'Notifications',
+    'settings.nav.companion': 'Companion',
+    'settings.nav.agents': 'Agents',
+    'settings.nav.wake': 'Wake words',
+    'settings.nav.localAi': 'Local AI',
+    'settings.nav.integrations': 'Integrations',
+    'settings.nav.security': 'Security',
+    'settings.nav.connection': 'Connection',
+    'settings.nav.developer': 'Developer',
+    'settings.loading': 'Loading…',
+    'settings.general.help': 'Choose the interface language for this app.',
+    'settings.companion.help': 'How the 3D agent companion looks and where it appears on screen.',
+    'settings.agents.help':
+      'Override avatar, voice, wake nickname and companion behaviour for a single agent.',
+    'settings.wake.help': 'Wake an agent with a spoken word and choose what a wake does.',
+    'settings.localAi.help': 'On-device models, speech, and audio device routing.',
+    'settings.integrations.help':
+      'Nexus apps, trusted certificates, and your LAN asset agents.',
+    'settings.security.help': 'Lock the interface behind a PIN after a period of inactivity.',
+    'settings.connection.help': 'The region, gateway and portal this desktop connects to.',
+    'settings.developer.help':
+      'Workspaces, local command skills, the audit trail and the chat cache.',
+
+    // Notifications (moved out of the old inline block).
+    'settings.notifications.suppressWhenLocked.on': 'on — locked cards show no content',
+    'settings.notifications.suppressWhenLocked.off':
+      'off — content is shown even while locked',
+
+    // App lock (was fully hardcoded).
+    'settings.appLock': 'App lock',
+    'settings.appLock.help':
+      'Lock the interface behind a PIN after a period of inactivity. The lock hides the screen only — it never blocks sign-in, 2FA, or any secure operation.',
+    'settings.appLock.enable': 'Lock the app after inactivity',
+    'settings.appLock.needPin': '(set a PIN first)',
+    'settings.appLock.timeout': 'Lock after (minutes of inactivity)',
+    'settings.appLock.minuteOne': '1 minute',
+    'settings.appLock.minutes': '{count} minutes',
+    'settings.appLock.replacePin': 'Replace PIN',
+    'settings.appLock.setPin': 'Set a PIN ({min}–12 digits)',
+    'settings.appLock.replacePinAction': 'Replace PIN',
+    'settings.appLock.setPinAction': 'Set PIN',
+    'settings.appLock.removePin': 'Remove PIN',
+    'settings.appLock.lockNow': 'Lock now',
+    'settings.appLock.armed': 'Armed · locks after {minutes} min',
+    'settings.appLock.notArmed': 'Not armed',
+    'settings.appLock.recovery': 'Forgot the PIN? Sign out or switch user to clear it.',
+
+    // Companion (avatar + placement + debug).
+    'settings.companion.avatar': 'Companion avatar',
+    'settings.companion.avatar.help':
+      'How the 3D agent companion behaves. The avatar follows your cursor while it stays in the companion window, and keeps tracking across the whole screen once the pointer leaves it.',
+    'settings.companion.clickNod': 'Nod when clicked',
+    'settings.companion.clickNod.help': '— play a nod gesture when you click the companion.',
+    'settings.companion.clickNodGesture': 'Click nod gesture',
+    'settings.companion.clickNodGesture.help':
+      'Clip id from the agent’s gesture pack (e.g. nod, agree).',
+    'settings.companion.gazeYaw': 'Head turn range — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'How far the head/neck turn toward the cursor (10–60°). Raise it if tracking feels stiff as your cursor crosses the screen.',
+    'settings.companion.gazePitch': 'Head tilt range — {deg}°',
+    'settings.companion.gazePitch.help': 'How far the head nods up/down toward the cursor (8–40°).',
+    'settings.companion.placement': 'Companion placement',
+    'settings.companion.placement.help':
+      'Where a newly opened companion window appears. Overlap is avoided by shifting the window until it fits, and a remembered position is re-clamped when a monitor is disconnected.',
+    'settings.companion.placement.mode': 'Default position',
+    'settings.companion.placement.mode.bottomRight': 'Bottom right',
+    'settings.companion.placement.mode.bottomLeft': 'Bottom left',
+    'settings.companion.placement.mode.topRight': 'Top right',
+    'settings.companion.placement.mode.topLeft': 'Top left',
+    'settings.companion.placement.mode.center': 'Center',
+    'settings.companion.placement.mode.rightOfMain': 'Right of the main window',
+    'settings.companion.placement.mode.rememberLast': 'Remember last position',
+    'settings.companion.placement.gap': 'Edge margin — {px} px',
+    'settings.companion.placement.gap.help': 'Distance kept from the screen edge.',
+    'settings.companion.placement.rememberPerAgent': 'Remember a separate position per agent',
+    'settings.companion.placement.rememberPerAgent.help':
+      'Used by “Remember last position” and per-agent overrides.',
+    'settings.companion.placement.bringMainToFront': 'Bring the main window forward',
+    'settings.companion.placement.bringMainToFront.help':
+      'Raise the main window whenever a companion opens automatically.',
+    'settings.companion.debug': 'Companion debug',
+    'settings.companion.debug.help':
+      'Developer surfaces for the 3D agent companion. All off by default; a normal companion window stays clean.',
+    'settings.companion.debug.motionFeed': 'Motion feed panel',
+    'settings.companion.debug.motionFeed.help':
+      'Live action feed (source / status / Δ / op / detail).',
+    'settings.companion.debug.gestureTest': 'Gesture tester',
+    'settings.companion.debug.gestureTest.help': 'Play any loaded clip, or run all one-shots.',
+    'settings.companion.debug.statusMotions': 'Status motions editor',
+    'settings.companion.debug.statusMotions.help':
+      'Clips cycled while the agent is thinking / writing.',
+    'settings.companion.debug.sceneMode': 'Walkable scene',
+    'settings.companion.debug.sceneMode.help':
+      'Ground grid + room bounds so walk / approach is visible.',
+    'settings.companion.debug.forceHint':
+      'You can also force all of these on with ?companionDebug=1 in the companion window URL.',
+
+    // Agents (new section).
+    'settings.agents': 'Agents',
+    'settings.agents.shared': 'shared',
+    'settings.agents.empty': 'No agents are available yet. Sign in and add an agent first.',
+    'settings.agents.avatar': 'Avatar',
+    'settings.agents.avatar.default': 'Default (the agent’s own)',
+    'settings.agents.placement': 'Companion position',
+    'settings.agents.placement.inherit': 'Use default ({mode})',
+    'settings.agents.wakeAliases': 'Wake nicknames',
+    'settings.agents.wakeAliases.help':
+      'Extra phrases that wake this agent, in addition to its name.',
+    'settings.agents.ttsModel': 'Reply voice model',
+    'settings.agents.ttsVoice': 'Reply voice',
+    'settings.agents.tts.inherit': 'Use default',
+    'settings.agents.ttsVoice.default': 'Default voice',
+    'settings.agents.ttsVoice.none': 'No voices',
+    'settings.agents.tts.save': 'Save voice',
+    'settings.agents.tts.clear': 'Clear voice',
+    'settings.agents.tts.effective': 'Effective: {model} · {voice}',
+    'settings.agents.tts.failed': 'Could not save the voice.',
+    'settings.agents.openCompanion': 'Open this agent’s companion on new messages',
+
+    // Connection + local GPU runner.
+    'settings.connection': 'Connection',
+    'settings.connection.region': 'Region node',
+    'settings.connection.gateway': 'Gateway (optional — defaults to region)',
+    'settings.connection.gateway.placeholder': 'same as region node',
+    'settings.connection.portal': 'Portal (optional — for redirects)',
+    'settings.connection.portal.placeholder': 'region may advertise its own',
+    'settings.connection.customCa': 'Custom CA (PEM, for local/self-signed region nodes)',
+    'settings.connection.save': 'Save connection',
+    'settings.connection.saving': 'Saving…',
+    'settings.connection.saved': 'Saved',
+    'settings.connection.runner': 'Local GPU runner (BYOK)',
+    'settings.connection.runner.help':
+      'Expose this machine’s local model server to your agents. The runner serves a loopback TLS proxy registered with the region as a BYOK edge_gpu_sidecar provider, so your agents can use your own GPU without buying cloud tokens.',
+    'settings.connection.runner.enabled': 'Run the local runner while signed in',
+    'settings.connection.runner.name': 'Label in the model picker',
+    'settings.connection.runner.upstream': 'Upstream local server (OpenAI-compatible)',
+    'settings.connection.runner.scope': 'Scope',
+    'settings.connection.runner.scope.user': 'user (private)',
+    'settings.connection.runner.scope.org': 'org (shared with members)',
+    'settings.connection.runner.notRunning': 'not running',
+    'settings.connection.runner.registered': 'registered',
+    'settings.connection.runner.registeredWith': 'registered · {id}',
+    'settings.connection.runner.notRegistered': 'not registered',
+    'settings.connection.runner.cert': 'loopback cert {fingerprint}… · expires {expires}',
+    'settings.connection.runner.register': 'Register with region',
+    'settings.connection.runner.stop': 'Stop',
+    'settings.connection.runner.failed': 'registration failed',
+
+    // Integrations: Nexus apps, trusted certs, LAN asset agents.
+    'settings.integrations.nexusApps': 'Nexus apps',
+    'settings.integrations.certificates': 'Trusted certificates',
+    'settings.integrations.lanAgents': 'LAN asset agents',
+    'settings.integrations.lanAgents.help':
+      'Asset nodes announce themselves on the local network over mDNS (_anx._tcp). When enabled, the desktop prefers the direct LAN/intranet path to your own asset agents instead of routing through the region. Peers from another region are never trusted.',
+    'settings.integrations.lanAgents.prefer': 'Prefer the local path to my asset agents',
+    'settings.integrations.lanAgents.hostsRooms': 'hosts rooms',
+    'settings.integrations.lanAgents.none': 'No matching asset agents found on this network.',
+    'settings.integrations.lanAgents.scan': 'Scan now',
+    'settings.integrations.lanAgents.scanning': 'Scanning…',
+    'settings.integrations.lanAgents.region': 'region {region}',
+    'settings.integrations.lanAgents.regionForeign': 'region {region} · {count} foreign ignored',
+
+    // Local AI (panel labels).
+    'settings.localAi.models': 'Local models',
+    'settings.localAi.speech': 'Local speech models',
+    'settings.localAi.audio': 'Audio devices',
+
+    // Developer: workspaces + local command skills (audit/cache live in their own modules).
+    'settings.workspaces': 'Agent workspaces',
+    'settings.workspaces.help':
+      'Directories the agent may read or write. Enforced in the main process — paths outside these roots (including symlink escapes) are refused.',
+    'settings.workspaces.remove': 'Remove',
+    'settings.workspaces.empty': 'No workspaces yet.',
+    'settings.workspaces.add': 'Add',
+    'settings.commands': 'Local command skills',
+    'settings.commands.help':
+      'Per-OS commands the agent may run, exposed as client tools. The CPU + GPU load skill ships by default (read-only).',
+  },
+
+  de: {
+    'settings.nav.general': 'Allgemein',
+    'settings.nav.notifications': 'Benachrichtigungen',
+    'settings.nav.companion': 'Companion',
+    'settings.nav.agents': 'Agenten',
+    'settings.nav.wake': 'Weckwörter',
+    'settings.nav.localAi': 'Lokale KI',
+    'settings.nav.integrations': 'Integrationen',
+    'settings.nav.security': 'Sicherheit',
+    'settings.nav.connection': 'Verbindung',
+    'settings.nav.developer': 'Entwickler',
+    'settings.loading': 'Wird geladen…',
+    'settings.general.help': 'Wählen Sie die Oberflächensprache für diese App.',
+    'settings.companion.help':
+      'Wie der 3D-Begleiter aussieht und wo er auf dem Bildschirm erscheint.',
+    'settings.agents.help':
+      'Avatar, Stimme, Wecknamen und Companion-Verhalten für einen einzelnen Agenten überschreiben.',
+    'settings.wake.help':
+      'Wecken Sie einen Agenten mit einem gesprochenen Wort und legen Sie fest, was ein Wecken auslöst.',
+    'settings.localAi.help': 'Modelle auf dem Gerät, Sprache und Audioausgabe.',
+    'settings.integrations.help':
+      'Nexus-Apps, vertrauenswürdige Zertifikate und Ihre LAN-Asset-Agenten.',
+    'settings.security.help':
+      'Sperren Sie die Oberfläche nach einer Zeit der Inaktivität mit einer PIN.',
+    'settings.connection.help':
+      'Die Region, das Gateway und das Portal, mit denen dieser Desktop verbunden ist.',
+    'settings.developer.help':
+      'Arbeitsbereiche, lokale Befehlsfähigkeiten, das Audit-Protokoll und der Chat-Cache.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'an — gesperrte Karten zeigen keinen Inhalt',
+    'settings.notifications.suppressWhenLocked.off':
+      'aus — Inhalt wird auch im gesperrten Zustand angezeigt',
+
+    'settings.appLock': 'App-Sperre',
+    'settings.appLock.help':
+      'Sperren Sie die Oberfläche nach einer Zeit der Inaktivität mit einer PIN. Die Sperre blendet nur den Bildschirm aus — sie blockiert niemals Anmeldung, 2FA oder einen sicheren Vorgang.',
+    'settings.appLock.enable': 'App nach Inaktivität sperren',
+    'settings.appLock.needPin': '(zuerst eine PIN festlegen)',
+    'settings.appLock.timeout': 'Sperren nach (Minuten Inaktivität)',
+    'settings.appLock.minuteOne': '1 Minute',
+    'settings.appLock.minutes': '{count} Minuten',
+    'settings.appLock.replacePin': 'PIN ändern',
+    'settings.appLock.setPin': 'PIN festlegen ({min}–12 Ziffern)',
+    'settings.appLock.replacePinAction': 'PIN ändern',
+    'settings.appLock.setPinAction': 'PIN festlegen',
+    'settings.appLock.removePin': 'PIN entfernen',
+    'settings.appLock.lockNow': 'Jetzt sperren',
+    'settings.appLock.armed': 'Aktiv · sperrt nach {minutes} Min.',
+    'settings.appLock.notArmed': 'Nicht aktiv',
+    'settings.appLock.recovery': 'PIN vergessen? Melden Sie sich ab oder wechseln Sie den Benutzer.',
+
+    'settings.companion.avatar': 'Companion-Avatar',
+    'settings.companion.avatar.help':
+      'Wie sich der 3D-Begleiter verhält. Der Avatar folgt Ihrem Cursor, solange er im Companion-Fenster bleibt, und verfolgt ihn im gesamten Bildschirm, sobald der Zeiger dieses verlässt.',
+    'settings.companion.clickNod': 'Beim Klicken nicken',
+    'settings.companion.clickNod.help':
+      '— spielt beim Klicken auf den Begleiter eine Nick-Geste ab.',
+    'settings.companion.clickNodGesture': 'Nick-Geste beim Klicken',
+    'settings.companion.clickNodGesture.help':
+      'Clip-ID aus dem Gestenpaket des Agenten (z. B. nod, agree).',
+    'settings.companion.gazeYaw': 'Kopfdrehung — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'Wie weit Kopf/Hals sich zum Cursor drehen (10–60°). Erhöhen Sie den Wert, wenn die Verfolgung beim Überqueren des Bildschirms steif wirkt.',
+    'settings.companion.gazePitch': 'Kopfneigung — {deg}°',
+    'settings.companion.gazePitch.help':
+      'Wie weit der Kopf zum Cursor nach oben/unten nickt (8–40°).',
+    'settings.companion.placement': 'Companion-Platzierung',
+    'settings.companion.placement.help':
+      'Wo ein neu geöffnetes Companion-Fenster erscheint. Überlappungen werden vermieden, indem das Fenster verschoben wird, bis es passt; eine gemerkte Position wird neu begrenzt, wenn ein Monitor getrennt wird.',
+    'settings.companion.placement.mode': 'Standardposition',
+    'settings.companion.placement.mode.bottomRight': 'Unten rechts',
+    'settings.companion.placement.mode.bottomLeft': 'Unten links',
+    'settings.companion.placement.mode.topRight': 'Oben rechts',
+    'settings.companion.placement.mode.topLeft': 'Oben links',
+    'settings.companion.placement.mode.center': 'Mitte',
+    'settings.companion.placement.mode.rightOfMain': 'Rechts vom Hauptfenster',
+    'settings.companion.placement.mode.rememberLast': 'Letzte Position merken',
+    'settings.companion.placement.gap': 'Randabstand — {px} px',
+    'settings.companion.placement.gap.help': 'Abstand zum Bildschirmrand.',
+    'settings.companion.placement.rememberPerAgent': 'Eine eigene Position je Agent merken',
+    'settings.companion.placement.rememberPerAgent.help':
+      'Wird von „Letzte Position merken“ und den Agenten-Überschreibungen verwendet.',
+    'settings.companion.placement.bringMainToFront': 'Hauptfenster in den Vordergrund holen',
+    'settings.companion.placement.bringMainToFront.help':
+      'Holt das Hauptfenster nach vorn, wenn ein Companion automatisch geöffnet wird.',
+    'settings.companion.debug': 'Companion-Debug',
+    'settings.companion.debug.help':
+      'Entwickler-Oberflächen für den 3D-Begleiter. Standardmäßig alle aus; ein normales Companion-Fenster bleibt sauber.',
+    'settings.companion.debug.motionFeed': 'Motion-Feed-Panel',
+    'settings.companion.debug.motionFeed.help':
+      'Live-Aktionsfeed (Quelle / Status / Δ / Op / Detail).',
+    'settings.companion.debug.gestureTest': 'Gesten-Tester',
+    'settings.companion.debug.gestureTest.help':
+      'Beliebigen geladenen Clip abspielen oder alle One-Shots ausführen.',
+    'settings.companion.debug.statusMotions': 'Status-Motion-Editor',
+    'settings.companion.debug.statusMotions.help':
+      'Clips, die zyklisch laufen, während der Agent denkt / schreibt.',
+    'settings.companion.debug.sceneMode': 'Begehbare Szene',
+    'settings.companion.debug.sceneMode.help':
+      'Bodengitter + Raumgrenzen, damit Gehen / Annähern sichtbar wird.',
+    'settings.companion.debug.forceHint':
+      'Sie können all dies auch mit ?companionDebug=1 in der URL des Companion-Fensters erzwingen.',
+
+    'settings.agents': 'Agenten',
+    'settings.agents.shared': 'geteilt',
+    'settings.agents.empty':
+      'Noch keine Agenten verfügbar. Melden Sie sich an und fügen Sie zuerst einen Agenten hinzu.',
+    'settings.agents.avatar': 'Avatar',
+    'settings.agents.avatar.default': 'Standard (der des Agenten)',
+    'settings.agents.placement': 'Companion-Position',
+    'settings.agents.placement.inherit': 'Standard verwenden ({mode})',
+    'settings.agents.wakeAliases': 'Wecknamen',
+    'settings.agents.wakeAliases.help':
+      'Zusätzliche Phrasen, die diesen Agenten wecken, zusätzlich zu seinem Namen.',
+    'settings.agents.ttsModel': 'Sprachmodell für Antworten',
+    'settings.agents.ttsVoice': 'Antwortstimme',
+    'settings.agents.tts.inherit': 'Standard verwenden',
+    'settings.agents.ttsVoice.default': 'Standardstimme',
+    'settings.agents.ttsVoice.none': 'Keine Stimmen',
+    'settings.agents.tts.save': 'Stimme speichern',
+    'settings.agents.tts.clear': 'Stimme löschen',
+    'settings.agents.tts.effective': 'Wirksam: {model} · {voice}',
+    'settings.agents.tts.failed': 'Die Stimme konnte nicht gespeichert werden.',
+    'settings.agents.openCompanion': 'Companion dieses Agenten bei neuen Nachrichten öffnen',
+
+    'settings.connection': 'Verbindung',
+    'settings.connection.region': 'Region-Node',
+    'settings.connection.gateway': 'Gateway (optional — Standard: Region)',
+    'settings.connection.gateway.placeholder': 'wie Region-Node',
+    'settings.connection.portal': 'Portal (optional — für Weiterleitungen)',
+    'settings.connection.portal.placeholder': 'die Region kann ihr eigenes angeben',
+    'settings.connection.customCa':
+      'Benutzerdefinierte CA (PEM, für lokale/selbstsignierte Region-Nodes)',
+    'settings.connection.save': 'Verbindung speichern',
+    'settings.connection.saving': 'Wird gespeichert…',
+    'settings.connection.saved': 'Gespeichert',
+    'settings.connection.runner': 'Lokaler GPU-Runner (BYOK)',
+    'settings.connection.runner.help':
+      'Stellen Sie den lokalen Modellserver dieses Rechners Ihren Agenten zur Verfügung. Der Runner betreibt einen Loopback-TLS-Proxy, der bei der Region als BYOK-Provider edge_gpu_sidecar registriert wird, sodass Ihre Agenten Ihre eigene GPU ohne Cloud-Tokens nutzen können.',
+    'settings.connection.runner.enabled': 'Lokalen Runner ausführen, solange angemeldet',
+    'settings.connection.runner.name': 'Bezeichnung in der Modellauswahl',
+    'settings.connection.runner.upstream': 'Vorgeschalteter lokaler Server (OpenAI-kompatibel)',
+    'settings.connection.runner.scope': 'Umfang',
+    'settings.connection.runner.scope.user': 'user (privat)',
+    'settings.connection.runner.scope.org': 'org (mit Mitgliedern geteilt)',
+    'settings.connection.runner.notRunning': 'läuft nicht',
+    'settings.connection.runner.registered': 'registriert',
+    'settings.connection.runner.registeredWith': 'registriert · {id}',
+    'settings.connection.runner.notRegistered': 'nicht registriert',
+    'settings.connection.runner.cert':
+      'Loopback-Zertifikat {fingerprint}… · läuft ab am {expires}',
+    'settings.connection.runner.register': 'Bei der Region registrieren',
+    'settings.connection.runner.stop': 'Stoppen',
+    'settings.connection.runner.failed': 'Registrierung fehlgeschlagen',
+
+    'settings.integrations.nexusApps': 'Nexus-Apps',
+    'settings.integrations.certificates': 'Vertrauenswürdige Zertifikate',
+    'settings.integrations.lanAgents': 'LAN-Asset-Agenten',
+    'settings.integrations.lanAgents.help':
+      'Asset-Nodes melden sich im lokalen Netzwerk über mDNS (_anx._tcp). Wenn aktiviert, bevorzugt der Desktop den direkten LAN/Intranet-Pfad zu Ihren eigenen Asset-Agenten statt über die Region zu leiten. Peers aus einer anderen Region werden nie vertraut.',
+    'settings.integrations.lanAgents.prefer': 'Lokalen Pfad zu meinen Asset-Agenten bevorzugen',
+    'settings.integrations.lanAgents.hostsRooms': 'hostet Räume',
+    'settings.integrations.lanAgents.none':
+      'Keine passenden Asset-Agenten in diesem Netzwerk gefunden.',
+    'settings.integrations.lanAgents.scan': 'Jetzt scannen',
+    'settings.integrations.lanAgents.scanning': 'Wird gescannt…',
+    'settings.integrations.lanAgents.region': 'Region {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'Region {region} · {count} fremde ignoriert',
+
+    'settings.localAi.models': 'Lokale Modelle',
+    'settings.localAi.speech': 'Lokale Sprachmodelle',
+    'settings.localAi.audio': 'Audiogeräte',
+
+    'settings.workspaces': 'Agent-Arbeitsbereiche',
+    'settings.workspaces.help':
+      'Verzeichnisse, die der Agent lesen oder schreiben darf. Wird im Hauptprozess erzwungen — Pfade außerhalb dieser Wurzeln (einschließlich Symlink-Ausbrüche) werden abgelehnt.',
+    'settings.workspaces.remove': 'Entfernen',
+    'settings.workspaces.empty': 'Noch keine Arbeitsbereiche.',
+    'settings.workspaces.add': 'Hinzufügen',
+    'settings.commands': 'Lokale Befehlsfähigkeiten',
+    'settings.commands.help':
+      'Betriebssystemspezifische Befehle, die der Agent ausführen darf, bereitgestellt als Client-Tools. Die CPU- + GPU-Last-Fähigkeit ist standardmäßig enthalten (schreibgeschützt).',
+  },
+
+  es: {
+    'settings.nav.general': 'General',
+    'settings.nav.notifications': 'Notificaciones',
+    'settings.nav.companion': 'Compañero',
+    'settings.nav.agents': 'Agentes',
+    'settings.nav.wake': 'Palabras de activación',
+    'settings.nav.localAi': 'IA local',
+    'settings.nav.integrations': 'Integraciones',
+    'settings.nav.security': 'Seguridad',
+    'settings.nav.connection': 'Conexión',
+    'settings.nav.developer': 'Desarrollador',
+    'settings.loading': 'Cargando…',
+    'settings.general.help': 'Elige el idioma de la interfaz de esta app.',
+    'settings.companion.help':
+      'Cómo se ve el compañero agente en 3D y dónde aparece en la pantalla.',
+    'settings.agents.help':
+      'Anula el avatar, la voz, el apodo de activación y el comportamiento del compañero para un solo agente.',
+    'settings.wake.help':
+      'Activa un agente con una palabra hablada y elige qué hace una activación.',
+    'settings.localAi.help': 'Modelos en el dispositivo, voz y enrutado de audio.',
+    'settings.integrations.help':
+      'Apps de Nexus, certificados de confianza y tus agentes de activos en la LAN.',
+    'settings.security.help':
+      'Bloquea la interfaz con un PIN tras un periodo de inactividad.',
+    'settings.connection.help': 'La región, la pasarela y el portal a los que se conecta este escritorio.',
+    'settings.developer.help':
+      'Espacios de trabajo, habilidades de comando locales, el registro de auditoría y la caché del chat.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'activado — las tarjetas bloqueadas no muestran contenido',
+    'settings.notifications.suppressWhenLocked.off':
+      'desactivado — el contenido se muestra incluso con el bloqueo',
+
+    'settings.appLock': 'Bloqueo de la app',
+    'settings.appLock.help':
+      'Bloquea la interfaz con un PIN tras un periodo de inactividad. El bloqueo solo oculta la pantalla: nunca bloquea el inicio de sesión, el 2FA ni ninguna operación segura.',
+    'settings.appLock.enable': 'Bloquear la app tras inactividad',
+    'settings.appLock.needPin': '(establece primero un PIN)',
+    'settings.appLock.timeout': 'Bloquear tras (minutos de inactividad)',
+    'settings.appLock.minuteOne': '1 minuto',
+    'settings.appLock.minutes': '{count} minutos',
+    'settings.appLock.replacePin': 'Cambiar PIN',
+    'settings.appLock.setPin': 'Establece un PIN ({min}–12 dígitos)',
+    'settings.appLock.replacePinAction': 'Cambiar PIN',
+    'settings.appLock.setPinAction': 'Establecer PIN',
+    'settings.appLock.removePin': 'Quitar PIN',
+    'settings.appLock.lockNow': 'Bloquear ahora',
+    'settings.appLock.armed': 'Armado · bloquea tras {minutes} min',
+    'settings.appLock.notArmed': 'Sin armar',
+    'settings.appLock.recovery':
+      '¿Olvidaste el PIN? Cierra la sesión o cambia de usuario para borrarlo.',
+
+    'settings.companion.avatar': 'Avatar del compañero',
+    'settings.companion.avatar.help':
+      'Cómo se comporta el compañero agente en 3D. El avatar sigue tu cursor mientras permanece en la ventana del compañero y sigue rastreando por toda la pantalla cuando el puntero sale de ella.',
+    'settings.companion.clickNod': 'Asentir al hacer clic',
+    'settings.companion.clickNod.help':
+      '— reproduce un gesto de asentimiento al hacer clic en el compañero.',
+    'settings.companion.clickNodGesture': 'Gesto de asentimiento al hacer clic',
+    'settings.companion.clickNodGesture.help':
+      'Id de clip del paquete de gestos del agente (p. ej. nod, agree).',
+    'settings.companion.gazeYaw': 'Rango de giro de cabeza — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'Cuánto giran la cabeza y el cuello hacia el cursor (10–60°). Súbelo si el seguimiento se siente rígido cuando el cursor cruza la pantalla.',
+    'settings.companion.gazePitch': 'Rango de inclinación de cabeza — {deg}°',
+    'settings.companion.gazePitch.help':
+      'Cuánto asiente la cabeza hacia arriba/abajo hacia el cursor (8–40°).',
+    'settings.companion.placement': 'Ubicación del compañero',
+    'settings.companion.placement.help':
+      'Dónde aparece una ventana de compañero recién abierta. Se evita el solapamiento desplazando la ventana hasta que encaje, y una posición recordada se vuelve a ajustar cuando se desconecta un monitor.',
+    'settings.companion.placement.mode': 'Posición predeterminada',
+    'settings.companion.placement.mode.bottomRight': 'Abajo a la derecha',
+    'settings.companion.placement.mode.bottomLeft': 'Abajo a la izquierda',
+    'settings.companion.placement.mode.topRight': 'Arriba a la derecha',
+    'settings.companion.placement.mode.topLeft': 'Arriba a la izquierda',
+    'settings.companion.placement.mode.center': 'Centro',
+    'settings.companion.placement.mode.rightOfMain': 'A la derecha de la ventana principal',
+    'settings.companion.placement.mode.rememberLast': 'Recordar la última posición',
+    'settings.companion.placement.gap': 'Margen de borde — {px} px',
+    'settings.companion.placement.gap.help': 'Distancia que se mantiene desde el borde de la pantalla.',
+    'settings.companion.placement.rememberPerAgent': 'Recordar una posición distinta por agente',
+    'settings.companion.placement.rememberPerAgent.help':
+      'Lo usan «Recordar la última posición» y las anulaciones por agente.',
+    'settings.companion.placement.bringMainToFront': 'Traer la ventana principal al frente',
+    'settings.companion.placement.bringMainToFront.help':
+      'Sube la ventana principal siempre que un compañero se abre automáticamente.',
+    'settings.companion.debug': 'Depuración del compañero',
+    'settings.companion.debug.help':
+      'Superficies de desarrollador para el compañero agente en 3D. Todas desactivadas por defecto; una ventana de compañero normal se mantiene limpia.',
+    'settings.companion.debug.motionFeed': 'Panel de flujo de movimiento',
+    'settings.companion.debug.motionFeed.help':
+      'Flujo de acciones en vivo (origen / estado / Δ / op / detalle).',
+    'settings.companion.debug.gestureTest': 'Probador de gestos',
+    'settings.companion.debug.gestureTest.help':
+      'Reproduce cualquier clip cargado o ejecuta todos los one-shots.',
+    'settings.companion.debug.statusMotions': 'Editor de movimientos de estado',
+    'settings.companion.debug.statusMotions.help':
+      'Clips que se reproducen en bucle mientras el agente piensa / escribe.',
+    'settings.companion.debug.sceneMode': 'Escena transitable',
+    'settings.companion.debug.sceneMode.help':
+      'Rejilla del suelo + límites de la sala para que se vea caminar / acercarse.',
+    'settings.companion.debug.forceHint':
+      'También puedes forzar todo esto con ?companionDebug=1 en la URL de la ventana del compañero.',
+
+    'settings.agents': 'Agentes',
+    'settings.agents.shared': 'compartido',
+    'settings.agents.empty':
+      'Aún no hay agentes disponibles. Inicia sesión y añade primero un agente.',
+    'settings.agents.avatar': 'Avatar',
+    'settings.agents.avatar.default': 'Predeterminado (el del agente)',
+    'settings.agents.placement': 'Posición del compañero',
+    'settings.agents.placement.inherit': 'Usar el predeterminado ({mode})',
+    'settings.agents.wakeAliases': 'Apodos de activación',
+    'settings.agents.wakeAliases.help':
+      'Frases adicionales que activan a este agente, además de su nombre.',
+    'settings.agents.ttsModel': 'Modelo de voz de respuesta',
+    'settings.agents.ttsVoice': 'Voz de respuesta',
+    'settings.agents.tts.inherit': 'Usar el predeterminado',
+    'settings.agents.ttsVoice.default': 'Voz predeterminada',
+    'settings.agents.ttsVoice.none': 'Sin voces',
+    'settings.agents.tts.save': 'Guardar voz',
+    'settings.agents.tts.clear': 'Borrar voz',
+    'settings.agents.tts.effective': 'Efectivo: {model} · {voice}',
+    'settings.agents.tts.failed': 'No se pudo guardar la voz.',
+    'settings.agents.openCompanion': 'Abrir el compañero de este agente con mensajes nuevos',
+
+    'settings.connection': 'Conexión',
+    'settings.connection.region': 'Nodo de región',
+    'settings.connection.gateway': 'Pasarela (opcional — por defecto, la región)',
+    'settings.connection.gateway.placeholder': 'igual que el nodo de región',
+    'settings.connection.portal': 'Portal (opcional — para redirecciones)',
+    'settings.connection.portal.placeholder': 'la región puede anunciar el suyo',
+    'settings.connection.customCa':
+      'CA personalizada (PEM, para nodos de región locales/autofirmados)',
+    'settings.connection.save': 'Guardar conexión',
+    'settings.connection.saving': 'Guardando…',
+    'settings.connection.saved': 'Guardado',
+    'settings.connection.runner': 'Ejecutor de GPU local (BYOK)',
+    'settings.connection.runner.help':
+      'Expón el servidor de modelos local de esta máquina a tus agentes. El ejecutor sirve un proxy TLS de bucle invertido registrado en la región como proveedor BYOK edge_gpu_sidecar, para que tus agentes usen tu propia GPU sin comprar tokens en la nube.',
+    'settings.connection.runner.enabled': 'Ejecutar el ejecutor local mientras haya sesión',
+    'settings.connection.runner.name': 'Etiqueta en el selector de modelos',
+    'settings.connection.runner.upstream': 'Servidor local de origen (compatible con OpenAI)',
+    'settings.connection.runner.scope': 'Ámbito',
+    'settings.connection.runner.scope.user': 'user (privado)',
+    'settings.connection.runner.scope.org': 'org (compartido con los miembros)',
+    'settings.connection.runner.notRunning': 'no se está ejecutando',
+    'settings.connection.runner.registered': 'registrado',
+    'settings.connection.runner.registeredWith': 'registrado · {id}',
+    'settings.connection.runner.notRegistered': 'no registrado',
+    'settings.connection.runner.cert':
+      'certificado de bucle invertido {fingerprint}… · caduca el {expires}',
+    'settings.connection.runner.register': 'Registrar en la región',
+    'settings.connection.runner.stop': 'Detener',
+    'settings.connection.runner.failed': 'el registro falló',
+
+    'settings.integrations.nexusApps': 'Apps de Nexus',
+    'settings.integrations.certificates': 'Certificados de confianza',
+    'settings.integrations.lanAgents': 'Agentes de activos en la LAN',
+    'settings.integrations.lanAgents.help':
+      'Los nodos de activos se anuncian en la red local mediante mDNS (_anx._tcp). Cuando está activado, el escritorio prefiere la ruta directa por LAN/intranet a tus propios agentes de activos en lugar de enrutar por la región. Nunca se confía en pares de otra región.',
+    'settings.integrations.lanAgents.prefer': 'Preferir la ruta local a mis agentes de activos',
+    'settings.integrations.lanAgents.hostsRooms': 'aloja salas',
+    'settings.integrations.lanAgents.none':
+      'No se han encontrado agentes de activos coincidentes en esta red.',
+    'settings.integrations.lanAgents.scan': 'Escanear ahora',
+    'settings.integrations.lanAgents.scanning': 'Escaneando…',
+    'settings.integrations.lanAgents.region': 'región {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'región {region} · {count} externos ignorados',
+
+    'settings.localAi.models': 'Modelos locales',
+    'settings.localAi.speech': 'Modelos de voz locales',
+    'settings.localAi.audio': 'Dispositivos de audio',
+
+    'settings.workspaces': 'Espacios de trabajo del agente',
+    'settings.workspaces.help':
+      'Directorios que el agente puede leer o escribir. Se aplica en el proceso principal: se rechazan las rutas fuera de estas raíces (incluidas las fugas por enlaces simbólicos).',
+    'settings.workspaces.remove': 'Eliminar',
+    'settings.workspaces.empty': 'Aún no hay espacios de trabajo.',
+    'settings.workspaces.add': 'Añadir',
+    'settings.commands': 'Habilidades de comando locales',
+    'settings.commands.help':
+      'Comandos por sistema operativo que el agente puede ejecutar, expuestos como herramientas de cliente. La habilidad de carga de CPU + GPU se incluye por defecto (solo lectura).',
+  },
+
+  fr: {
+    'settings.nav.general': 'Général',
+    'settings.nav.notifications': 'Notifications',
+    'settings.nav.companion': 'Compagnon',
+    'settings.nav.agents': 'Agents',
+    'settings.nav.wake': 'Mots d’activation',
+    'settings.nav.localAi': 'IA locale',
+    'settings.nav.integrations': 'Intégrations',
+    'settings.nav.security': 'Sécurité',
+    'settings.nav.connection': 'Connexion',
+    'settings.nav.developer': 'Développeur',
+    'settings.loading': 'Chargement…',
+    'settings.general.help': 'Choisissez la langue de l’interface de cette application.',
+    'settings.companion.help':
+      'L’apparence du compagnon agent en 3D et son emplacement à l’écran.',
+    'settings.agents.help':
+      'Remplacez l’avatar, la voix, le surnom d’activation et le comportement du compagnon pour un seul agent.',
+    'settings.wake.help':
+      'Réveillez un agent avec un mot prononcé et choisissez ce que déclenche un réveil.',
+    'settings.localAi.help': 'Modèles sur l’appareil, voix et routage audio.',
+    'settings.integrations.help':
+      'Applications Nexus, certificats approuvés et vos agents d’actifs sur le LAN.',
+    'settings.security.help':
+      'Verrouillez l’interface derrière un code PIN après une période d’inactivité.',
+    'settings.connection.help':
+      'La région, la passerelle et le portail auxquels ce bureau se connecte.',
+    'settings.developer.help':
+      'Espaces de travail, compétences de commande locales, journal d’audit et cache de discussion.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'activé — les cartes verrouillées n’affichent aucun contenu',
+    'settings.notifications.suppressWhenLocked.off':
+      'désactivé — le contenu s’affiche même lorsque l’app est verrouillée',
+
+    'settings.appLock': 'Verrouillage de l’application',
+    'settings.appLock.help':
+      'Verrouillez l’interface derrière un code PIN après une période d’inactivité. Le verrouillage masque uniquement l’écran — il ne bloque jamais la connexion, le 2FA ni aucune opération sécurisée.',
+    'settings.appLock.enable': 'Verrouiller l’application après inactivité',
+    'settings.appLock.needPin': '(définissez d’abord un code PIN)',
+    'settings.appLock.timeout': 'Verrouiller après (minutes d’inactivité)',
+    'settings.appLock.minuteOne': '1 minute',
+    'settings.appLock.minutes': '{count} minutes',
+    'settings.appLock.replacePin': 'Modifier le code PIN',
+    'settings.appLock.setPin': 'Définir un code PIN ({min}–12 chiffres)',
+    'settings.appLock.replacePinAction': 'Modifier le code PIN',
+    'settings.appLock.setPinAction': 'Définir le code PIN',
+    'settings.appLock.removePin': 'Supprimer le code PIN',
+    'settings.appLock.lockNow': 'Verrouiller maintenant',
+    'settings.appLock.armed': 'Armé · verrouille après {minutes} min',
+    'settings.appLock.notArmed': 'Non armé',
+    'settings.appLock.recovery':
+      'Code PIN oublié ? Déconnectez-vous ou changez d’utilisateur pour l’effacer.',
+
+    'settings.companion.avatar': 'Avatar du compagnon',
+    'settings.companion.avatar.help':
+      'Le comportement du compagnon agent en 3D. L’avatar suit votre curseur tant qu’il reste dans la fenêtre du compagnon, et continue de le suivre sur tout l’écran dès que le pointeur la quitte.',
+    'settings.companion.clickNod': 'Hocher la tête au clic',
+    'settings.companion.clickNod.help':
+      '— joue un geste de hochement lorsque vous cliquez sur le compagnon.',
+    'settings.companion.clickNodGesture': 'Geste de hochement au clic',
+    'settings.companion.clickNodGesture.help':
+      'Identifiant de clip du pack de gestes de l’agent (par ex. nod, agree).',
+    'settings.companion.gazeYaw': 'Amplitude de rotation de la tête — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'À quel point la tête et le cou pivotent vers le curseur (10–60°). Augmentez la valeur si le suivi semble raide lorsque le curseur traverse l’écran.',
+    'settings.companion.gazePitch': 'Amplitude d’inclinaison de la tête — {deg}°',
+    'settings.companion.gazePitch.help':
+      'À quel point la tête hoche vers le haut/bas vers le curseur (8–40°).',
+    'settings.companion.placement': 'Placement du compagnon',
+    'settings.companion.placement.help':
+      'Où apparaît une nouvelle fenêtre de compagnon. Les chevauchements sont évités en décalant la fenêtre jusqu’à ce qu’elle tienne, et une position mémorisée est réajustée lorsqu’un écran est déconnecté.',
+    'settings.companion.placement.mode': 'Position par défaut',
+    'settings.companion.placement.mode.bottomRight': 'En bas à droite',
+    'settings.companion.placement.mode.bottomLeft': 'En bas à gauche',
+    'settings.companion.placement.mode.topRight': 'En haut à droite',
+    'settings.companion.placement.mode.topLeft': 'En haut à gauche',
+    'settings.companion.placement.mode.center': 'Centre',
+    'settings.companion.placement.mode.rightOfMain': 'À droite de la fenêtre principale',
+    'settings.companion.placement.mode.rememberLast': 'Mémoriser la dernière position',
+    'settings.companion.placement.gap': 'Marge de bord — {px} px',
+    'settings.companion.placement.gap.help': 'Distance conservée depuis le bord de l’écran.',
+    'settings.companion.placement.rememberPerAgent': 'Mémoriser une position distincte par agent',
+    'settings.companion.placement.rememberPerAgent.help':
+      'Utilisé par « Mémoriser la dernière position » et les remplacements par agent.',
+    'settings.companion.placement.bringMainToFront': 'Mettre la fenêtre principale au premier plan',
+    'settings.companion.placement.bringMainToFront.help':
+      'Ramène la fenêtre principale au premier plan dès qu’un compagnon s’ouvre automatiquement.',
+    'settings.companion.debug': 'Débogage du compagnon',
+    'settings.companion.debug.help':
+      'Surfaces de développeur pour le compagnon agent en 3D. Toutes désactivées par défaut ; une fenêtre de compagnon normale reste épurée.',
+    'settings.companion.debug.motionFeed': 'Panneau de flux des mouvements',
+    'settings.companion.debug.motionFeed.help':
+      'Flux d’actions en direct (source / état / Δ / op / détail).',
+    'settings.companion.debug.gestureTest': 'Testeur de gestes',
+    'settings.companion.debug.gestureTest.help':
+      'Jouez n’importe quel clip chargé, ou exécutez tous les one-shots.',
+    'settings.companion.debug.statusMotions': 'Éditeur de mouvements d’état',
+    'settings.companion.debug.statusMotions.help':
+      'Clips joués en boucle pendant que l’agent réfléchit / écrit.',
+    'settings.companion.debug.sceneMode': 'Scène praticable',
+    'settings.companion.debug.sceneMode.help':
+      'Grille au sol + limites de la pièce pour rendre la marche / l’approche visible.',
+    'settings.companion.debug.forceHint':
+      'Vous pouvez aussi forcer tout ceci avec ?companionDebug=1 dans l’URL de la fenêtre du compagnon.',
+
+    'settings.agents': 'Agents',
+    'settings.agents.shared': 'partagé',
+    'settings.agents.empty':
+      'Aucun agent disponible pour l’instant. Connectez-vous et ajoutez d’abord un agent.',
+    'settings.agents.avatar': 'Avatar',
+    'settings.agents.avatar.default': 'Par défaut (celui de l’agent)',
+    'settings.agents.placement': 'Position du compagnon',
+    'settings.agents.placement.inherit': 'Utiliser la valeur par défaut ({mode})',
+    'settings.agents.wakeAliases': 'Surnoms d’activation',
+    'settings.agents.wakeAliases.help':
+      'Phrases supplémentaires qui réveillent cet agent, en plus de son nom.',
+    'settings.agents.ttsModel': 'Modèle de voix de réponse',
+    'settings.agents.ttsVoice': 'Voix de réponse',
+    'settings.agents.tts.inherit': 'Utiliser la valeur par défaut',
+    'settings.agents.ttsVoice.default': 'Voix par défaut',
+    'settings.agents.ttsVoice.none': 'Aucune voix',
+    'settings.agents.tts.save': 'Enregistrer la voix',
+    'settings.agents.tts.clear': 'Effacer la voix',
+    'settings.agents.tts.effective': 'Effectif : {model} · {voice}',
+    'settings.agents.tts.failed': 'Impossible d’enregistrer la voix.',
+    'settings.agents.openCompanion': 'Ouvrir le compagnon de cet agent sur les nouveaux messages',
+
+    'settings.connection': 'Connexion',
+    'settings.connection.region': 'Nœud de région',
+    'settings.connection.gateway': 'Passerelle (facultatif — par défaut, la région)',
+    'settings.connection.gateway.placeholder': 'identique au nœud de région',
+    'settings.connection.portal': 'Portail (facultatif — pour les redirections)',
+    'settings.connection.portal.placeholder': 'la région peut annoncer le sien',
+    'settings.connection.customCa':
+      'AC personnalisée (PEM, pour les nœuds de région locaux/auto-signés)',
+    'settings.connection.save': 'Enregistrer la connexion',
+    'settings.connection.saving': 'Enregistrement…',
+    'settings.connection.saved': 'Enregistré',
+    'settings.connection.runner': 'Exécuteur GPU local (BYOK)',
+    'settings.connection.runner.help':
+      'Exposez le serveur de modèles local de cette machine à vos agents. L’exécuteur fournit un proxy TLS en boucle locale enregistré auprès de la région en tant que fournisseur BYOK edge_gpu_sidecar, afin que vos agents utilisent votre propre GPU sans acheter de jetons cloud.',
+    'settings.connection.runner.enabled': 'Exécuter l’exécuteur local lorsque connecté',
+    'settings.connection.runner.name': 'Libellé dans le sélecteur de modèles',
+    'settings.connection.runner.upstream': 'Serveur local en amont (compatible OpenAI)',
+    'settings.connection.runner.scope': 'Portée',
+    'settings.connection.runner.scope.user': 'user (privé)',
+    'settings.connection.runner.scope.org': 'org (partagé avec les membres)',
+    'settings.connection.runner.notRunning': 'non démarré',
+    'settings.connection.runner.registered': 'enregistré',
+    'settings.connection.runner.registeredWith': 'enregistré · {id}',
+    'settings.connection.runner.notRegistered': 'non enregistré',
+    'settings.connection.runner.cert':
+      'certificat en boucle locale {fingerprint}… · expire le {expires}',
+    'settings.connection.runner.register': 'Enregistrer auprès de la région',
+    'settings.connection.runner.stop': 'Arrêter',
+    'settings.connection.runner.failed': 'échec de l’enregistrement',
+
+    'settings.integrations.nexusApps': 'Applications Nexus',
+    'settings.integrations.certificates': 'Certificats approuvés',
+    'settings.integrations.lanAgents': 'Agents d’actifs sur le LAN',
+    'settings.integrations.lanAgents.help':
+      'Les nœuds d’actifs s’annoncent sur le réseau local via mDNS (_anx._tcp). Lorsque cette option est activée, le bureau privilégie le chemin direct LAN/intranet vers vos propres agents d’actifs au lieu de passer par la région. Les pairs d’une autre région ne sont jamais approuvés.',
+    'settings.integrations.lanAgents.prefer':
+      'Privilégier le chemin local vers mes agents d’actifs',
+    'settings.integrations.lanAgents.hostsRooms': 'héberge des salles',
+    'settings.integrations.lanAgents.none':
+      'Aucun agent d’actif correspondant trouvé sur ce réseau.',
+    'settings.integrations.lanAgents.scan': 'Analyser maintenant',
+    'settings.integrations.lanAgents.scanning': 'Analyse…',
+    'settings.integrations.lanAgents.region': 'région {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'région {region} · {count} étrangers ignorés',
+
+    'settings.localAi.models': 'Modèles locaux',
+    'settings.localAi.speech': 'Modèles vocaux locaux',
+    'settings.localAi.audio': 'Périphériques audio',
+
+    'settings.workspaces': 'Espaces de travail de l’agent',
+    'settings.workspaces.help':
+      'Répertoires que l’agent peut lire ou écrire. Appliqué dans le processus principal — les chemins hors de ces racines (y compris les échappements par lien symbolique) sont refusés.',
+    'settings.workspaces.remove': 'Supprimer',
+    'settings.workspaces.empty': 'Aucun espace de travail pour l’instant.',
+    'settings.workspaces.add': 'Ajouter',
+    'settings.commands': 'Compétences de commande locales',
+    'settings.commands.help':
+      'Commandes par système d’exploitation que l’agent peut exécuter, exposées comme outils clients. La compétence de charge CPU + GPU est fournie par défaut (lecture seule).',
+  },
+
+  ru: {
+    'settings.nav.general': 'Общие',
+    'settings.nav.notifications': 'Уведомления',
+    'settings.nav.companion': 'Компаньон',
+    'settings.nav.agents': 'Агенты',
+    'settings.nav.wake': 'Слова активации',
+    'settings.nav.localAi': 'Локальный ИИ',
+    'settings.nav.integrations': 'Интеграции',
+    'settings.nav.security': 'Безопасность',
+    'settings.nav.connection': 'Подключение',
+    'settings.nav.developer': 'Разработчик',
+    'settings.loading': 'Загрузка…',
+    'settings.general.help': 'Выберите язык интерфейса для этого приложения.',
+    'settings.companion.help':
+      'Как выглядит 3D-компаньон агента и где он появляется на экране.',
+    'settings.agents.help':
+      'Переопределите аватар, голос, имя для активации и поведение компаньона для отдельного агента.',
+    'settings.wake.help':
+      'Активируйте агента произнесённым словом и выберите, что делает активация.',
+    'settings.localAi.help': 'Модели на устройстве, речь и маршрутизация звука.',
+    'settings.integrations.help':
+      'Приложения Nexus, доверенные сертификаты и ваши агенты-устройства в локальной сети.',
+    'settings.security.help':
+      'Блокируйте интерфейс PIN-кодом после периода бездействия.',
+    'settings.connection.help': 'Регион, шлюз и портал, к которым подключается этот клиент.',
+    'settings.developer.help':
+      'Рабочие каталоги, локальные команды, журнал аудита и кэш чата.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'вкл. — заблокированные карточки не показывают содержимое',
+    'settings.notifications.suppressWhenLocked.off':
+      'выкл. — содержимое показывается даже при блокировке',
+
+    'settings.appLock': 'Блокировка приложения',
+    'settings.appLock.help':
+      'Блокируйте интерфейс PIN-кодом после периода бездействия. Блокировка только скрывает экран — она никогда не мешает входу, 2FA или защищённым операциям.',
+    'settings.appLock.enable': 'Блокировать приложение после бездействия',
+    'settings.appLock.needPin': '(сначала задайте PIN-код)',
+    'settings.appLock.timeout': 'Блокировать через (минут бездействия)',
+    'settings.appLock.minuteOne': '1 минута',
+    'settings.appLock.minutes': '{count} минут',
+    'settings.appLock.replacePin': 'Заменить PIN-код',
+    'settings.appLock.setPin': 'Задайте PIN-код ({min}–12 цифр)',
+    'settings.appLock.replacePinAction': 'Заменить PIN-код',
+    'settings.appLock.setPinAction': 'Задать PIN-код',
+    'settings.appLock.removePin': 'Удалить PIN-код',
+    'settings.appLock.lockNow': 'Заблокировать сейчас',
+    'settings.appLock.armed': 'Активна · блокировка через {minutes} мин',
+    'settings.appLock.notArmed': 'Не активна',
+    'settings.appLock.recovery':
+      'Забыли PIN-код? Выйдите из системы или смените пользователя, чтобы сбросить его.',
+
+    'settings.companion.avatar': 'Аватар компаньона',
+    'settings.companion.avatar.help':
+      'Как ведёт себя 3D-компаньон агента. Аватар следит за курсором, пока находится в окне компаньона, и продолжает отслеживать его по всему экрану, когда указатель покидает окно.',
+    'settings.companion.clickNod': 'Кивать при нажатии',
+    'settings.companion.clickNod.help':
+      '— проигрывать жест кивка при нажатии на компаньона.',
+    'settings.companion.clickNodGesture': 'Жест кивка при нажатии',
+    'settings.companion.clickNodGesture.help':
+      'Идентификатор клипа из набора жестов агента (напр. nod, agree).',
+    'settings.companion.gazeYaw': 'Диапазон поворота головы — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'Насколько голова и шея поворачиваются к курсору (10–60°). Увеличьте, если отслеживание кажется жёстким при движении курсора по экрану.',
+    'settings.companion.gazePitch': 'Диапазон наклона головы — {deg}°',
+    'settings.companion.gazePitch.help':
+      'Насколько голова кивает вверх/вниз к курсору (8–40°).',
+    'settings.companion.placement': 'Размещение компаньона',
+    'settings.companion.placement.help':
+      'Где появляется новое окно компаньона. Перекрытие избегается сдвигом окна, пока оно не поместится, а запомненная позиция заново ограничивается при отключении монитора.',
+    'settings.companion.placement.mode': 'Позиция по умолчанию',
+    'settings.companion.placement.mode.bottomRight': 'Внизу справа',
+    'settings.companion.placement.mode.bottomLeft': 'Внизу слева',
+    'settings.companion.placement.mode.topRight': 'Вверху справа',
+    'settings.companion.placement.mode.topLeft': 'Вверху слева',
+    'settings.companion.placement.mode.center': 'По центру',
+    'settings.companion.placement.mode.rightOfMain': 'Справа от главного окна',
+    'settings.companion.placement.mode.rememberLast': 'Запоминать последнюю позицию',
+    'settings.companion.placement.gap': 'Отступ от края — {px} px',
+    'settings.companion.placement.gap.help': 'Расстояние от края экрана.',
+    'settings.companion.placement.rememberPerAgent': 'Запоминать отдельную позицию для каждого агента',
+    'settings.companion.placement.rememberPerAgent.help':
+      'Используется функцией «Запоминать последнюю позицию» и переопределениями для агентов.',
+    'settings.companion.placement.bringMainToFront': 'Выводить главное окно вперёд',
+    'settings.companion.placement.bringMainToFront.help':
+      'Поднимать главное окно всякий раз, когда компаньон открывается автоматически.',
+    'settings.companion.debug': 'Отладка компаньона',
+    'settings.companion.debug.help':
+      'Инструменты разработчика для 3D-компаньона. По умолчанию всё выключено; обычное окно компаньона остаётся чистым.',
+    'settings.companion.debug.motionFeed': 'Панель потока движений',
+    'settings.companion.debug.motionFeed.help':
+      'Живой поток действий (источник / статус / Δ / операция / детали).',
+    'settings.companion.debug.gestureTest': 'Тестер жестов',
+    'settings.companion.debug.gestureTest.help':
+      'Проиграть любой загруженный клип или запустить все одиночные.',
+    'settings.companion.debug.statusMotions': 'Редактор движений состояния',
+    'settings.companion.debug.statusMotions.help':
+      'Клипы, циклично проигрываемые, пока агент думает / пишет.',
+    'settings.companion.debug.sceneMode': 'Проходимая сцена',
+    'settings.companion.debug.sceneMode.help':
+      'Сетка пола + границы комнаты, чтобы были видны ходьба / приближение.',
+    'settings.companion.debug.forceHint':
+      'Вы также можете включить всё это принудительно с помощью ?companionDebug=1 в URL окна компаньона.',
+
+    'settings.agents': 'Агенты',
+    'settings.agents.shared': 'общий',
+    'settings.agents.empty':
+      'Агенты пока недоступны. Войдите в систему и сначала добавьте агента.',
+    'settings.agents.avatar': 'Аватар',
+    'settings.agents.avatar.default': 'По умолчанию (свой у агента)',
+    'settings.agents.placement': 'Позиция компаньона',
+    'settings.agents.placement.inherit': 'Использовать значение по умолчанию ({mode})',
+    'settings.agents.wakeAliases': 'Имена для активации',
+    'settings.agents.wakeAliases.help':
+      'Дополнительные фразы, активирующие этого агента, помимо его имени.',
+    'settings.agents.ttsModel': 'Модель голоса ответа',
+    'settings.agents.ttsVoice': 'Голос ответа',
+    'settings.agents.tts.inherit': 'Использовать значение по умолчанию',
+    'settings.agents.ttsVoice.default': 'Голос по умолчанию',
+    'settings.agents.ttsVoice.none': 'Нет голосов',
+    'settings.agents.tts.save': 'Сохранить голос',
+    'settings.agents.tts.clear': 'Очистить голос',
+    'settings.agents.tts.effective': 'Действует: {model} · {voice}',
+    'settings.agents.tts.failed': 'Не удалось сохранить голос.',
+    'settings.agents.openCompanion': 'Открывать компаньон этого агента при новых сообщениях',
+
+    'settings.connection': 'Подключение',
+    'settings.connection.region': 'Узел региона',
+    'settings.connection.gateway': 'Шлюз (необязательно — по умолчанию регион)',
+    'settings.connection.gateway.placeholder': 'как у узла региона',
+    'settings.connection.portal': 'Портал (необязательно — для перенаправлений)',
+    'settings.connection.portal.placeholder': 'регион может объявить свой',
+    'settings.connection.customCa':
+      'Свой CA (PEM, для локальных/самоподписанных узлов региона)',
+    'settings.connection.save': 'Сохранить подключение',
+    'settings.connection.saving': 'Сохранение…',
+    'settings.connection.saved': 'Сохранено',
+    'settings.connection.runner': 'Локальный GPU-раннер (BYOK)',
+    'settings.connection.runner.help':
+      'Откройте локальный сервер моделей этого компьютера своим агентам. Раннер обслуживает локальный TLS-прокси, зарегистрированный в регионе как провайдер BYOK edge_gpu_sidecar, чтобы ваши агенты использовали ваш GPU без покупки облачных токенов.',
+    'settings.connection.runner.enabled': 'Запускать локальный раннер, пока выполнен вход',
+    'settings.connection.runner.name': 'Название в выборе моделей',
+    'settings.connection.runner.upstream': 'Вышестоящий локальный сервер (совместимый с OpenAI)',
+    'settings.connection.runner.scope': 'Область',
+    'settings.connection.runner.scope.user': 'user (частный)',
+    'settings.connection.runner.scope.org': 'org (общий для участников)',
+    'settings.connection.runner.notRunning': 'не запущен',
+    'settings.connection.runner.registered': 'зарегистрирован',
+    'settings.connection.runner.registeredWith': 'зарегистрирован · {id}',
+    'settings.connection.runner.notRegistered': 'не зарегистрирован',
+    'settings.connection.runner.cert':
+      'локальный сертификат {fingerprint}… · истекает {expires}',
+    'settings.connection.runner.register': 'Зарегистрировать в регионе',
+    'settings.connection.runner.stop': 'Остановить',
+    'settings.connection.runner.failed': 'регистрация не удалась',
+
+    'settings.integrations.nexusApps': 'Приложения Nexus',
+    'settings.integrations.certificates': 'Доверенные сертификаты',
+    'settings.integrations.lanAgents': 'Агенты-устройства в локальной сети',
+    'settings.integrations.lanAgents.help':
+      'Узлы-устройства объявляют себя в локальной сети через mDNS (_anx._tcp). Когда включено, клиент предпочитает прямой путь LAN/интранет к вашим собственным агентам-устройствам вместо маршрута через регион. Узлы из другого региона никогда не считаются доверенными.',
+    'settings.integrations.lanAgents.prefer':
+      'Предпочитать локальный путь к моим агентам-устройствам',
+    'settings.integrations.lanAgents.hostsRooms': 'размещает комнаты',
+    'settings.integrations.lanAgents.none':
+      'Подходящие агенты-устройства в этой сети не найдены.',
+    'settings.integrations.lanAgents.scan': 'Сканировать сейчас',
+    'settings.integrations.lanAgents.scanning': 'Сканирование…',
+    'settings.integrations.lanAgents.region': 'регион {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'регион {region} · {count} чужих пропущено',
+
+    'settings.localAi.models': 'Локальные модели',
+    'settings.localAi.speech': 'Локальные речевые модели',
+    'settings.localAi.audio': 'Аудиоустройства',
+
+    'settings.workspaces': 'Рабочие каталоги агента',
+    'settings.workspaces.help':
+      'Каталоги, которые агент может читать или записывать. Проверяется в главном процессе — пути вне этих корней (включая выходы через символические ссылки) отклоняются.',
+    'settings.workspaces.remove': 'Удалить',
+    'settings.workspaces.empty': 'Рабочих каталогов пока нет.',
+    'settings.workspaces.add': 'Добавить',
+    'settings.commands': 'Локальные команды',
+    'settings.commands.help':
+      'Команды по операционным системам, которые агент может выполнять, представленные как клиентские инструменты. Навык нагрузки CPU + GPU поставляется по умолчанию (только чтение).',
+  },
+
+  uk: {
+    'settings.nav.general': 'Загальні',
+    'settings.nav.notifications': 'Сповіщення',
+    'settings.nav.companion': 'Компаньйон',
+    'settings.nav.agents': 'Агенти',
+    'settings.nav.wake': 'Слова активації',
+    'settings.nav.localAi': 'Локальний ШІ',
+    'settings.nav.integrations': 'Інтеграції',
+    'settings.nav.security': 'Безпека',
+    'settings.nav.connection': 'Підключення',
+    'settings.nav.developer': 'Розробник',
+    'settings.loading': 'Завантаження…',
+    'settings.general.help': 'Виберіть мову інтерфейсу цього застосунку.',
+    'settings.companion.help':
+      'Як виглядає 3D-компаньйон агента та де він з’являється на екрані.',
+    'settings.agents.help':
+      'Перевизначте аватар, голос, ім’я для активації та поведінку компаньйона для окремого агента.',
+    'settings.wake.help':
+      'Активуйте агента вимовленим словом і виберіть, що робить активація.',
+    'settings.localAi.help': 'Моделі на пристрої, мовлення та маршрутизація звуку.',
+    'settings.integrations.help':
+      'Застосунки Nexus, довірені сертифікати та ваші агенти-пристрої в локальній мережі.',
+    'settings.security.help':
+      'Блокуйте інтерфейс PIN-кодом після періоду бездіяльності.',
+    'settings.connection.help': 'Регіон, шлюз і портал, до яких підключається цей клієнт.',
+    'settings.developer.help':
+      'Робочі каталоги, локальні команди, журнал аудиту та кеш чату.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'увімк. — заблоковані картки не показують вміст',
+    'settings.notifications.suppressWhenLocked.off':
+      'вимк. — вміст показується навіть при блокуванні',
+
+    'settings.appLock': 'Блокування застосунку',
+    'settings.appLock.help':
+      'Блокуйте інтерфейс PIN-кодом після періоду бездіяльності. Блокування лише приховує екран — воно ніколи не заважає входу, 2FA чи захищеним операціям.',
+    'settings.appLock.enable': 'Блокувати застосунок після бездіяльності',
+    'settings.appLock.needPin': '(спершу задайте PIN-код)',
+    'settings.appLock.timeout': 'Блокувати через (хвилин бездіяльності)',
+    'settings.appLock.minuteOne': '1 хвилина',
+    'settings.appLock.minutes': '{count} хвилин',
+    'settings.appLock.replacePin': 'Замінити PIN-код',
+    'settings.appLock.setPin': 'Задайте PIN-код ({min}–12 цифр)',
+    'settings.appLock.replacePinAction': 'Замінити PIN-код',
+    'settings.appLock.setPinAction': 'Задати PIN-код',
+    'settings.appLock.removePin': 'Видалити PIN-код',
+    'settings.appLock.lockNow': 'Заблокувати зараз',
+    'settings.appLock.armed': 'Активна · блокування через {minutes} хв',
+    'settings.appLock.notArmed': 'Не активна',
+    'settings.appLock.recovery':
+      'Забули PIN-код? Вийдіть із системи або змініть користувача, щоб скинути його.',
+
+    'settings.companion.avatar': 'Аватар компаньйона',
+    'settings.companion.avatar.help':
+      'Як поводиться 3D-компаньйон агента. Аватар стежить за курсором, поки перебуває у вікні компаньйона, і продовжує відстежувати його по всьому екрану, коли вказівник залишає вікно.',
+    'settings.companion.clickNod': 'Кивати при натисканні',
+    'settings.companion.clickNod.help':
+      '— відтворювати жест кивка при натисканні на компаньйона.',
+    'settings.companion.clickNodGesture': 'Жест кивка при натисканні',
+    'settings.companion.clickNodGesture.help':
+      'Ідентифікатор кліпу з набору жестів агента (напр. nod, agree).',
+    'settings.companion.gazeYaw': 'Діапазон повороту голови — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'Наскільки голова та шия повертаються до курсора (10–60°). Збільште, якщо відстеження здається жорстким під час руху курсора екраном.',
+    'settings.companion.gazePitch': 'Діапазон нахилу голови — {deg}°',
+    'settings.companion.gazePitch.help':
+      'Наскільки голова киває вгору/вниз до курсора (8–40°).',
+    'settings.companion.placement': 'Розміщення компаньйона',
+    'settings.companion.placement.help':
+      'Де з’являється нове вікно компаньйона. Перекриття уникається зсувом вікна, доки воно не вміститься, а запам’ятовану позицію повторно обмежують при від’єднанні монітора.',
+    'settings.companion.placement.mode': 'Позиція за замовчуванням',
+    'settings.companion.placement.mode.bottomRight': 'Унизу праворуч',
+    'settings.companion.placement.mode.bottomLeft': 'Унизу ліворуч',
+    'settings.companion.placement.mode.topRight': 'Угорі праворуч',
+    'settings.companion.placement.mode.topLeft': 'Угорі ліворуч',
+    'settings.companion.placement.mode.center': 'По центру',
+    'settings.companion.placement.mode.rightOfMain': 'Праворуч від головного вікна',
+    'settings.companion.placement.mode.rememberLast': 'Запам’ятовувати останню позицію',
+    'settings.companion.placement.gap': 'Відступ від краю — {px} px',
+    'settings.companion.placement.gap.help': 'Відстань від краю екрана.',
+    'settings.companion.placement.rememberPerAgent':
+      'Запам’ятовувати окрему позицію для кожного агента',
+    'settings.companion.placement.rememberPerAgent.help':
+      'Використовується функцією «Запам’ятовувати останню позицію» та перевизначеннями для агентів.',
+    'settings.companion.placement.bringMainToFront': 'Виводити головне вікно вперед',
+    'settings.companion.placement.bringMainToFront.help':
+      'Піднімати головне вікно щоразу, коли компаньйон відкривається автоматично.',
+    'settings.companion.debug': 'Налагодження компаньйона',
+    'settings.companion.debug.help':
+      'Інструменти розробника для 3D-компаньйона. За замовчуванням усе вимкнено; звичайне вікно компаньйона залишається чистим.',
+    'settings.companion.debug.motionFeed': 'Панель потоку рухів',
+    'settings.companion.debug.motionFeed.help':
+      'Живий потік дій (джерело / стан / Δ / операція / деталі).',
+    'settings.companion.debug.gestureTest': 'Тестувальник жестів',
+    'settings.companion.debug.gestureTest.help':
+      'Відтворити будь-який завантажений кліп або запустити всі одноразові.',
+    'settings.companion.debug.statusMotions': 'Редактор рухів стану',
+    'settings.companion.debug.statusMotions.help':
+      'Кліпи, що циклічно відтворюються, поки агент думає / пише.',
+    'settings.companion.debug.sceneMode': 'Прохідна сцена',
+    'settings.companion.debug.sceneMode.help':
+      'Сітка підлоги + межі кімнати, щоб було видно ходьбу / наближення.',
+    'settings.companion.debug.forceHint':
+      'Ви також можете примусово ввімкнути все це за допомогою ?companionDebug=1 в URL вікна компаньйона.',
+
+    'settings.agents': 'Агенти',
+    'settings.agents.shared': 'спільний',
+    'settings.agents.empty':
+      'Агенти поки недоступні. Увійдіть у систему та спершу додайте агента.',
+    'settings.agents.avatar': 'Аватар',
+    'settings.agents.avatar.default': 'За замовчуванням (власний агента)',
+    'settings.agents.placement': 'Позиція компаньйона',
+    'settings.agents.placement.inherit': 'Використати значення за замовчуванням ({mode})',
+    'settings.agents.wakeAliases': 'Імена для активації',
+    'settings.agents.wakeAliases.help':
+      'Додаткові фрази, що активують цього агента, окрім його імені.',
+    'settings.agents.ttsModel': 'Модель голосу відповіді',
+    'settings.agents.ttsVoice': 'Голос відповіді',
+    'settings.agents.tts.inherit': 'Використати значення за замовчуванням',
+    'settings.agents.ttsVoice.default': 'Голос за замовчуванням',
+    'settings.agents.ttsVoice.none': 'Немає голосів',
+    'settings.agents.tts.save': 'Зберегти голос',
+    'settings.agents.tts.clear': 'Очистити голос',
+    'settings.agents.tts.effective': 'Діє: {model} · {voice}',
+    'settings.agents.tts.failed': 'Не вдалося зберегти голос.',
+    'settings.agents.openCompanion': 'Відкривати компаньйон цього агента при нових повідомленнях',
+
+    'settings.connection': 'Підключення',
+    'settings.connection.region': 'Вузол регіону',
+    'settings.connection.gateway': 'Шлюз (необов’язково — за замовчуванням регіон)',
+    'settings.connection.gateway.placeholder': 'як у вузла регіону',
+    'settings.connection.portal': 'Портал (необов’язково — для перенаправлень)',
+    'settings.connection.portal.placeholder': 'регіон може оголосити свій',
+    'settings.connection.customCa':
+      'Власний CA (PEM, для локальних/самопідписаних вузлів регіону)',
+    'settings.connection.save': 'Зберегти підключення',
+    'settings.connection.saving': 'Збереження…',
+    'settings.connection.saved': 'Збережено',
+    'settings.connection.runner': 'Локальний GPU-ранер (BYOK)',
+    'settings.connection.runner.help':
+      'Відкрийте локальний сервер моделей цієї машини своїм агентам. Ранер обслуговує локальний TLS-проксі, зареєстрований у регіоні як провайдер BYOK edge_gpu_sidecar, щоб ваші агенти використовували ваш GPU без купівлі хмарних токенів.',
+    'settings.connection.runner.enabled': 'Запускати локальний ранер, поки виконано вхід',
+    'settings.connection.runner.name': 'Назва у виборі моделей',
+    'settings.connection.runner.upstream': 'Вищестоящий локальний сервер (сумісний з OpenAI)',
+    'settings.connection.runner.scope': 'Область',
+    'settings.connection.runner.scope.user': 'user (приватний)',
+    'settings.connection.runner.scope.org': 'org (спільний для учасників)',
+    'settings.connection.runner.notRunning': 'не запущено',
+    'settings.connection.runner.registered': 'зареєстровано',
+    'settings.connection.runner.registeredWith': 'зареєстровано · {id}',
+    'settings.connection.runner.notRegistered': 'не зареєстровано',
+    'settings.connection.runner.cert':
+      'локальний сертифікат {fingerprint}… · спливає {expires}',
+    'settings.connection.runner.register': 'Зареєструвати в регіоні',
+    'settings.connection.runner.stop': 'Зупинити',
+    'settings.connection.runner.failed': 'реєстрація не вдалася',
+
+    'settings.integrations.nexusApps': 'Застосунки Nexus',
+    'settings.integrations.certificates': 'Довірені сертифікати',
+    'settings.integrations.lanAgents': 'Агенти-пристрої в локальній мережі',
+    'settings.integrations.lanAgents.help':
+      'Вузли-пристрої оголошують себе в локальній мережі через mDNS (_anx._tcp). Коли ввімкнено, клієнт надає перевагу прямому шляху LAN/інтранет до ваших власних агентів-пристроїв замість маршруту через регіон. Вузли з іншого регіону ніколи не вважаються довіреними.',
+    'settings.integrations.lanAgents.prefer':
+      'Надавати перевагу локальному шляху до моїх агентів-пристроїв',
+    'settings.integrations.lanAgents.hostsRooms': 'розміщує кімнати',
+    'settings.integrations.lanAgents.none':
+      'Відповідних агентів-пристроїв у цій мережі не знайдено.',
+    'settings.integrations.lanAgents.scan': 'Сканувати зараз',
+    'settings.integrations.lanAgents.scanning': 'Сканування…',
+    'settings.integrations.lanAgents.region': 'регіон {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'регіон {region} · {count} чужих проігноровано',
+
+    'settings.localAi.models': 'Локальні моделі',
+    'settings.localAi.speech': 'Локальні мовні моделі',
+    'settings.localAi.audio': 'Аудіопристрої',
+
+    'settings.workspaces': 'Робочі каталоги агента',
+    'settings.workspaces.help':
+      'Каталоги, які агент може читати або записувати. Перевіряється в головному процесі — шляхи поза цими коренями (включно з виходами через символічні посилання) відхиляються.',
+    'settings.workspaces.remove': 'Видалити',
+    'settings.workspaces.empty': 'Робочих каталогів поки немає.',
+    'settings.workspaces.add': 'Додати',
+    'settings.commands': 'Локальні команди',
+    'settings.commands.help':
+      'Команди за операційними системами, які агент може виконувати, представлені як клієнтські інструменти. Навичка навантаження CPU + GPU постачається за замовчуванням (лише читання).',
+  },
+
+  et: {
+    'settings.nav.general': 'Üldine',
+    'settings.nav.notifications': 'Teavitused',
+    'settings.nav.companion': 'Kaaslane',
+    'settings.nav.agents': 'Agendid',
+    'settings.nav.wake': 'Äratussõnad',
+    'settings.nav.localAi': 'Kohalik tehisintellekt',
+    'settings.nav.integrations': 'Integratsioonid',
+    'settings.nav.security': 'Turvalisus',
+    'settings.nav.connection': 'Ühendus',
+    'settings.nav.developer': 'Arendaja',
+    'settings.loading': 'Laadimine…',
+    'settings.general.help': 'Valige selle rakenduse liidese keel.',
+    'settings.companion.help':
+      'Kuidas 3D-agendikaaslane välja näeb ja kuhu ekraanil ilmub.',
+    'settings.agents.help':
+      'Asendage ühe agendi avatar, hääl, äratushüüdnimi ja kaaslase käitumine.',
+    'settings.wake.help':
+      'Äratage agent öeldud sõnaga ja valige, mida äratamine teeb.',
+    'settings.localAi.help': 'Seadmes olevad mudelid, kõne ja heliväljundi suunamine.',
+    'settings.integrations.help':
+      'Nexuse rakendused, usaldusväärsed sertifikaadid ja teie LAN-i varavagendid.',
+    'settings.security.help':
+      'Lukustage liides PIN-koodiga pärast tegevusetuse perioodi.',
+    'settings.connection.help': 'Regioon, lüüs ja portaal, millega see töölaud ühendub.',
+    'settings.developer.help':
+      'Tööruumid, kohalikud käsunõuded, auditi jälg ja vestluse vahemälu.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'sees — lukustatud kaardid ei näita sisu',
+    'settings.notifications.suppressWhenLocked.off':
+      'väljas — sisu näidatakse ka lukustatult',
+
+    'settings.appLock': 'Rakenduse lukk',
+    'settings.appLock.help':
+      'Lukustage liides PIN-koodiga pärast tegevusetuse perioodi. Lukk peidab ainult ekraani — see ei blokeeri kunagi sisselogimist, 2FA-d ega ühtki turvalist toimingut.',
+    'settings.appLock.enable': 'Lukusta rakendus pärast tegevusetust',
+    'settings.appLock.needPin': '(määrake esmalt PIN-kood)',
+    'settings.appLock.timeout': 'Lukusta pärast (tegevusetuse minuteid)',
+    'settings.appLock.minuteOne': '1 minut',
+    'settings.appLock.minutes': '{count} minutit',
+    'settings.appLock.replacePin': 'Asenda PIN-kood',
+    'settings.appLock.setPin': 'Määrake PIN-kood ({min}–12 numbrit)',
+    'settings.appLock.replacePinAction': 'Asenda PIN-kood',
+    'settings.appLock.setPinAction': 'Määra PIN-kood',
+    'settings.appLock.removePin': 'Eemalda PIN-kood',
+    'settings.appLock.lockNow': 'Lukusta kohe',
+    'settings.appLock.armed': 'Aktiivne · lukustub {minutes} min pärast',
+    'settings.appLock.notArmed': 'Ei ole aktiivne',
+    'settings.appLock.recovery':
+      'Unustasite PIN-koodi? Logige välja või vahetage kasutajat, et see lähtestada.',
+
+    'settings.companion.avatar': 'Kaaslase avatar',
+    'settings.companion.avatar.help':
+      'Kuidas 3D-agendikaaslane käitub. Avatar järgib teie kursorit, kuni viibib kaaslase aknas, ja jätkab jälgimist üle kogu ekraani, kui kursor aknast lahkub.',
+    'settings.companion.clickNod': 'Nooguta klõpsamisel',
+    'settings.companion.clickNod.help':
+      '— esita noogutuse žest, kui kaaslast klõpsate.',
+    'settings.companion.clickNodGesture': 'Klõpsu noogutuse žest',
+    'settings.companion.clickNodGesture.help':
+      'Klipi id agendi žestipaketist (nt nod, agree).',
+    'settings.companion.gazeYaw': 'Pea pöörde ulatus — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'Kui kaugele pea/kael kursori poole pöörduvad (10–60°). Suurendage, kui jälgimine tundub jäik, kui kursor ekraanil liigub.',
+    'settings.companion.gazePitch': 'Pea kalde ulatus — {deg}°',
+    'settings.companion.gazePitch.help':
+      'Kui palju pea kursori poole üles/alla noogutab (8–40°).',
+    'settings.companion.placement': 'Kaaslase paigutus',
+    'settings.companion.placement.help':
+      'Kuhu äsja avatud kaaslase aken ilmub. Ülekattumist välditakse akna nihutamisega, kuni see mahub, ja meelespeetud asukoht piiratakse uuesti, kui monitor lahutatakse.',
+    'settings.companion.placement.mode': 'Vaikimisi asukoht',
+    'settings.companion.placement.mode.bottomRight': 'All paremal',
+    'settings.companion.placement.mode.bottomLeft': 'All vasakul',
+    'settings.companion.placement.mode.topRight': 'Ülal paremal',
+    'settings.companion.placement.mode.topLeft': 'Ülal vasakul',
+    'settings.companion.placement.mode.center': 'Keskel',
+    'settings.companion.placement.mode.rightOfMain': 'Põhiaknast paremal',
+    'settings.companion.placement.mode.rememberLast': 'Jäta viimane asukoht meelde',
+    'settings.companion.placement.gap': 'Serva veeris — {px} px',
+    'settings.companion.placement.gap.help': 'Ekraani servast hoitav kaugus.',
+    'settings.companion.placement.rememberPerAgent': 'Jäta iga agendi jaoks eraldi asukoht meelde',
+    'settings.companion.placement.rememberPerAgent.help':
+      'Kasutavad funktsioon „Jäta viimane asukoht meelde“ ja agendipõhised asendused.',
+    'settings.companion.placement.bringMainToFront': 'Too põhiaken ette',
+    'settings.companion.placement.bringMainToFront.help':
+      'Tõstab põhiakna ette alati, kui kaaslane avaneb automaatselt.',
+    'settings.companion.debug': 'Kaaslase silumine',
+    'settings.companion.debug.help':
+      '3D-agendikaaslase arendusvaated. Vaikimisi kõik väljas; tavaline kaaslase aken jääb puhtaks.',
+    'settings.companion.debug.motionFeed': 'Liikumisvoo paneel',
+    'settings.companion.debug.motionFeed.help':
+      'Reaalajas tegevusvoog (allikas / olek / Δ / op / detail).',
+    'settings.companion.debug.gestureTest': 'Žestide testija',
+    'settings.companion.debug.gestureTest.help':
+      'Esita ükskõik millist laetud klippi või käivita kõik ühekordsed.',
+    'settings.companion.debug.statusMotions': 'Oleku-liikumiste redaktor',
+    'settings.companion.debug.statusMotions.help':
+      'Klipid, mida tsüklitakse, kui agent mõtleb / kirjutab.',
+    'settings.companion.debug.sceneMode': 'Kõnnitav stseen',
+    'settings.companion.debug.sceneMode.help':
+      'Põranda ruudustik + ruumi piirid, et kõndimine / lähenemine oleks nähtav.',
+    'settings.companion.debug.forceHint':
+      'Saate kõik selle ka sunniviisiliselt sisse lülitada, lisades kaaslase akna URL-ile ?companionDebug=1.',
+
+    'settings.agents': 'Agendid',
+    'settings.agents.shared': 'jagatud',
+    'settings.agents.empty':
+      'Ühtegi agenti pole veel saadaval. Logige sisse ja lisage esmalt agent.',
+    'settings.agents.avatar': 'Avatar',
+    'settings.agents.avatar.default': 'Vaikimisi (agendi oma)',
+    'settings.agents.placement': 'Kaaslase asukoht',
+    'settings.agents.placement.inherit': 'Kasuta vaikimisi ({mode})',
+    'settings.agents.wakeAliases': 'Äratushüüdnimed',
+    'settings.agents.wakeAliases.help':
+      'Lisafraasid, mis äratavad selle agendi lisaks tema nimele.',
+    'settings.agents.ttsModel': 'Vastuse häälemudel',
+    'settings.agents.ttsVoice': 'Vastuse hääl',
+    'settings.agents.tts.inherit': 'Kasuta vaikimisi',
+    'settings.agents.ttsVoice.default': 'Vaikehääl',
+    'settings.agents.ttsVoice.none': 'Hääli pole',
+    'settings.agents.tts.save': 'Salvesta hääl',
+    'settings.agents.tts.clear': 'Tühjenda hääl',
+    'settings.agents.tts.effective': 'Kehtiv: {model} · {voice}',
+    'settings.agents.tts.failed': 'Häält ei saanud salvestada.',
+    'settings.agents.openCompanion': 'Ava selle agendi kaaslane uute sõnumite korral',
+
+    'settings.connection': 'Ühendus',
+    'settings.connection.region': 'Regiooni sõlm',
+    'settings.connection.gateway': 'Lüüs (valikuline — vaikimisi regioon)',
+    'settings.connection.gateway.placeholder': 'sama mis regiooni sõlm',
+    'settings.connection.portal': 'Portaal (valikuline — ümbersuunamisteks)',
+    'settings.connection.portal.placeholder': 'regioon võib teatada oma',
+    'settings.connection.customCa':
+      'Kohandatud CA (PEM, kohalike/iseallkirjastatud regiooni sõlmede jaoks)',
+    'settings.connection.save': 'Salvesta ühendus',
+    'settings.connection.saving': 'Salvestamine…',
+    'settings.connection.saved': 'Salvestatud',
+    'settings.connection.runner': 'Kohalik GPU-jooksutaja (BYOK)',
+    'settings.connection.runner.help':
+      'Avage selle masina kohalik mudeliserver oma agentidele. Jooksutaja pakub lokaalset TLS-puhverserverit, mis on regioonis registreeritud BYOK-proviraiderina edge_gpu_sidecar, et teie agendid saaksid kasutada teie oma GPU-d ilma pilvetokeneid ostmata.',
+    'settings.connection.runner.enabled': 'Käivita kohalik jooksutaja sisselogituna',
+    'settings.connection.runner.name': 'Nimetus mudelivalikus',
+    'settings.connection.runner.upstream': 'Ülesvoolu kohalik server (OpenAI-ühilduv)',
+    'settings.connection.runner.scope': 'Ulatus',
+    'settings.connection.runner.scope.user': 'user (privaatne)',
+    'settings.connection.runner.scope.org': 'org (liikmetega jagatud)',
+    'settings.connection.runner.notRunning': 'ei tööta',
+    'settings.connection.runner.registered': 'registreeritud',
+    'settings.connection.runner.registeredWith': 'registreeritud · {id}',
+    'settings.connection.runner.notRegistered': 'ei ole registreeritud',
+    'settings.connection.runner.cert':
+      'lokaalne sertifikaat {fingerprint}… · aegub {expires}',
+    'settings.connection.runner.register': 'Registreeri regioonis',
+    'settings.connection.runner.stop': 'Peata',
+    'settings.connection.runner.failed': 'registreerimine ebaõnnestus',
+
+    'settings.integrations.nexusApps': 'Nexuse rakendused',
+    'settings.integrations.certificates': 'Usaldusväärsed sertifikaadid',
+    'settings.integrations.lanAgents': 'LAN-i varavagendid',
+    'settings.integrations.lanAgents.help':
+      'Varavsõlmed teavitavad end kohalikus võrgus mDNS-i (_anx._tcp) kaudu. Kui see on lubatud, eelistab töölaud otsest LAN/i ettevõrgu teed teie enda varavagentidele, mitte regiooni kaudu suunamist. Teise regiooni sõlmi ei usaldata kunagi.',
+    'settings.integrations.lanAgents.prefer':
+      'Eelista kohalikku teed minu varavagentidele',
+    'settings.integrations.lanAgents.hostsRooms': 'majutab ruume',
+    'settings.integrations.lanAgents.none':
+      'Selles võrgus ei leitud sobivaid varavagente.',
+    'settings.integrations.lanAgents.scan': 'Skaneeri kohe',
+    'settings.integrations.lanAgents.scanning': 'Skaneerimine…',
+    'settings.integrations.lanAgents.region': 'regioon {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'regioon {region} · {count} võõrast eiratud',
+
+    'settings.localAi.models': 'Kohalikud mudelid',
+    'settings.localAi.speech': 'Kohalikud kõnemudelid',
+    'settings.localAi.audio': 'Heliseadmed',
+
+    'settings.workspaces': 'Agendi tööruumid',
+    'settings.workspaces.help':
+      'Kataloogid, mida agent võib lugeda või kirjutada. Jõustatakse põhiprotsessis — neist juurtest väljapoole jäävad teed (sh sümbollingi kaudu väljumised) lükatakse tagasi.',
+    'settings.workspaces.remove': 'Eemalda',
+    'settings.workspaces.empty': 'Tööruume veel pole.',
+    'settings.workspaces.add': 'Lisa',
+    'settings.commands': 'Kohalikud käsunõuded',
+    'settings.commands.help':
+      'Operatsioonisüsteemipõhised käsud, mida agent võib käivitada, pakutud klienditööriistadena. CPU + GPU koormuse nõue on vaikimisi kaasas (kirjutuskaitstud).',
+  },
+
+  it: {
+    'settings.nav.general': 'Generale',
+    'settings.nav.notifications': 'Notifiche',
+    'settings.nav.companion': 'Compagno',
+    'settings.nav.agents': 'Agenti',
+    'settings.nav.wake': 'Parole di attivazione',
+    'settings.nav.localAi': 'IA locale',
+    'settings.nav.integrations': 'Integrazioni',
+    'settings.nav.security': 'Sicurezza',
+    'settings.nav.connection': 'Connessione',
+    'settings.nav.developer': 'Sviluppatore',
+    'settings.loading': 'Caricamento…',
+    'settings.general.help': 'Scegli la lingua dell’interfaccia per questa app.',
+    'settings.companion.help':
+      'L’aspetto del compagno agente 3D e dove appare sullo schermo.',
+    'settings.agents.help':
+      'Sostituisci avatar, voce, soprannome di attivazione e comportamento del compagno per un singolo agente.',
+    'settings.wake.help':
+      'Attiva un agente con una parola pronunciata e scegli cosa fa un’attivazione.',
+    'settings.localAi.help': 'Modelli sul dispositivo, voce e instradamento audio.',
+    'settings.integrations.help':
+      'App Nexus, certificati attendibili e i tuoi agenti asset in LAN.',
+    'settings.security.help':
+      'Blocca l’interfaccia con un PIN dopo un periodo di inattività.',
+    'settings.connection.help': 'La regione, il gateway e il portale a cui si connette questo desktop.',
+    'settings.developer.help':
+      'Aree di lavoro, competenze di comando locali, registro di controllo e cache della chat.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'attivo — le schede bloccate non mostrano contenuto',
+    'settings.notifications.suppressWhenLocked.off':
+      'disattivo — il contenuto è mostrato anche quando è bloccato',
+
+    'settings.appLock': 'Blocco app',
+    'settings.appLock.help':
+      'Blocca l’interfaccia con un PIN dopo un periodo di inattività. Il blocco nasconde solo lo schermo — non blocca mai l’accesso, il 2FA o qualsiasi operazione sicura.',
+    'settings.appLock.enable': 'Blocca l’app dopo inattività',
+    'settings.appLock.needPin': '(imposta prima un PIN)',
+    'settings.appLock.timeout': 'Blocca dopo (minuti di inattività)',
+    'settings.appLock.minuteOne': '1 minuto',
+    'settings.appLock.minutes': '{count} minuti',
+    'settings.appLock.replacePin': 'Sostituisci PIN',
+    'settings.appLock.setPin': 'Imposta un PIN ({min}–12 cifre)',
+    'settings.appLock.replacePinAction': 'Sostituisci PIN',
+    'settings.appLock.setPinAction': 'Imposta PIN',
+    'settings.appLock.removePin': 'Rimuovi PIN',
+    'settings.appLock.lockNow': 'Blocca ora',
+    'settings.appLock.armed': 'Armato · blocca dopo {minutes} min',
+    'settings.appLock.notArmed': 'Non armato',
+    'settings.appLock.recovery':
+      'Hai dimenticato il PIN? Esci o cambia utente per azzerarlo.',
+
+    'settings.companion.avatar': 'Avatar del compagno',
+    'settings.companion.avatar.help':
+      'Come si comporta il compagno agente 3D. L’avatar segue il cursore finché resta nella finestra del compagno e continua a seguirlo su tutto lo schermo quando il puntatore la lascia.',
+    'settings.companion.clickNod': 'Annuisci al clic',
+    'settings.companion.clickNod.help':
+      '— riproduce un gesto di cenno quando fai clic sul compagno.',
+    'settings.companion.clickNodGesture': 'Gesto di cenno al clic',
+    'settings.companion.clickNodGesture.help':
+      'Id del clip dal pacchetto di gesti dell’agente (es. nod, agree).',
+    'settings.companion.gazeYaw': 'Ampiezza rotazione testa — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'Quanto testa e collo ruotano verso il cursore (10–60°). Aumenta se il tracciamento sembra rigido mentre il cursore attraversa lo schermo.',
+    'settings.companion.gazePitch': 'Ampiezza inclinazione testa — {deg}°',
+    'settings.companion.gazePitch.help':
+      'Quanto la testa annuisce verso l’alto/basso verso il cursore (8–40°).',
+    'settings.companion.placement': 'Posizione del compagno',
+    'settings.companion.placement.help':
+      'Dove appare una finestra del compagno appena aperta. La sovrapposizione è evitata spostando la finestra finché non entra, e una posizione memorizzata viene riportata nei limiti quando un monitor viene disconnesso.',
+    'settings.companion.placement.mode': 'Posizione predefinita',
+    'settings.companion.placement.mode.bottomRight': 'In basso a destra',
+    'settings.companion.placement.mode.bottomLeft': 'In basso a sinistra',
+    'settings.companion.placement.mode.topRight': 'In alto a destra',
+    'settings.companion.placement.mode.topLeft': 'In alto a sinistra',
+    'settings.companion.placement.mode.center': 'Al centro',
+    'settings.companion.placement.mode.rightOfMain': 'A destra della finestra principale',
+    'settings.companion.placement.mode.rememberLast': 'Ricorda l’ultima posizione',
+    'settings.companion.placement.gap': 'Margine dal bordo — {px} px',
+    'settings.companion.placement.gap.help': 'Distanza mantenuta dal bordo dello schermo.',
+    'settings.companion.placement.rememberPerAgent': 'Ricorda una posizione distinta per agente',
+    'settings.companion.placement.rememberPerAgent.help':
+      'Usato da “Ricorda l’ultima posizione” e dalle sostituzioni per agente.',
+    'settings.companion.placement.bringMainToFront': 'Porta la finestra principale in primo piano',
+    'settings.companion.placement.bringMainToFront.help':
+      'Solleva la finestra principale ogni volta che un compagno si apre automaticamente.',
+    'settings.companion.debug': 'Debug del compagno',
+    'settings.companion.debug.help':
+      'Strumenti per sviluppatori del compagno agente 3D. Tutti disattivati per impostazione predefinita; una normale finestra del compagno resta pulita.',
+    'settings.companion.debug.motionFeed': 'Pannello flusso dei movimenti',
+    'settings.companion.debug.motionFeed.help':
+      'Flusso di azioni dal vivo (origine / stato / Δ / op / dettaglio).',
+    'settings.companion.debug.gestureTest': 'Tester dei gesti',
+    'settings.companion.debug.gestureTest.help':
+      'Riproduci qualsiasi clip caricata o esegui tutti gli one-shot.',
+    'settings.companion.debug.statusMotions': 'Editor dei movimenti di stato',
+    'settings.companion.debug.statusMotions.help':
+      'Clip riprodotte in ciclo mentre l’agente pensa / scrive.',
+    'settings.companion.debug.sceneMode': 'Scena percorribile',
+    'settings.companion.debug.sceneMode.help':
+      'Griglia del pavimento + limiti della stanza così camminare / avvicinarsi è visibile.',
+    'settings.companion.debug.forceHint':
+      'Puoi anche forzare tutto questo con ?companionDebug=1 nell’URL della finestra del compagno.',
+
+    'settings.agents': 'Agenti',
+    'settings.agents.shared': 'condiviso',
+    'settings.agents.empty':
+      'Nessun agente ancora disponibile. Accedi e aggiungi prima un agente.',
+    'settings.agents.avatar': 'Avatar',
+    'settings.agents.avatar.default': 'Predefinito (quello dell’agente)',
+    'settings.agents.placement': 'Posizione del compagno',
+    'settings.agents.placement.inherit': 'Usa predefinito ({mode})',
+    'settings.agents.wakeAliases': 'Soprannomi di attivazione',
+    'settings.agents.wakeAliases.help':
+      'Frasi aggiuntive che attivano questo agente, oltre al suo nome.',
+    'settings.agents.ttsModel': 'Modello voce di risposta',
+    'settings.agents.ttsVoice': 'Voce di risposta',
+    'settings.agents.tts.inherit': 'Usa predefinito',
+    'settings.agents.ttsVoice.default': 'Voce predefinita',
+    'settings.agents.ttsVoice.none': 'Nessuna voce',
+    'settings.agents.tts.save': 'Salva voce',
+    'settings.agents.tts.clear': 'Cancella voce',
+    'settings.agents.tts.effective': 'Effettiva: {model} · {voice}',
+    'settings.agents.tts.failed': 'Impossibile salvare la voce.',
+    'settings.agents.openCompanion': 'Apri il compagno di questo agente sui nuovi messaggi',
+
+    'settings.connection': 'Connessione',
+    'settings.connection.region': 'Nodo di regione',
+    'settings.connection.gateway': 'Gateway (facoltativo — predefinito: regione)',
+    'settings.connection.gateway.placeholder': 'uguale al nodo di regione',
+    'settings.connection.portal': 'Portale (facoltativo — per i reindirizzamenti)',
+    'settings.connection.portal.placeholder': 'la regione può annunciare il proprio',
+    'settings.connection.customCa':
+      'CA personalizzata (PEM, per nodi di regione locali/autofirmati)',
+    'settings.connection.save': 'Salva connessione',
+    'settings.connection.saving': 'Salvataggio…',
+    'settings.connection.saved': 'Salvato',
+    'settings.connection.runner': 'Runner GPU locale (BYOK)',
+    'settings.connection.runner.help':
+      'Esponi il server di modelli locale di questa macchina ai tuoi agenti. Il runner fornisce un proxy TLS in loopback registrato presso la regione come provider BYOK edge_gpu_sidecar, così i tuoi agenti usano la tua GPU senza acquistare token cloud.',
+    'settings.connection.runner.enabled': 'Esegui il runner locale mentre sei connesso',
+    'settings.connection.runner.name': 'Etichetta nel selettore dei modelli',
+    'settings.connection.runner.upstream': 'Server locale a monte (compatibile OpenAI)',
+    'settings.connection.runner.scope': 'Ambito',
+    'settings.connection.runner.scope.user': 'user (privato)',
+    'settings.connection.runner.scope.org': 'org (condiviso con i membri)',
+    'settings.connection.runner.notRunning': 'non in esecuzione',
+    'settings.connection.runner.registered': 'registrato',
+    'settings.connection.runner.registeredWith': 'registrato · {id}',
+    'settings.connection.runner.notRegistered': 'non registrato',
+    'settings.connection.runner.cert':
+      'certificato in loopback {fingerprint}… · scade il {expires}',
+    'settings.connection.runner.register': 'Registra presso la regione',
+    'settings.connection.runner.stop': 'Interrompi',
+    'settings.connection.runner.failed': 'registrazione non riuscita',
+
+    'settings.integrations.nexusApps': 'App Nexus',
+    'settings.integrations.certificates': 'Certificati attendibili',
+    'settings.integrations.lanAgents': 'Agenti asset in LAN',
+    'settings.integrations.lanAgents.help':
+      'I nodi asset si annunciano sulla rete locale tramite mDNS (_anx._tcp). Quando è attivo, il desktop preferisce il percorso diretto LAN/intranet verso i tuoi agenti asset invece di passare dalla regione. I peer di un’altra regione non sono mai considerati attendibili.',
+    'settings.integrations.lanAgents.prefer': 'Preferisci il percorso locale verso i miei agenti asset',
+    'settings.integrations.lanAgents.hostsRooms': 'ospita stanze',
+    'settings.integrations.lanAgents.none':
+      'Nessun agente asset corrispondente trovato su questa rete.',
+    'settings.integrations.lanAgents.scan': 'Scansiona ora',
+    'settings.integrations.lanAgents.scanning': 'Scansione…',
+    'settings.integrations.lanAgents.region': 'regione {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'regione {region} · {count} esterni ignorati',
+
+    'settings.localAi.models': 'Modelli locali',
+    'settings.localAi.speech': 'Modelli vocali locali',
+    'settings.localAi.audio': 'Dispositivi audio',
+
+    'settings.workspaces': 'Aree di lavoro dell’agente',
+    'settings.workspaces.help':
+      'Directory che l’agente può leggere o scrivere. Applicato nel processo principale — i percorsi fuori da queste radici (incluse le uscite tramite link simbolici) vengono rifiutati.',
+    'settings.workspaces.remove': 'Rimuovi',
+    'settings.workspaces.empty': 'Nessuna area di lavoro ancora.',
+    'settings.workspaces.add': 'Aggiungi',
+    'settings.commands': 'Competenze di comando locali',
+    'settings.commands.help':
+      'Comandi per sistema operativo che l’agente può eseguire, esposti come strumenti client. La competenza di carico CPU + GPU è inclusa per impostazione predefinita (sola lettura).',
+  },
+
+  pt: {
+    'settings.nav.general': 'Geral',
+    'settings.nav.notifications': 'Notificações',
+    'settings.nav.companion': 'Companheiro',
+    'settings.nav.agents': 'Agentes',
+    'settings.nav.wake': 'Palavras de ativação',
+    'settings.nav.localAi': 'IA local',
+    'settings.nav.integrations': 'Integrações',
+    'settings.nav.security': 'Segurança',
+    'settings.nav.connection': 'Ligação',
+    'settings.nav.developer': 'Programador',
+    'settings.loading': 'A carregar…',
+    'settings.general.help': 'Escolha o idioma da interface desta aplicação.',
+    'settings.companion.help':
+      'O aspeto do companheiro agente 3D e onde aparece no ecrã.',
+    'settings.agents.help':
+      'Substitua o avatar, a voz, a alcunha de ativação e o comportamento do companheiro para um único agente.',
+    'settings.wake.help':
+      'Ative um agente com uma palavra falada e escolha o que uma ativação faz.',
+    'settings.localAi.help': 'Modelos no dispositivo, voz e encaminhamento de áudio.',
+    'settings.integrations.help':
+      'Aplicações Nexus, certificados fidedignos e os seus agentes de ativos na LAN.',
+    'settings.security.help':
+      'Bloqueie a interface com um PIN após um período de inatividade.',
+    'settings.connection.help': 'A região, o gateway e o portal a que este desktop se liga.',
+    'settings.developer.help':
+      'Áreas de trabalho, competências de comando locais, registo de auditoria e cache do chat.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'ligado — cartões bloqueados não mostram conteúdo',
+    'settings.notifications.suppressWhenLocked.off':
+      'desligado — o conteúdo é mostrado mesmo com o bloqueio',
+
+    'settings.appLock': 'Bloqueio da aplicação',
+    'settings.appLock.help':
+      'Bloqueie a interface com um PIN após um período de inatividade. O bloqueio apenas oculta o ecrã — nunca bloqueia o início de sessão, o 2FA ou qualquer operação segura.',
+    'settings.appLock.enable': 'Bloquear a aplicação após inatividade',
+    'settings.appLock.needPin': '(defina primeiro um PIN)',
+    'settings.appLock.timeout': 'Bloquear após (minutos de inatividade)',
+    'settings.appLock.minuteOne': '1 minuto',
+    'settings.appLock.minutes': '{count} minutos',
+    'settings.appLock.replacePin': 'Substituir PIN',
+    'settings.appLock.setPin': 'Defina um PIN ({min}–12 dígitos)',
+    'settings.appLock.replacePinAction': 'Substituir PIN',
+    'settings.appLock.setPinAction': 'Definir PIN',
+    'settings.appLock.removePin': 'Remover PIN',
+    'settings.appLock.lockNow': 'Bloquear agora',
+    'settings.appLock.armed': 'Armado · bloqueia após {minutes} min',
+    'settings.appLock.notArmed': 'Não armado',
+    'settings.appLock.recovery':
+      'Esqueceu-se do PIN? Termine a sessão ou mude de utilizador para o limpar.',
+
+    'settings.companion.avatar': 'Avatar do companheiro',
+    'settings.companion.avatar.help':
+      'Como o companheiro agente 3D se comporta. O avatar segue o cursor enquanto permanece na janela do companheiro e continua a segui-lo em todo o ecrã quando o ponteiro a deixa.',
+    'settings.companion.clickNod': 'Assentir ao clicar',
+    'settings.companion.clickNod.help':
+      '— reproduz um gesto de assentimento quando clica no companheiro.',
+    'settings.companion.clickNodGesture': 'Gesto de assentimento ao clicar',
+    'settings.companion.clickNodGesture.help':
+      'Id do clip do pacote de gestos do agente (por ex. nod, agree).',
+    'settings.companion.gazeYaw': 'Amplitude de rotação da cabeça — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'Quanto a cabeça e o pescoço rodam em direção ao cursor (10–60°). Aumente se o seguimento parecer rígido quando o cursor atravessa o ecrã.',
+    'settings.companion.gazePitch': 'Amplitude de inclinação da cabeça — {deg}°',
+    'settings.companion.gazePitch.help':
+      'Quanto a cabeça assente para cima/baixo em direção ao cursor (8–40°).',
+    'settings.companion.placement': 'Colocação do companheiro',
+    'settings.companion.placement.help':
+      'Onde aparece uma janela do companheiro recém-aberta. A sobreposição é evitada deslocando a janela até caber, e uma posição memorizada é reajustada quando um monitor é desligado.',
+    'settings.companion.placement.mode': 'Posição predefinida',
+    'settings.companion.placement.mode.bottomRight': 'Canto inferior direito',
+    'settings.companion.placement.mode.bottomLeft': 'Canto inferior esquerdo',
+    'settings.companion.placement.mode.topRight': 'Canto superior direito',
+    'settings.companion.placement.mode.topLeft': 'Canto superior esquerdo',
+    'settings.companion.placement.mode.center': 'Centro',
+    'settings.companion.placement.mode.rightOfMain': 'À direita da janela principal',
+    'settings.companion.placement.mode.rememberLast': 'Memorizar a última posição',
+    'settings.companion.placement.gap': 'Margem da margem — {px} px',
+    'settings.companion.placement.gap.help': 'Distância mantida em relação à margem do ecrã.',
+    'settings.companion.placement.rememberPerAgent': 'Memorizar uma posição distinta por agente',
+    'settings.companion.placement.rememberPerAgent.help':
+      'Usado por “Memorizar a última posição” e pelas substituições por agente.',
+    'settings.companion.placement.bringMainToFront': 'Trazer a janela principal para a frente',
+    'settings.companion.placement.bringMainToFront.help':
+      'Coloca a janela principal à frente sempre que um companheiro abre automaticamente.',
+    'settings.companion.debug': 'Depuração do companheiro',
+    'settings.companion.debug.help':
+      'Ferramentas de programador para o companheiro agente 3D. Todas desligadas por predefinição; uma janela normal do companheiro mantém-se limpa.',
+    'settings.companion.debug.motionFeed': 'Painel de fluxo de movimentos',
+    'settings.companion.debug.motionFeed.help':
+      'Fluxo de ações ao vivo (origem / estado / Δ / op / detalhe).',
+    'settings.companion.debug.gestureTest': 'Testador de gestos',
+    'settings.companion.debug.gestureTest.help':
+      'Reproduza qualquer clip carregado ou execute todos os one-shots.',
+    'settings.companion.debug.statusMotions': 'Editor de movimentos de estado',
+    'settings.companion.debug.statusMotions.help':
+      'Clips reproduzidos em ciclo enquanto o agente pensa / escreve.',
+    'settings.companion.debug.sceneMode': 'Cena percorrível',
+    'settings.companion.debug.sceneMode.help':
+      'Grelha do chão + limites da sala para que andar / aproximar-se seja visível.',
+    'settings.companion.debug.forceHint':
+      'Também pode forçar tudo isto com ?companionDebug=1 no URL da janela do companheiro.',
+
+    'settings.agents': 'Agentes',
+    'settings.agents.shared': 'partilhado',
+    'settings.agents.empty':
+      'Ainda não há agentes disponíveis. Inicie sessão e adicione primeiro um agente.',
+    'settings.agents.avatar': 'Avatar',
+    'settings.agents.avatar.default': 'Predefinido (o do agente)',
+    'settings.agents.placement': 'Posição do companheiro',
+    'settings.agents.placement.inherit': 'Usar predefinição ({mode})',
+    'settings.agents.wakeAliases': 'Alcunhas de ativação',
+    'settings.agents.wakeAliases.help':
+      'Frases adicionais que ativam este agente, além do seu nome.',
+    'settings.agents.ttsModel': 'Modelo de voz de resposta',
+    'settings.agents.ttsVoice': 'Voz de resposta',
+    'settings.agents.tts.inherit': 'Usar predefinição',
+    'settings.agents.ttsVoice.default': 'Voz predefinida',
+    'settings.agents.ttsVoice.none': 'Sem vozes',
+    'settings.agents.tts.save': 'Guardar voz',
+    'settings.agents.tts.clear': 'Limpar voz',
+    'settings.agents.tts.effective': 'Efetiva: {model} · {voice}',
+    'settings.agents.tts.failed': 'Não foi possível guardar a voz.',
+    'settings.agents.openCompanion': 'Abrir o companheiro deste agente em novas mensagens',
+
+    'settings.connection': 'Ligação',
+    'settings.connection.region': 'Nó de região',
+    'settings.connection.gateway': 'Gateway (opcional — predefinição: região)',
+    'settings.connection.gateway.placeholder': 'igual ao nó de região',
+    'settings.connection.portal': 'Portal (opcional — para redirecionamentos)',
+    'settings.connection.portal.placeholder': 'a região pode anunciar o seu',
+    'settings.connection.customCa':
+      'CA personalizada (PEM, para nós de região locais/autoassinados)',
+    'settings.connection.save': 'Guardar ligação',
+    'settings.connection.saving': 'A guardar…',
+    'settings.connection.saved': 'Guardado',
+    'settings.connection.runner': 'Executor de GPU local (BYOK)',
+    'settings.connection.runner.help':
+      'Exponha o servidor de modelos local desta máquina aos seus agentes. O executor disponibiliza um proxy TLS em loopback registado junto da região como fornecedor BYOK edge_gpu_sidecar, para que os seus agentes usem a sua própria GPU sem comprar tokens na nuvem.',
+    'settings.connection.runner.enabled': 'Executar o executor local com sessão iniciada',
+    'settings.connection.runner.name': 'Etiqueta no seletor de modelos',
+    'settings.connection.runner.upstream': 'Servidor local a montante (compatível com OpenAI)',
+    'settings.connection.runner.scope': 'Âmbito',
+    'settings.connection.runner.scope.user': 'user (privado)',
+    'settings.connection.runner.scope.org': 'org (partilhado com os membros)',
+    'settings.connection.runner.notRunning': 'não está em execução',
+    'settings.connection.runner.registered': 'registado',
+    'settings.connection.runner.registeredWith': 'registado · {id}',
+    'settings.connection.runner.notRegistered': 'não registado',
+    'settings.connection.runner.cert':
+      'certificado em loopback {fingerprint}… · expira a {expires}',
+    'settings.connection.runner.register': 'Registar junto da região',
+    'settings.connection.runner.stop': 'Parar',
+    'settings.connection.runner.failed': 'o registo falhou',
+
+    'settings.integrations.nexusApps': 'Aplicações Nexus',
+    'settings.integrations.certificates': 'Certificados fidedignos',
+    'settings.integrations.lanAgents': 'Agentes de ativos na LAN',
+    'settings.integrations.lanAgents.help':
+      'Os nós de ativos anunciam-se na rede local via mDNS (_anx._tcp). Quando ativado, o desktop prefere o caminho direto LAN/intranet para os seus próprios agentes de ativos em vez de encaminhar pela região. Os pares de outra região nunca são considerados fidedignos.',
+    'settings.integrations.lanAgents.prefer': 'Preferir o caminho local para os meus agentes de ativos',
+    'settings.integrations.lanAgents.hostsRooms': 'aloja salas',
+    'settings.integrations.lanAgents.none':
+      'Não foram encontrados agentes de ativos correspondentes nesta rede.',
+    'settings.integrations.lanAgents.scan': 'Analisar agora',
+    'settings.integrations.lanAgents.scanning': 'A analisar…',
+    'settings.integrations.lanAgents.region': 'região {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'região {region} · {count} externos ignorados',
+
+    'settings.localAi.models': 'Modelos locais',
+    'settings.localAi.speech': 'Modelos de voz locais',
+    'settings.localAi.audio': 'Dispositivos de áudio',
+
+    'settings.workspaces': 'Áreas de trabalho do agente',
+    'settings.workspaces.help':
+      'Diretorias que o agente pode ler ou escrever. Aplicado no processo principal — os caminhos fora destas raízes (incluindo escapes por links simbólicos) são recusados.',
+    'settings.workspaces.remove': 'Remover',
+    'settings.workspaces.empty': 'Ainda não há áreas de trabalho.',
+    'settings.workspaces.add': 'Adicionar',
+    'settings.commands': 'Competências de comando locais',
+    'settings.commands.help':
+      'Comandos por sistema operativo que o agente pode executar, expostos como ferramentas de cliente. A competência de carga de CPU + GPU é incluída por predefinição (só leitura).',
+  },
+
+  nl: {
+    'settings.nav.general': 'Algemeen',
+    'settings.nav.notifications': 'Meldingen',
+    'settings.nav.companion': 'Metgezel',
+    'settings.nav.agents': 'Agenten',
+    'settings.nav.wake': 'Wekwoorden',
+    'settings.nav.localAi': 'Lokale AI',
+    'settings.nav.integrations': 'Integraties',
+    'settings.nav.security': 'Beveiliging',
+    'settings.nav.connection': 'Verbinding',
+    'settings.nav.developer': 'Ontwikkelaar',
+    'settings.loading': 'Laden…',
+    'settings.general.help': 'Kies de interfacetaal voor deze app.',
+    'settings.companion.help':
+      'Hoe de 3D-agentmetgezel eruitziet en waar die op het scherm verschijnt.',
+    'settings.agents.help':
+      'Overschrijf avatar, stem, weknaam en metgezelgedrag voor één enkele agent.',
+    'settings.wake.help':
+      'Wek een agent met een uitgesproken woord en kies wat een wekactie doet.',
+
+    'settings.localAi.help': 'Modellen op het apparaat, spraak en audiorouting.',
+    'settings.integrations.help':
+      'Nexus-apps, vertrouwde certificaten en je LAN-assetagenten.',
+    'settings.security.help':
+      'Vergrendel de interface met een pincode na een periode van inactiviteit.',
+    'settings.connection.help': 'De regio, gateway en portal waarmee deze desktop verbindt.',
+    'settings.developer.help':
+      'Werkruimtes, lokale opdrachtvaardigheden, het auditspoor en de chatcache.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'aan — vergrendelde kaarten tonen geen inhoud',
+    'settings.notifications.suppressWhenLocked.off':
+      'uit — inhoud wordt ook getoond wanneer vergrendeld',
+
+    'settings.appLock': 'App-vergrendeling',
+    'settings.appLock.help':
+      'Vergrendel de interface met een pincode na een periode van inactiviteit. De vergrendeling verbergt alleen het scherm — ze blokkeert nooit aanmelding, 2FA of een beveiligde bewerking.',
+    'settings.appLock.enable': 'App vergrendelen na inactiviteit',
+    'settings.appLock.needPin': '(stel eerst een pincode in)',
+    'settings.appLock.timeout': 'Vergrendelen na (minuten inactiviteit)',
+    'settings.appLock.minuteOne': '1 minuut',
+    'settings.appLock.minutes': '{count} minuten',
+    'settings.appLock.replacePin': 'Pincode wijzigen',
+    'settings.appLock.setPin': 'Stel een pincode in ({min}–12 cijfers)',
+    'settings.appLock.replacePinAction': 'Pincode wijzigen',
+    'settings.appLock.setPinAction': 'Pincode instellen',
+    'settings.appLock.removePin': 'Pincode verwijderen',
+    'settings.appLock.lockNow': 'Nu vergrendelen',
+    'settings.appLock.armed': 'Actief · vergrendelt na {minutes} min',
+    'settings.appLock.notArmed': 'Niet actief',
+    'settings.appLock.recovery':
+      'Pincode vergeten? Meld je af of wissel van gebruiker om deze te wissen.',
+
+    'settings.companion.avatar': 'Metgezel-avatar',
+    'settings.companion.avatar.help':
+      'Hoe de 3D-agentmetgezel zich gedraagt. De avatar volgt je cursor zolang die in het metgezelvenster blijft en blijft hem over het hele scherm volgen zodra de aanwijzer het venster verlaat.',
+    'settings.companion.clickNod': 'Knikken bij klikken',
+    'settings.companion.clickNod.help':
+      '— speelt een knikgebaar af wanneer je op de metgezel klikt.',
+    'settings.companion.clickNodGesture': 'Knikgebaar bij klikken',
+    'settings.companion.clickNodGesture.help':
+      'Clip-id uit het gebarenpakket van de agent (bijv. nod, agree).',
+    'settings.companion.gazeYaw': 'Draaibereik hoofd — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'Hoe ver hoofd en nek naar de cursor draaien (10–60°). Verhoog dit als het volgen stijf aanvoelt wanneer je cursor over het scherm beweegt.',
+    'settings.companion.gazePitch': 'Kantelbereik hoofd — {deg}°',
+    'settings.companion.gazePitch.help':
+      'Hoe ver het hoofd naar boven/onder naar de cursor knikt (8–40°).',
+    'settings.companion.placement': 'Plaatsing van de metgezel',
+    'settings.companion.placement.help':
+      'Waar een nieuw geopend metgezelvenster verschijnt. Overlap wordt vermeden door het venster te verschuiven tot het past, en een onthouden positie wordt opnieuw begrensd wanneer een monitor wordt losgekoppeld.',
+    'settings.companion.placement.mode': 'Standaardpositie',
+    'settings.companion.placement.mode.bottomRight': 'Rechtsonder',
+    'settings.companion.placement.mode.bottomLeft': 'Linksonder',
+    'settings.companion.placement.mode.topRight': 'Rechtsboven',
+    'settings.companion.placement.mode.topLeft': 'Linksboven',
+    'settings.companion.placement.mode.center': 'Midden',
+    'settings.companion.placement.mode.rightOfMain': 'Rechts van het hoofdvenster',
+    'settings.companion.placement.mode.rememberLast': 'Laatste positie onthouden',
+    'settings.companion.placement.gap': 'Randmarge — {px} px',
+    'settings.companion.placement.gap.help': 'Afstand die tot de schermrand wordt aangehouden.',
+    'settings.companion.placement.rememberPerAgent': 'Onthoud een aparte positie per agent',
+    'settings.companion.placement.rememberPerAgent.help':
+      'Gebruikt door “Laatste positie onthouden” en per-agent overschrijvingen.',
+    'settings.companion.placement.bringMainToFront': 'Hoofdvenster naar voren halen',
+    'settings.companion.placement.bringMainToFront.help':
+      'Haalt het hoofdvenster naar voren zodra een metgezel automatisch opent.',
+    'settings.companion.debug': 'Metgezel-debug',
+    'settings.companion.debug.help':
+      'Ontwikkelaarsoppervlakken voor de 3D-agentmetgezel. Standaard allemaal uit; een normaal metgezelvenster blijft schoon.',
+    'settings.companion.debug.motionFeed': 'Paneel bewegingsfeed',
+    'settings.companion.debug.motionFeed.help':
+      'Live actiefeed (bron / status / Δ / op / detail).',
+    'settings.companion.debug.gestureTest': 'Gebaren-tester',
+    'settings.companion.debug.gestureTest.help':
+      'Speel een geladen clip af of voer alle one-shots uit.',
+    'settings.companion.debug.statusMotions': 'Editor voor statusbewegingen',
+    'settings.companion.debug.statusMotions.help':
+      'Clips die cyclisch worden afgespeeld terwijl de agent nadenkt / schrijft.',
+    'settings.companion.debug.sceneMode': 'Beloopbare scène',
+    'settings.companion.debug.sceneMode.help':
+      'Vloerraster + kamerbegrenzing zodat lopen / naderen zichtbaar is.',
+    'settings.companion.debug.forceHint':
+      'Je kunt dit alles ook forceren met ?companionDebug=1 in de URL van het metgezelvenster.',
+
+    'settings.agents': 'Agenten',
+    'settings.agents.shared': 'gedeeld',
+    'settings.agents.empty':
+      'Er zijn nog geen agenten beschikbaar. Meld je aan en voeg eerst een agent toe.',
+    'settings.agents.avatar': 'Avatar',
+    'settings.agents.avatar.default': 'Standaard (die van de agent)',
+    'settings.agents.placement': 'Positie van de metgezel',
+    'settings.agents.placement.inherit': 'Standaard gebruiken ({mode})',
+    'settings.agents.wakeAliases': 'Weknamen',
+    'settings.agents.wakeAliases.help':
+      'Extra zinnen die deze agent wekken, naast zijn naam.',
+    'settings.agents.ttsModel': 'Stemmodel voor antwoorden',
+    'settings.agents.ttsVoice': 'Antwoordstem',
+    'settings.agents.tts.inherit': 'Standaard gebruiken',
+    'settings.agents.ttsVoice.default': 'Standaardstem',
+    'settings.agents.ttsVoice.none': 'Geen stemmen',
+    'settings.agents.tts.save': 'Stem opslaan',
+    'settings.agents.tts.clear': 'Stem wissen',
+    'settings.agents.tts.effective': 'Effectief: {model} · {voice}',
+    'settings.agents.tts.failed': 'Kon de stem niet opslaan.',
+    'settings.agents.openCompanion': 'Metgezel van deze agent openen bij nieuwe berichten',
+
+    'settings.connection': 'Verbinding',
+    'settings.connection.region': 'Regioknooppunt',
+    'settings.connection.gateway': 'Gateway (optioneel — standaard: regio)',
+    'settings.connection.gateway.placeholder': 'gelijk aan regioknooppunt',
+    'settings.connection.portal': 'Portal (optioneel — voor omleidingen)',
+    'settings.connection.portal.placeholder': 'de regio kan de eigen portal aankondigen',
+    'settings.connection.customCa':
+      'Aangepaste CA (PEM, voor lokale/zelfondertekende regioknooppunten)',
+    'settings.connection.save': 'Verbinding opslaan',
+    'settings.connection.saving': 'Opslaan…',
+    'settings.connection.saved': 'Opgeslagen',
+    'settings.connection.runner': 'Lokale GPU-runner (BYOK)',
+    'settings.connection.runner.help':
+      'Stel de lokale modelserver van deze machine beschikbaar aan je agenten. De runner levert een loopback TLS-proxy die bij de regio is geregistreerd als BYOK-provider edge_gpu_sidecar, zodat je agenten je eigen GPU gebruiken zonder cloudtokens te kopen.',
+    'settings.connection.runner.enabled': 'Lokale runner uitvoeren zolang je bent aangemeld',
+    'settings.connection.runner.name': 'Label in de modelkiezer',
+    'settings.connection.runner.upstream': 'Upstream lokale server (OpenAI-compatibel)',
+    'settings.connection.runner.scope': 'Bereik',
+    'settings.connection.runner.scope.user': 'user (privé)',
+    'settings.connection.runner.scope.org': 'org (gedeeld met leden)',
+    'settings.connection.runner.notRunning': 'wordt niet uitgevoerd',
+    'settings.connection.runner.registered': 'geregistreerd',
+    'settings.connection.runner.registeredWith': 'geregistreerd · {id}',
+    'settings.connection.runner.notRegistered': 'niet geregistreerd',
+    'settings.connection.runner.cert':
+      'loopback-certificaat {fingerprint}… · verloopt op {expires}',
+    'settings.connection.runner.register': 'Registreren bij de regio',
+    'settings.connection.runner.stop': 'Stoppen',
+    'settings.connection.runner.failed': 'registratie mislukt',
+
+    'settings.integrations.nexusApps': 'Nexus-apps',
+    'settings.integrations.certificates': 'Vertrouwde certificaten',
+    'settings.integrations.lanAgents': 'LAN-assetagenten',
+    'settings.integrations.lanAgents.help':
+      'Assetknooppunten kondigen zich aan op het lokale netwerk via mDNS (_anx._tcp). Indien ingeschakeld verkiest de desktop het directe LAN/intranet-pad naar je eigen assetagenten boven routering via de regio. Peers uit een andere regio worden nooit vertrouwd.',
+    'settings.integrations.lanAgents.prefer': 'Lokaal pad naar mijn assetagenten verkiezen',
+    'settings.integrations.lanAgents.hostsRooms': 'host ruimtes',
+    'settings.integrations.lanAgents.none':
+      'Geen overeenkomende assetagenten gevonden op dit netwerk.',
+    'settings.integrations.lanAgents.scan': 'Nu scannen',
+    'settings.integrations.lanAgents.scanning': 'Scannen…',
+    'settings.integrations.lanAgents.region': 'regio {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'regio {region} · {count} vreemde genegeerd',
+
+    'settings.localAi.models': 'Lokale modellen',
+    'settings.localAi.speech': 'Lokale spraakmodellen',
+    'settings.localAi.audio': 'Audioapparaten',
+
+    'settings.workspaces': 'Agentwerkruimtes',
+    'settings.workspaces.help':
+      'Mappen die de agent mag lezen of schrijven. Afgedwongen in het hoofdproces — paden buiten deze roots (inclusief ontsnappingen via symbolische koppelingen) worden geweigerd.',
+    'settings.workspaces.remove': 'Verwijderen',
+    'settings.workspaces.empty': 'Nog geen werkruimtes.',
+    'settings.workspaces.add': 'Toevoegen',
+    'settings.commands': 'Lokale opdrachtvaardigheden',
+    'settings.commands.help':
+      'Opdrachten per besturingssysteem die de agent mag uitvoeren, beschikbaar als clienttools. De CPU- + GPU-belastingvaardigheid wordt standaard meegeleverd (alleen-lezen).',
+  },
+
+  pl: {
+    'settings.nav.general': 'Ogólne',
+    'settings.nav.notifications': 'Powiadomienia',
+    'settings.nav.companion': 'Towarzysz',
+    'settings.nav.agents': 'Agenci',
+    'settings.nav.wake': 'Słowa aktywujące',
+    'settings.nav.localAi': 'Lokalna AI',
+    'settings.nav.integrations': 'Integracje',
+    'settings.nav.security': 'Bezpieczeństwo',
+    'settings.nav.connection': 'Połączenie',
+    'settings.nav.developer': 'Programista',
+    'settings.loading': 'Ładowanie…',
+    'settings.general.help': 'Wybierz język interfejsu tej aplikacji.',
+    'settings.companion.help':
+      'Jak wygląda towarzysz agenta 3D i gdzie pojawia się na ekranie.',
+    'settings.agents.help':
+      'Zastąp awatar, głos, pseudonim aktywujący i zachowanie towarzysza dla pojedynczego agenta.',
+    'settings.wake.help':
+      'Aktywuj agenta wypowiedzianym słowem i wybierz, co robi aktywacja.',
+    'settings.localAi.help': 'Modele na urządzeniu, mowa i kierowanie dźwiękiem.',
+    'settings.integrations.help':
+      'Aplikacje Nexus, zaufane certyfikaty i Twoi agenci zasobów w sieci LAN.',
+    'settings.security.help':
+      'Zablokuj interfejs kodem PIN po okresie bezczynności.',
+    'settings.connection.help': 'Region, brama i portal, z którymi łączy się ten klient.',
+    'settings.developer.help':
+      'Obszary robocze, lokalne umiejętności poleceń, dziennik audytu i pamięć podręczna czatu.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'wł. — zablokowane karty nie pokazują treści',
+    'settings.notifications.suppressWhenLocked.off':
+      'wył. — treść jest pokazywana nawet przy blokadzie',
+
+    'settings.appLock': 'Blokada aplikacji',
+    'settings.appLock.help':
+      'Zablokuj interfejs kodem PIN po okresie bezczynności. Blokada tylko zasłania ekran — nigdy nie blokuje logowania, 2FA ani żadnej bezpiecznej operacji.',
+    'settings.appLock.enable': 'Zablokuj aplikację po bezczynności',
+    'settings.appLock.needPin': '(najpierw ustaw kod PIN)',
+    'settings.appLock.timeout': 'Zablokuj po (minutach bezczynności)',
+    'settings.appLock.minuteOne': '1 minuta',
+    'settings.appLock.minutes': '{count} minut',
+    'settings.appLock.replacePin': 'Zmień kod PIN',
+    'settings.appLock.setPin': 'Ustaw kod PIN ({min}–12 cyfr)',
+    'settings.appLock.replacePinAction': 'Zmień kod PIN',
+    'settings.appLock.setPinAction': 'Ustaw kod PIN',
+    'settings.appLock.removePin': 'Usuń kod PIN',
+    'settings.appLock.lockNow': 'Zablokuj teraz',
+    'settings.appLock.armed': 'Aktywna · blokuje po {minutes} min',
+    'settings.appLock.notArmed': 'Nieaktywna',
+    'settings.appLock.recovery':
+      'Nie pamiętasz kodu PIN? Wyloguj się lub zmień użytkownika, aby go usunąć.',
+
+    'settings.companion.avatar': 'Awatar towarzysza',
+    'settings.companion.avatar.help':
+      'Jak zachowuje się towarzysz agenta 3D. Awatar podąża za kursorem, dopóki pozostaje w oknie towarzysza, i śledzi go na całym ekranie, gdy wskaźnik je opuści.',
+    'settings.companion.clickNod': 'Kiwnij po kliknięciu',
+    'settings.companion.clickNod.help':
+      '— odtwarza gest kiwnięcia po kliknięciu towarzysza.',
+    'settings.companion.clickNodGesture': 'Gest kiwnięcia po kliknięciu',
+    'settings.companion.clickNodGesture.help':
+      'Identyfikator klipu z pakietu gestów agenta (np. nod, agree).',
+    'settings.companion.gazeYaw': 'Zakres obrotu głowy — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'Jak daleko głowa i szyja obracają się w stronę kursora (10–60°). Zwiększ, jeśli śledzenie wydaje się sztywne, gdy kursor przemierza ekran.',
+    'settings.companion.gazePitch': 'Zakres pochylenia głowy — {deg}°',
+    'settings.companion.gazePitch.help':
+      'Jak daleko głowa kiwa w górę/w dół w stronę kursora (8–40°).',
+    'settings.companion.placement': 'Umiejscowienie towarzysza',
+    'settings.companion.placement.help':
+      'Gdzie pojawia się nowo otwarte okno towarzysza. Nakładanie się jest unikane przez przesuwanie okna, aż się zmieści, a zapamiętana pozycja jest ponownie ograniczana, gdy monitor zostanie odłączony.',
+    'settings.companion.placement.mode': 'Pozycja domyślna',
+    'settings.companion.placement.mode.bottomRight': 'Prawy dolny róg',
+    'settings.companion.placement.mode.bottomLeft': 'Lewy dolny róg',
+    'settings.companion.placement.mode.topRight': 'Prawy górny róg',
+    'settings.companion.placement.mode.topLeft': 'Lewy górny róg',
+    'settings.companion.placement.mode.center': 'Środek',
+    'settings.companion.placement.mode.rightOfMain': 'Po prawej stronie okna głównego',
+    'settings.companion.placement.mode.rememberLast': 'Zapamiętaj ostatnią pozycję',
+    'settings.companion.placement.gap': 'Margines krawędzi — {px} px',
+    'settings.companion.placement.gap.help': 'Odległość zachowana od krawędzi ekranu.',
+    'settings.companion.placement.rememberPerAgent': 'Zapamiętuj osobną pozycję dla każdego agenta',
+    'settings.companion.placement.rememberPerAgent.help':
+      'Używane przez „Zapamiętaj ostatnią pozycję” i zastąpienia dla agenta.',
+    'settings.companion.placement.bringMainToFront': 'Wysuń okno główne na wierzch',
+    'settings.companion.placement.bringMainToFront.help':
+      'Wysuwa okno główne na wierzch za każdym razem, gdy towarzysz otwiera się automatycznie.',
+    'settings.companion.debug': 'Debugowanie towarzysza',
+    'settings.companion.debug.help':
+      'Narzędzia programistyczne dla towarzysza agenta 3D. Domyślnie wszystko wyłączone; zwykłe okno towarzysza pozostaje czyste.',
+    'settings.companion.debug.motionFeed': 'Panel strumienia ruchów',
+    'settings.companion.debug.motionFeed.help':
+      'Strumień akcji na żywo (źródło / status / Δ / op / szczegóły).',
+    'settings.companion.debug.gestureTest': 'Tester gestów',
+    'settings.companion.debug.gestureTest.help':
+      'Odtwórz dowolny wczytany klip lub uruchom wszystkie jednorazowe.',
+    'settings.companion.debug.statusMotions': 'Edytor ruchów stanu',
+    'settings.companion.debug.statusMotions.help':
+      'Klipy odtwarzane cyklicznie, gdy agent myśli / pisze.',
+    'settings.companion.debug.sceneMode': 'Scena do chodzenia',
+    'settings.companion.debug.sceneMode.help':
+      'Siatka podłogi + granice pomieszczenia, aby chodzenie / podchodzenie było widoczne.',
+    'settings.companion.debug.forceHint':
+      'Możesz też wymusić to wszystko, dodając ?companionDebug=1 do adresu URL okna towarzysza.',
+
+    'settings.agents': 'Agenci',
+    'settings.agents.shared': 'współdzielony',
+    'settings.agents.empty':
+      'Brak dostępnych agentów. Zaloguj się i najpierw dodaj agenta.',
+    'settings.agents.avatar': 'Awatar',
+    'settings.agents.avatar.default': 'Domyślny (własny agenta)',
+    'settings.agents.placement': 'Pozycja towarzysza',
+    'settings.agents.placement.inherit': 'Użyj domyślnej ({mode})',
+    'settings.agents.wakeAliases': 'Pseudonimy aktywujące',
+    'settings.agents.wakeAliases.help':
+      'Dodatkowe frazy aktywujące tego agenta, oprócz jego nazwy.',
+    'settings.agents.ttsModel': 'Model głosu odpowiedzi',
+    'settings.agents.ttsVoice': 'Głos odpowiedzi',
+    'settings.agents.tts.inherit': 'Użyj domyślnego',
+    'settings.agents.ttsVoice.default': 'Domyślny głos',
+    'settings.agents.ttsVoice.none': 'Brak głosów',
+    'settings.agents.tts.save': 'Zapisz głos',
+    'settings.agents.tts.clear': 'Wyczyść głos',
+    'settings.agents.tts.effective': 'Obowiązuje: {model} · {voice}',
+    'settings.agents.tts.failed': 'Nie udało się zapisać głosu.',
+    'settings.agents.openCompanion': 'Otwieraj towarzysza tego agenta przy nowych wiadomościach',
+
+    'settings.connection': 'Połączenie',
+    'settings.connection.region': 'Węzeł regionu',
+    'settings.connection.gateway': 'Brama (opcjonalnie — domyślnie region)',
+    'settings.connection.gateway.placeholder': 'tak jak węzeł regionu',
+    'settings.connection.portal': 'Portal (opcjonalnie — do przekierowań)',
+    'settings.connection.portal.placeholder': 'region może ogłosić własny',
+    'settings.connection.customCa':
+      'Własny CA (PEM, dla lokalnych/samopodpisanych węzłów regionu)',
+    'settings.connection.save': 'Zapisz połączenie',
+    'settings.connection.saving': 'Zapisywanie…',
+    'settings.connection.saved': 'Zapisano',
+    'settings.connection.runner': 'Lokalny runner GPU (BYOK)',
+    'settings.connection.runner.help':
+      'Udostępnij lokalny serwer modeli tego komputera swoim agentom. Runner obsługuje lokalne proxy TLS zarejestrowane w regionie jako dostawca BYOK edge_gpu_sidecar, dzięki czemu agenci mogą korzystać z Twojego GPU bez kupowania tokenów w chmurze.',
+    'settings.connection.runner.enabled': 'Uruchamiaj lokalny runner po zalogowaniu',
+    'settings.connection.runner.name': 'Etykieta w wyborze modeli',
+    'settings.connection.runner.upstream': 'Nadrzędny serwer lokalny (zgodny z OpenAI)',
+    'settings.connection.runner.scope': 'Zakres',
+    'settings.connection.runner.scope.user': 'user (prywatny)',
+    'settings.connection.runner.scope.org': 'org (współdzielony z członkami)',
+    'settings.connection.runner.notRunning': 'nie działa',
+    'settings.connection.runner.registered': 'zarejestrowany',
+    'settings.connection.runner.registeredWith': 'zarejestrowany · {id}',
+    'settings.connection.runner.notRegistered': 'niezarejestrowany',
+    'settings.connection.runner.cert':
+      'certyfikat lokalny {fingerprint}… · wygasa {expires}',
+    'settings.connection.runner.register': 'Zarejestruj w regionie',
+    'settings.connection.runner.stop': 'Zatrzymaj',
+    'settings.connection.runner.failed': 'rejestracja nie powiodła się',
+
+    'settings.integrations.nexusApps': 'Aplikacje Nexus',
+    'settings.integrations.certificates': 'Zaufane certyfikaty',
+    'settings.integrations.lanAgents': 'Agenci zasobów w sieci LAN',
+    'settings.integrations.lanAgents.help':
+      'Węzły zasobów ogłaszają się w sieci lokalnej przez mDNS (_anx._tcp). Po włączeniu klient preferuje bezpośrednią ścieżkę LAN/intranet do własnych agentów zasobów zamiast trasowania przez region. Węzły z innego regionu nigdy nie są uznawane za zaufane.',
+    'settings.integrations.lanAgents.prefer':
+      'Preferuj lokalną ścieżkę do moich agentów zasobów',
+    'settings.integrations.lanAgents.hostsRooms': 'hostuje pokoje',
+    'settings.integrations.lanAgents.none':
+      'Nie znaleziono pasujących agentów zasobów w tej sieci.',
+    'settings.integrations.lanAgents.scan': 'Skanuj teraz',
+    'settings.integrations.lanAgents.scanning': 'Skanowanie…',
+    'settings.integrations.lanAgents.region': 'region {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'region {region} · {count} obcych zignorowano',
+
+    'settings.localAi.models': 'Modele lokalne',
+    'settings.localAi.speech': 'Lokalne modele mowy',
+    'settings.localAi.audio': 'Urządzenia audio',
+
+    'settings.workspaces': 'Obszary robocze agenta',
+    'settings.workspaces.help':
+      'Katalogi, które agent może odczytywać lub zapisywać. Egzekwowane w procesie głównym — ścieżki poza tymi korzeniami (w tym wyjścia przez dowiązania symboliczne) są odrzucane.',
+    'settings.workspaces.remove': 'Usuń',
+    'settings.workspaces.empty': 'Brak obszarów roboczych.',
+    'settings.workspaces.add': 'Dodaj',
+    'settings.commands': 'Lokalne umiejętności poleceń',
+    'settings.commands.help':
+      'Polecenia zależne od systemu, które agent może uruchamiać, udostępniane jako narzędzia klienta. Umiejętność obciążenia CPU + GPU jest domyślnie dołączona (tylko do odczytu).',
+  },
+
+  tr: {
+    'settings.nav.general': 'Genel',
+    'settings.nav.notifications': 'Bildirimler',
+    'settings.nav.companion': 'Yol arkadaşı',
+    'settings.nav.agents': 'Ajanlar',
+    'settings.nav.wake': 'Uyandırma sözcükleri',
+    'settings.nav.localAi': 'Yerel YZ',
+    'settings.nav.integrations': 'Entegrasyonlar',
+    'settings.nav.security': 'Güvenlik',
+    'settings.nav.connection': 'Bağlantı',
+    'settings.nav.developer': 'Geliştirici',
+    'settings.loading': 'Yükleniyor…',
+    'settings.general.help': 'Bu uygulamanın arayüz dilini seçin.',
+    'settings.companion.help':
+      '3D ajan yol arkadaşının görünümü ve ekranda nerede görüneceği.',
+    'settings.agents.help':
+      'Tek bir ajan için avatarı, sesi, uyandırma takma adını ve yol arkadaşı davranışını geçersiz kılın.',
+    'settings.wake.help':
+      'Bir ajanı söylenen sözcükle uyandırın ve uyandırmanın ne yapacağını seçin.',
+    'settings.localAi.help': 'Cihazdaki modeller, konuşma ve ses yönlendirmesi.',
+    'settings.integrations.help':
+      'Nexus uygulamaları, güvenilen sertifikalar ve LAN varlık ajanlarınız.',
+    'settings.security.help':
+      'Hareketsizlik süresinden sonra arayüzü bir PIN ile kilitleyin.',
+    'settings.connection.help': 'Bu masaüstünün bağlandığı bölge, ağ geçidi ve portal.',
+    'settings.developer.help':
+      'Çalışma alanları, yerel komut yetenekleri, denetim kaydı ve sohbet önbelleği.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'açık — kilitli kartlar içerik göstermez',
+    'settings.notifications.suppressWhenLocked.off':
+      'kapalı — içerik kilitliyken de gösterilir',
+
+    'settings.appLock': 'Uygulama kilidi',
+    'settings.appLock.help':
+      'Hareketsizlik süresinden sonra arayüzü bir PIN ile kilitleyin. Kilit yalnızca ekranı gizler — oturum açmayı, 2FA’yı veya herhangi bir güvenli işlemi asla engellemez.',
+    'settings.appLock.enable': 'Hareketsizlikten sonra uygulamayı kilitle',
+    'settings.appLock.needPin': '(önce bir PIN belirleyin)',
+    'settings.appLock.timeout': 'Şundan sonra kilitle (dakika hareketsizlik)',
+    'settings.appLock.minuteOne': '1 dakika',
+    'settings.appLock.minutes': '{count} dakika',
+    'settings.appLock.replacePin': 'PIN’i değiştir',
+    'settings.appLock.setPin': 'Bir PIN belirleyin ({min}–12 hane)',
+    'settings.appLock.replacePinAction': 'PIN’i değiştir',
+    'settings.appLock.setPinAction': 'PIN belirle',
+    'settings.appLock.removePin': 'PIN’i kaldır',
+    'settings.appLock.lockNow': 'Şimdi kilitle',
+    'settings.appLock.armed': 'Etkin · {minutes} dk sonra kilitler',
+    'settings.appLock.notArmed': 'Etkin değil',
+    'settings.appLock.recovery':
+      'PIN’i mi unuttunuz? Temizlemek için oturumu kapatın veya kullanıcı değiştirin.',
+
+    'settings.companion.avatar': 'Yol arkadaşı avatarı',
+    'settings.companion.avatar.help':
+      '3D ajan yol arkadaşının davranışı. Avatar, yol arkadaşı penceresinde kaldığı sürece imlecinizi izler ve imleç pencereden çıktığında tüm ekranda izlemeye devam eder.',
+    'settings.companion.clickNod': 'Tıklanınca başını salla',
+    'settings.companion.clickNod.help':
+      '— yol arkadaşına tıkladığınızda bir baş sallama hareketi oynatır.',
+    'settings.companion.clickNodGesture': 'Tıklama baş sallama hareketi',
+    'settings.companion.clickNodGesture.help':
+      'Ajanın hareket paketinden klibin kimliği (örn. nod, agree).',
+    'settings.companion.gazeYaw': 'Baş dönüş aralığı — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'Başın ve boynun imlece doğru ne kadar döndüğü (10–60°). İmleç ekranda gezinirken izleme sert geliyorsa artırın.',
+    'settings.companion.gazePitch': 'Baş eğme aralığı — {deg}°',
+    'settings.companion.gazePitch.help':
+      'Başın imlece doğru yukarı/aşağı ne kadar sallandığı (8–40°).',
+    'settings.companion.placement': 'Yol arkadaşı konumu',
+    'settings.companion.placement.help':
+      'Yeni açılan bir yol arkadaşı penceresinin nerede görüneceği. Çakışma, pencere sığana kadar kaydırılarak önlenir ve bir monitör bağlantısı kesildiğinde hatırlanan konum yeniden sınırlandırılır.',
+    'settings.companion.placement.mode': 'Varsayılan konum',
+    'settings.companion.placement.mode.bottomRight': 'Sağ alt',
+    'settings.companion.placement.mode.bottomLeft': 'Sol alt',
+    'settings.companion.placement.mode.topRight': 'Sağ üst',
+    'settings.companion.placement.mode.topLeft': 'Sol üst',
+    'settings.companion.placement.mode.center': 'Orta',
+    'settings.companion.placement.mode.rightOfMain': 'Ana pencerenin sağı',
+    'settings.companion.placement.mode.rememberLast': 'Son konumu hatırla',
+    'settings.companion.placement.gap': 'Kenar boşluğu — {px} px',
+    'settings.companion.placement.gap.help': 'Ekran kenarından tutulan mesafe.',
+    'settings.companion.placement.rememberPerAgent':
+      'Her ajan için ayrı bir konum hatırla',
+    'settings.companion.placement.rememberPerAgent.help':
+      '“Son konumu hatırla” ve ajan başına geçersiz kılmalar tarafından kullanılır.',
+    'settings.companion.placement.bringMainToFront': 'Ana pencereyi öne getir',
+    'settings.companion.placement.bringMainToFront.help':
+      'Bir yol arkadaşı otomatik açıldığında ana pencereyi öne getirir.',
+    'settings.companion.debug': 'Yol arkadaşı hata ayıklama',
+    'settings.companion.debug.help':
+      '3D ajan yol arkadaşı için geliştirici yüzeyleri. Varsayılan olarak hepsi kapalı; normal bir yol arkadaşı penceresi temiz kalır.',
+    'settings.companion.debug.motionFeed': 'Hareket akışı paneli',
+    'settings.companion.debug.motionFeed.help':
+      'Canlı eylem akışı (kaynak / durum / Δ / op / ayrıntı).',
+    'settings.companion.debug.gestureTest': 'Hareket test aracı',
+    'settings.companion.debug.gestureTest.help':
+      'Yüklü herhangi bir klibi oynatın veya tüm tek seferlikleri çalıştırın.',
+    'settings.companion.debug.statusMotions': 'Durum hareketleri düzenleyicisi',
+    'settings.companion.debug.statusMotions.help':
+      'Ajan düşünürken / yazarken döngüyle oynatılan klipler.',
+    'settings.companion.debug.sceneMode': 'Gezilebilir sahne',
+    'settings.companion.debug.sceneMode.help':
+      'Zemin ızgarası + oda sınırları, böylece yürüme / yaklaşma görünür olur.',
+    'settings.companion.debug.forceHint':
+      'Bunların tümünü yol arkadaşı pencere URL’sine ?companionDebug=1 ekleyerek de zorlayabilirsiniz.',
+
+    'settings.agents': 'Ajanlar',
+    'settings.agents.shared': 'paylaşılan',
+    'settings.agents.empty':
+      'Henüz kullanılabilir ajan yok. Oturum açın ve önce bir ajan ekleyin.',
+    'settings.agents.avatar': 'Avatar',
+    'settings.agents.avatar.default': 'Varsayılan (ajanın kendi)',
+    'settings.agents.placement': 'Yol arkadaşı konumu',
+    'settings.agents.placement.inherit': 'Varsayılanı kullan ({mode})',
+    'settings.agents.wakeAliases': 'Uyandırma takma adları',
+    'settings.agents.wakeAliases.help':
+      'Bu ajanı adına ek olarak uyandıran ek ifadeler.',
+    'settings.agents.ttsModel': 'Yanıt ses modeli',
+    'settings.agents.ttsVoice': 'Yanıt sesi',
+    'settings.agents.tts.inherit': 'Varsayılanı kullan',
+    'settings.agents.ttsVoice.default': 'Varsayılan ses',
+    'settings.agents.ttsVoice.none': 'Ses yok',
+    'settings.agents.tts.save': 'Sesi kaydet',
+    'settings.agents.tts.clear': 'Sesi temizle',
+    'settings.agents.tts.effective': 'Geçerli: {model} · {voice}',
+    'settings.agents.tts.failed': 'Ses kaydedilemedi.',
+    'settings.agents.openCompanion': 'Yeni mesajlarda bu ajanın yol arkadaşını aç',
+
+    'settings.connection': 'Bağlantı',
+    'settings.connection.region': 'Bölge düğümü',
+    'settings.connection.gateway': 'Ağ geçidi (isteğe bağlı — varsayılan: bölge)',
+    'settings.connection.gateway.placeholder': 'bölge düğümüyle aynı',
+    'settings.connection.portal': 'Portal (isteğe bağlı — yönlendirmeler için)',
+    'settings.connection.portal.placeholder': 'bölge kendi portalını duyurabilir',
+    'settings.connection.customCa':
+      'Özel CA (PEM, yerel/kendinden imzalı bölge düğümleri için)',
+    'settings.connection.save': 'Bağlantıyı kaydet',
+    'settings.connection.saving': 'Kaydediliyor…',
+    'settings.connection.saved': 'Kaydedildi',
+    'settings.connection.runner': 'Yerel GPU çalıştırıcısı (BYOK)',
+    'settings.connection.runner.help':
+      'Bu makinenin yerel model sunucusunu ajanlarınıza açın. Çalıştırıcı, bölgede BYOK sağlayıcısı edge_gpu_sidecar olarak kayıtlı bir yerel TLS vekili sunar; böylece ajanlarınız bulut tokenları satın almadan kendi GPU’nuzu kullanır.',
+    'settings.connection.runner.enabled': 'Oturum açıkken yerel çalıştırıcıyı çalıştır',
+    'settings.connection.runner.name': 'Model seçicideki etiket',
+    'settings.connection.runner.upstream': 'Üst kaynak yerel sunucu (OpenAI uyumlu)',
+    'settings.connection.runner.scope': 'Kapsam',
+    'settings.connection.runner.scope.user': 'user (özel)',
+    'settings.connection.runner.scope.org': 'org (üyelerle paylaşılır)',
+    'settings.connection.runner.notRunning': 'çalışmıyor',
+    'settings.connection.runner.registered': 'kayıtlı',
+    'settings.connection.runner.registeredWith': 'kayıtlı · {id}',
+    'settings.connection.runner.notRegistered': 'kayıtlı değil',
+    'settings.connection.runner.cert':
+      'yerel sertifika {fingerprint}… · bitiş {expires}',
+    'settings.connection.runner.register': 'Bölgeye kaydet',
+    'settings.connection.runner.stop': 'Durdur',
+    'settings.connection.runner.failed': 'kayıt başarısız oldu',
+
+    'settings.integrations.nexusApps': 'Nexus uygulamaları',
+    'settings.integrations.certificates': 'Güvenilen sertifikalar',
+    'settings.integrations.lanAgents': 'LAN varlık ajanları',
+    'settings.integrations.lanAgents.help':
+      'Varlık düğümleri yerel ağda mDNS (_anx._tcp) üzerinden kendilerini duyurur. Etkinleştirildiğinde masaüstü, bölge üzerinden yönlendirmek yerine kendi varlık ajanlarınıza doğrudan LAN/intranet yolunu tercih eder. Başka bir bölgeden gelen eşlere asla güvenilmez.',
+    'settings.integrations.lanAgents.prefer':
+      'Varlık ajanlarıma yerel yolu tercih et',
+    'settings.integrations.lanAgents.hostsRooms': 'odaları barındırır',
+    'settings.integrations.lanAgents.none':
+      'Bu ağda eşleşen varlık ajanı bulunamadı.',
+    'settings.integrations.lanAgents.scan': 'Şimdi tara',
+    'settings.integrations.lanAgents.scanning': 'Taranıyor…',
+    'settings.integrations.lanAgents.region': 'bölge {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'bölge {region} · {count} yabancı yok sayıldı',
+
+    'settings.localAi.models': 'Yerel modeller',
+    'settings.localAi.speech': 'Yerel konuşma modelleri',
+    'settings.localAi.audio': 'Ses aygıtları',
+
+    'settings.workspaces': 'Ajan çalışma alanları',
+    'settings.workspaces.help':
+      'Ajanın okuyabileceği veya yazabileceği dizinler. Ana süreçte uygulanır — bu köklerin dışındaki yollar (sembolik bağlantı kaçışları dahil) reddedilir.',
+    'settings.workspaces.remove': 'Kaldır',
+    'settings.workspaces.empty': 'Henüz çalışma alanı yok.',
+    'settings.workspaces.add': 'Ekle',
+    'settings.commands': 'Yerel komut yetenekleri',
+    'settings.commands.help':
+      'Ajanın çalıştırabileceği işletim sistemine özgü komutlar, istemci araçları olarak sunulur. CPU + GPU yükü yeteneği varsayılan olarak gelir (salt okunur).',
+  },
+
+  ar: {
+    'settings.nav.general': 'عام',
+    'settings.nav.notifications': 'الإشعارات',
+    'settings.nav.companion': 'الرفيق',
+    'settings.nav.agents': 'الوكلاء',
+    'settings.nav.wake': 'كلمات التنبيه',
+    'settings.nav.localAi': 'الذكاء الاصطناعي المحلي',
+    'settings.nav.integrations': 'عمليات التكامل',
+    'settings.nav.security': 'الأمان',
+    'settings.nav.connection': 'الاتصال',
+    'settings.nav.developer': 'المطوّر',
+    'settings.loading': 'جارٍ التحميل…',
+    'settings.general.help': 'اختر لغة واجهة هذا التطبيق.',
+    'settings.companion.help': 'كيف يبدو رفيق الوكيل ثلاثي الأبعاد وأين يظهر على الشاشة.',
+    'settings.agents.help':
+      'تجاوز الصورة الرمزية والصوت واسم التنبيه وسلوك الرفيق لوكيل واحد.',
+    'settings.wake.help': 'نبّه وكيلًا بكلمة منطوقة واختر ما يفعله التنبيه.',
+    'settings.localAi.help': 'النماذج على الجهاز والكلام وتوجيه الصوت.',
+    'settings.integrations.help':
+      'تطبيقات Nexus والشهادات الموثوقة ووكلاء الأصول على شبكتك المحلية.',
+    'settings.security.help': 'اقفل الواجهة برمز PIN بعد فترة من الخمول.',
+    'settings.connection.help': 'المنطقة والبوابة والبوابة الإلكترونية التي يتصل بها هذا التطبيق.',
+    'settings.developer.help':
+      'مساحات العمل ومهارات الأوامر المحلية وسجل التدقيق وذاكرة المحادثة المؤقتة.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'مفعّل — البطاقات المقفلة لا تُظهر أي محتوى',
+    'settings.notifications.suppressWhenLocked.off':
+      'معطّل — يُعرض المحتوى حتى أثناء القفل',
+
+    'settings.appLock': 'قفل التطبيق',
+    'settings.appLock.help':
+      'اقفل الواجهة برمز PIN بعد فترة من الخمول. القفل يخفي الشاشة فقط — ولا يمنع أبدًا تسجيل الدخول أو المصادقة الثنائية أو أي عملية آمنة.',
+    'settings.appLock.enable': 'اقفل التطبيق بعد الخمول',
+    'settings.appLock.needPin': '(عيّن رمز PIN أولًا)',
+    'settings.appLock.timeout': 'القفل بعد (دقائق من الخمول)',
+    'settings.appLock.minuteOne': 'دقيقة واحدة',
+    'settings.appLock.minutes': '{count} دقيقة',
+    'settings.appLock.replacePin': 'تغيير رمز PIN',
+    'settings.appLock.setPin': 'عيّن رمز PIN ({min}–12 رقمًا)',
+    'settings.appLock.replacePinAction': 'تغيير رمز PIN',
+    'settings.appLock.setPinAction': 'تعيين رمز PIN',
+    'settings.appLock.removePin': 'إزالة رمز PIN',
+    'settings.appLock.lockNow': 'اقفل الآن',
+    'settings.appLock.armed': 'مُسلّح · يقفل بعد {minutes} دقيقة',
+    'settings.appLock.notArmed': 'غير مُسلّح',
+    'settings.appLock.recovery':
+      'نسيت رمز PIN؟ سجّل الخروج أو بدّل المستخدم لمسحه.',
+
+    'settings.companion.avatar': 'الصورة الرمزية للرفيق',
+    'settings.companion.avatar.help':
+      'كيف يتصرّف رفيق الوكيل ثلاثي الأبعاد. تتبع الصورة الرمزية مؤشرك ما دامت داخل نافذة الرفيق، وتواصل تتبعه عبر الشاشة كاملةً بمجرد أن يخرج المؤشر منها.',
+    'settings.companion.clickNod': 'إيماءة عند النقر',
+    'settings.companion.clickNod.help': '— تشغيل إيماءة إيماء عند النقر على الرفيق.',
+    'settings.companion.clickNodGesture': 'إيماءة الإيماء عند النقر',
+    'settings.companion.clickNodGesture.help':
+      'معرّف المقطع من حزمة إيماءات الوكيل (مثل nod، agree).',
+    'settings.companion.gazeYaw': 'مدى دوران الرأس — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'مقدار دوران الرأس والرقبة نحو المؤشر (10–60°). ارفعه إذا بدا التتبّع متيبّسًا عند تحرّك المؤشر عبر الشاشة.',
+    'settings.companion.gazePitch': 'مدى إمالة الرأس — {deg}°',
+    'settings.companion.gazePitch.help':
+      'مقدار إيماءة الرأس لأعلى/لأسفل نحو المؤشر (8–40°).',
+    'settings.companion.placement': 'موضع الرفيق',
+    'settings.companion.placement.help':
+      'أين تظهر نافذة الرفيق المفتوحة حديثًا. يُتجنّب التداخل بإزاحة النافذة حتى تتّسع، ويُعاد تقييد الموضع المحفوظ عند فصل شاشة.',
+    'settings.companion.placement.mode': 'الموضع الافتراضي',
+    'settings.companion.placement.mode.bottomRight': 'أسفل اليمين',
+    'settings.companion.placement.mode.bottomLeft': 'أسفل اليسار',
+    'settings.companion.placement.mode.topRight': 'أعلى اليمين',
+    'settings.companion.placement.mode.topLeft': 'أعلى اليسار',
+    'settings.companion.placement.mode.center': 'الوسط',
+    'settings.companion.placement.mode.rightOfMain': 'يمين النافذة الرئيسية',
+    'settings.companion.placement.mode.rememberLast': 'تذكّر آخر موضع',
+    'settings.companion.placement.gap': 'هامش الحافة — {px} بكسل',
+    'settings.companion.placement.gap.help': 'المسافة المُحتفَظ بها من حافة الشاشة.',
+    'settings.companion.placement.rememberPerAgent': 'تذكّر موضعًا منفصلًا لكل وكيل',
+    'settings.companion.placement.rememberPerAgent.help':
+      'يُستخدم بواسطة «تذكّر آخر موضع» وتجاوزات كل وكيل.',
+    'settings.companion.placement.bringMainToFront': 'إحضار النافذة الرئيسية إلى المقدمة',
+    'settings.companion.placement.bringMainToFront.help':
+      'يرفع النافذة الرئيسية إلى المقدمة كلما فُتح رفيق تلقائيًا.',
+    'settings.companion.debug': 'تصحيح الرفيق',
+    'settings.companion.debug.help':
+      'أدوات المطوّر لرفيق الوكيل ثلاثي الأبعاد. كلها معطّلة افتراضيًا؛ تبقى نافذة الرفيق العادية نظيفة.',
+    'settings.companion.debug.motionFeed': 'لوحة تدفّق الحركة',
+    'settings.companion.debug.motionFeed.help':
+      'تدفّق الإجراءات الحيّ (المصدر / الحالة / Δ / العملية / التفاصيل).',
+    'settings.companion.debug.gestureTest': 'مُختبر الإيماءات',
+    'settings.companion.debug.gestureTest.help':
+      'شغّل أي مقطع محمّل، أو نفّذ جميع اللمرات الفردية.',
+    'settings.companion.debug.statusMotions': 'محرّر حركات الحالة',
+    'settings.companion.debug.statusMotions.help':
+      'مقاطع تُعاد دوريًا أثناء تفكير الوكيل / كتابته.',
+    'settings.companion.debug.sceneMode': 'مشهد قابل للتجوّل',
+    'settings.companion.debug.sceneMode.help':
+      'شبكة الأرضية + حدود الغرفة بحيث يظهر المشي / الاقتراب.',
+    'settings.companion.debug.forceHint':
+      'يمكنك أيضًا فرض كل هذا بإضافة ?companionDebug=1 إلى رابط نافذة الرفيق.',
+
+    'settings.agents': 'الوكلاء',
+    'settings.agents.shared': 'مشترك',
+    'settings.agents.empty': 'لا يوجد وكلاء متاحون بعد. سجّل الدخول وأضف وكيلًا أولًا.',
+    'settings.agents.avatar': 'الصورة الرمزية',
+    'settings.agents.avatar.default': 'افتراضي (الخاص بالوكيل)',
+    'settings.agents.placement': 'موضع الرفيق',
+    'settings.agents.placement.inherit': 'استخدام الافتراضي ({mode})',
+    'settings.agents.wakeAliases': 'أسماء التنبيه',
+    'settings.agents.wakeAliases.help':
+      'عبارات إضافية تنبّه هذا الوكيل، إلى جانب اسمه.',
+    'settings.agents.ttsModel': 'نموذج صوت الرد',
+    'settings.agents.ttsVoice': 'صوت الرد',
+    'settings.agents.tts.inherit': 'استخدام الافتراضي',
+    'settings.agents.ttsVoice.default': 'الصوت الافتراضي',
+    'settings.agents.ttsVoice.none': 'لا توجد أصوات',
+    'settings.agents.tts.save': 'حفظ الصوت',
+    'settings.agents.tts.clear': 'مسح الصوت',
+    'settings.agents.tts.effective': 'الفعلي: {model} · {voice}',
+    'settings.agents.tts.failed': 'تعذّر حفظ الصوت.',
+    'settings.agents.openCompanion': 'افتح رفيق هذا الوكيل عند وصول رسائل جديدة',
+
+    'settings.connection': 'الاتصال',
+    'settings.connection.region': 'عقدة المنطقة',
+    'settings.connection.gateway': 'البوابة (اختياري — الافتراضي المنطقة)',
+    'settings.connection.gateway.placeholder': 'مثل عقدة المنطقة',
+    'settings.connection.portal': 'البوابة الإلكترونية (اختياري — لإعادة التوجيه)',
+    'settings.connection.portal.placeholder': 'قد تُعلن المنطقة بوابتها الخاصة',
+    'settings.connection.customCa':
+      'مرجع شهادات مخصّص (PEM، لعقد المنطقة المحلية/ذاتية التوقيع)',
+    'settings.connection.save': 'حفظ الاتصال',
+    'settings.connection.saving': 'جارٍ الحفظ…',
+    'settings.connection.saved': 'تم الحفظ',
+    'settings.connection.runner': 'مشغّل GPU المحلي (BYOK)',
+    'settings.connection.runner.help':
+      'اعرض خادم النماذج المحلي لهذا الجهاز على وكلائك. يقدّم المشغّل وكيل TLS محليًا مسجّلًا لدى المنطقة كمزوّد BYOK من نوع edge_gpu_sidecar، حتى يستخدم وكلاؤك وحدة GPU الخاصة بك دون شراء رموز سحابية.',
+    'settings.connection.runner.enabled': 'تشغيل المشغّل المحلي أثناء تسجيل الدخول',
+    'settings.connection.runner.name': 'التسمية في منتقي النماذج',
+    'settings.connection.runner.upstream': 'الخادم المحلي الأعلى (متوافق مع OpenAI)',
+    'settings.connection.runner.scope': 'النطاق',
+    'settings.connection.runner.scope.user': 'user (خاص)',
+    'settings.connection.runner.scope.org': 'org (مشترك مع الأعضاء)',
+    'settings.connection.runner.notRunning': 'غير قيد التشغيل',
+    'settings.connection.runner.registered': 'مسجّل',
+    'settings.connection.runner.registeredWith': 'مسجّل · {id}',
+    'settings.connection.runner.notRegistered': 'غير مسجّل',
+    'settings.connection.runner.cert':
+      'شهادة محلية {fingerprint}… · تنتهي في {expires}',
+    'settings.connection.runner.register': 'التسجيل لدى المنطقة',
+    'settings.connection.runner.stop': 'إيقاف',
+    'settings.connection.runner.failed': 'فشل التسجيل',
+
+    'settings.integrations.nexusApps': 'تطبيقات Nexus',
+    'settings.integrations.certificates': 'الشهادات الموثوقة',
+    'settings.integrations.lanAgents': 'وكلاء الأصول على الشبكة المحلية',
+    'settings.integrations.lanAgents.help':
+      'تُعلن عقد الأصول عن نفسها على الشبكة المحلية عبر mDNS (_anx._tcp). عند التمكين، يفضّل التطبيق المسار المباشر عبر الشبكة المحلية/الداخلية إلى وكلاء أصولك بدلًا من التوجيه عبر المنطقة. لا يُوثق أبدًا بأقران من منطقة أخرى.',
+    'settings.integrations.lanAgents.prefer':
+      'تفضيل المسار المحلي إلى وكلاء أصولي',
+    'settings.integrations.lanAgents.hostsRooms': 'يستضيف غرفًا',
+    'settings.integrations.lanAgents.none':
+      'لم يُعثر على وكلاء أصول مطابقين في هذه الشبكة.',
+    'settings.integrations.lanAgents.scan': 'افحص الآن',
+    'settings.integrations.lanAgents.scanning': 'جارٍ الفحص…',
+    'settings.integrations.lanAgents.region': 'المنطقة {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'المنطقة {region} · تم تجاهل {count} من الخارج',
+
+    'settings.localAi.models': 'النماذج المحلية',
+    'settings.localAi.speech': 'نماذج الكلام المحلية',
+    'settings.localAi.audio': 'أجهزة الصوت',
+
+    'settings.workspaces': 'مساحات عمل الوكيل',
+    'settings.workspaces.help':
+      'المجلدات التي يجوز للوكيل قراءتها أو الكتابة فيها. تُفرض في العملية الرئيسية — تُرفض المسارات خارج هذه الجذور (بما في ذلك الهروب عبر الروابط الرمزية).',
+    'settings.workspaces.remove': 'إزالة',
+    'settings.workspaces.empty': 'لا توجد مساحات عمل بعد.',
+    'settings.workspaces.add': 'إضافة',
+    'settings.commands': 'مهارات الأوامر المحلية',
+    'settings.commands.help':
+      'أوامر خاصة بكل نظام تشغيل يجوز للوكيل تشغيلها، معروضة كأدوات للعميل. تُضمَّن مهارة حمل CPU + GPU افتراضيًا (للقراءة فقط).',
+  },
+
+  hi: {
+    'settings.nav.general': 'सामान्य',
+    'settings.nav.notifications': 'सूचनाएँ',
+    'settings.nav.companion': 'साथी',
+    'settings.nav.agents': 'एजेंट',
+    'settings.nav.wake': 'वेक शब्द',
+    'settings.nav.localAi': 'स्थानीय AI',
+    'settings.nav.integrations': 'एकीकरण',
+    'settings.nav.security': 'सुरक्षा',
+    'settings.nav.connection': 'कनेक्शन',
+    'settings.nav.developer': 'डेवलपर',
+    'settings.loading': 'लोड हो रहा है…',
+    'settings.general.help': 'इस ऐप के इंटरफ़ेस की भाषा चुनें।',
+    'settings.companion.help':
+      '3D एजेंट साथी कैसा दिखता है और स्क्रीन पर कहाँ दिखाई देता है।',
+    'settings.agents.help':
+      'एक एजेंट के लिए अवतार, आवाज़, वेक उपनाम और साथी व्यवहार बदलें।',
+    'settings.wake.help':
+      'बोले गए शब्द से एजेंट को जगाएँ और चुनें कि जगाने पर क्या हो।',
+    'settings.localAi.help': 'डिवाइस पर मौजूद मॉडल, वाणी और ऑडियो रूटिंग।',
+    'settings.integrations.help':
+      'Nexus ऐप्स, विश्वसनीय प्रमाणपत्र और LAN एसेट एजेंट।',
+    'settings.security.help': 'निष्क्रियता के बाद इंटरफ़ेस को PIN से लॉक करें।',
+    'settings.connection.help': 'यह डेस्कटॉप जिस क्षेत्र, गेटवे और पोर्टल से जुड़ता है।',
+    'settings.developer.help':
+      'वर्कस्पेस, स्थानीय कमांड कौशल, ऑडिट ट्रेल और चैट कैश।',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'चालू — लॉक किए गए कार्ड कोई सामग्री नहीं दिखाते',
+    'settings.notifications.suppressWhenLocked.off':
+      'बंद — लॉक होने पर भी सामग्री दिखाई जाती है',
+
+    'settings.appLock': 'ऐप लॉक',
+    'settings.appLock.help':
+      'निष्क्रियता के बाद इंटरफ़ेस को PIN से लॉक करें। लॉक केवल स्क्रीन छिपाता है — यह कभी भी साइन-इन, 2FA या किसी सुरक्षित कार्रवाई को नहीं रोकता।',
+    'settings.appLock.enable': 'निष्क्रियता के बाद ऐप लॉक करें',
+    'settings.appLock.needPin': '(पहले PIN सेट करें)',
+    'settings.appLock.timeout': 'इतने बाद लॉक करें (निष्क्रियता के मिनट)',
+    'settings.appLock.minuteOne': '1 मिनट',
+    'settings.appLock.minutes': '{count} मिनट',
+    'settings.appLock.replacePin': 'PIN बदलें',
+    'settings.appLock.setPin': 'PIN सेट करें ({min}–12 अंक)',
+    'settings.appLock.replacePinAction': 'PIN बदलें',
+    'settings.appLock.setPinAction': 'PIN सेट करें',
+    'settings.appLock.removePin': 'PIN हटाएँ',
+    'settings.appLock.lockNow': 'अभी लॉक करें',
+    'settings.appLock.armed': 'सक्रिय · {minutes} मिनट बाद लॉक होगा',
+    'settings.appLock.notArmed': 'सक्रिय नहीं',
+    'settings.appLock.recovery':
+      'PIN भूल गए? साइन आउट करें या उपयोगकर्ता बदलें ताकि इसे हटाया जा सके।',
+
+    'settings.companion.avatar': 'साथी अवतार',
+    'settings.companion.avatar.help':
+      '3D एजेंट साथी कैसे व्यवहार करता है। अवतार आपके कर्सर का पीछा तब तक करता है जब तक वह साथी विंडो में रहता है, और कर्सर बाहर निकलने पर पूरी स्क्रीन पर ट्रैक करता रहता है।',
+    'settings.companion.clickNod': 'क्लिक पर सिर हिलाएँ',
+    'settings.companion.clickNod.help':
+      '— साथी पर क्लिक करने पर सिर हिलाने का जेस्चर चलाएँ।',
+    'settings.companion.clickNodGesture': 'क्लिक पर सिर हिलाने का जेस्चर',
+    'settings.companion.clickNodGesture.help':
+      'एजेंट के जेस्चर पैक से क्लिप आईडी (जैसे nod, agree)।',
+    'settings.companion.gazeYaw': 'सिर घुमाने की सीमा — {deg}°',
+    'settings.companion.gazeYaw.help':
+      'सिर/गर्दन कर्सर की ओर कितना मुड़ते हैं (10–60°)। यदि कर्सर स्क्रीन पर घूमते समय ट्रैकिंग कठोर लगे तो इसे बढ़ाएँ।',
+    'settings.companion.gazePitch': 'सिर झुकाने की सीमा — {deg}°',
+    'settings.companion.gazePitch.help':
+      'सिर कर्सर की ओर ऊपर/नीचे कितना झुकता है (8–40°)।',
+    'settings.companion.placement': 'साथी का स्थान',
+    'settings.companion.placement.help':
+      'नई खुली साथी विंडो कहाँ दिखाई देती है। विंडो को तब तक खिसकाकर ओवरलैप से बचा जाता है जब तक वह फ़िट न हो जाए, और मॉनिटर हटने पर याद किया गया स्थान फिर से सीमित कर दिया जाता है।',
+    'settings.companion.placement.mode': 'डिफ़ॉल्ट स्थान',
+    'settings.companion.placement.mode.bottomRight': 'नीचे दाएँ',
+    'settings.companion.placement.mode.bottomLeft': 'नीचे बाएँ',
+    'settings.companion.placement.mode.topRight': 'ऊपर दाएँ',
+    'settings.companion.placement.mode.topLeft': 'ऊपर बाएँ',
+    'settings.companion.placement.mode.center': 'केंद्र',
+    'settings.companion.placement.mode.rightOfMain': 'मुख्य विंडो के दाएँ',
+    'settings.companion.placement.mode.rememberLast': 'अंतिम स्थान याद रखें',
+    'settings.companion.placement.gap': 'किनारे का मार्जिन — {px} px',
+    'settings.companion.placement.gap.help': 'स्क्रीन के किनारे से रखी जाने वाली दूरी।',
+    'settings.companion.placement.rememberPerAgent': 'प्रत्येक एजेंट के लिए अलग स्थान याद रखें',
+    'settings.companion.placement.rememberPerAgent.help':
+      '“अंतिम स्थान याद रखें” और प्रति-एजेंट ओवरराइड द्वारा उपयोग किया जाता है।',
+    'settings.companion.placement.bringMainToFront': 'मुख्य विंडो को सामने लाएँ',
+    'settings.companion.placement.bringMainToFront.help':
+      'जब भी कोई साथी स्वतः खुले, मुख्य विंडो को सामने लाता है।',
+    'settings.companion.debug': 'साथी डिबग',
+    'settings.companion.debug.help':
+      '3D एजेंट साथी के लिए डेवलपर सतहें। डिफ़ॉल्ट रूप से सभी बंद; सामान्य साथी विंडो साफ़ रहती है।',
+    'settings.companion.debug.motionFeed': 'मोशन फ़ीड पैनल',
+    'settings.companion.debug.motionFeed.help':
+      'लाइव एक्शन फ़ीड (स्रोत / स्थिति / Δ / ऑप / विवरण)।',
+    'settings.companion.debug.gestureTest': 'जेस्चर टेस्टर',
+    'settings.companion.debug.gestureTest.help':
+      'कोई भी लोड किया गया क्लिप चलाएँ, या सभी वन-शॉट चलाएँ।',
+    'settings.companion.debug.statusMotions': 'स्थिति मोशन एडिटर',
+    'settings.companion.debug.statusMotions.help':
+      'एजेंट के सोचने / लिखने के दौरान चक्रीय रूप से चलने वाले क्लिप।',
+    'settings.companion.debug.sceneMode': 'चलने योग्य दृश्य',
+    'settings.companion.debug.sceneMode.help':
+      'ज़मीन का ग्रिड + कमरे की सीमाएँ ताकि चलना / पास आना दिखाई दे।',
+    'settings.companion.debug.forceHint':
+      'आप साथी विंडो के URL में ?companionDebug=1 जोड़कर भी इन सब को बाध्य कर सकते हैं।',
+
+    'settings.agents': 'एजेंट',
+    'settings.agents.shared': 'साझा',
+    'settings.agents.empty':
+      'अभी कोई एजेंट उपलब्ध नहीं है। साइन इन करें और पहले एक एजेंट जोड़ें।',
+    'settings.agents.avatar': 'अवतार',
+    'settings.agents.avatar.default': 'डिफ़ॉल्ट (एजेंट का अपना)',
+    'settings.agents.placement': 'साथी का स्थान',
+    'settings.agents.placement.inherit': 'डिफ़ॉल्ट उपयोग करें ({mode})',
+    'settings.agents.wakeAliases': 'वेक उपनाम',
+    'settings.agents.wakeAliases.help':
+      'इस एजेंट को उसके नाम के अतिरिक्त जगाने वाले अतिरिक्त वाक्यांश।',
+    'settings.agents.ttsModel': 'उत्तर आवाज़ मॉडल',
+    'settings.agents.ttsVoice': 'उत्तर आवाज़',
+    'settings.agents.tts.inherit': 'डिफ़ॉल्ट उपयोग करें',
+    'settings.agents.ttsVoice.default': 'डिफ़ॉल्ट आवाज़',
+    'settings.agents.ttsVoice.none': 'कोई आवाज़ नहीं',
+    'settings.agents.tts.save': 'आवाज़ सहेजें',
+    'settings.agents.tts.clear': 'आवाज़ साफ़ करें',
+    'settings.agents.tts.effective': 'प्रभावी: {model} · {voice}',
+    'settings.agents.tts.failed': 'आवाज़ सहेजी नहीं जा सकी।',
+    'settings.agents.openCompanion': 'नए संदेशों पर इस एजेंट का साथी खोलें',
+
+    'settings.connection': 'कनेक्शन',
+    'settings.connection.region': 'क्षेत्र नोड',
+    'settings.connection.gateway': 'गेटवे (वैकल्पिक — डिफ़ॉल्ट क्षेत्र)',
+    'settings.connection.gateway.placeholder': 'क्षेत्र नोड जैसा',
+    'settings.connection.portal': 'पोर्टल (वैकल्पिक — रीडायरेक्ट के लिए)',
+    'settings.connection.portal.placeholder': 'क्षेत्र अपना घोषित कर सकता है',
+    'settings.connection.customCa':
+      'कस्टम CA (PEM, स्थानीय/स्व-हस्ताक्षरित क्षेत्र नोड के लिए)',
+    'settings.connection.save': 'कनेक्शन सहेजें',
+    'settings.connection.saving': 'सहेजा जा रहा है…',
+    'settings.connection.saved': 'सहेजा गया',
+    'settings.connection.runner': 'स्थानीय GPU रनर (BYOK)',
+    'settings.connection.runner.help':
+      'इस मशीन के स्थानीय मॉडल सर्वर को अपने एजेंट के लिए उपलब्ध कराएँ। रनर एक लूपबैक TLS प्रॉक्सी परोसता है जो क्षेत्र में BYOK प्रदाता edge_gpu_sidecar के रूप में पंजीकृत होता है, ताकि आपके एजेंट क्लाउड टोकन खरीदे बिना आपके GPU का उपयोग कर सकें।',
+    'settings.connection.runner.enabled': 'साइन इन रहते हुए स्थानीय रनर चलाएँ',
+    'settings.connection.runner.name': 'मॉडल पिकर में लेबल',
+    'settings.connection.runner.upstream': 'अपस्ट्रीम स्थानीय सर्वर (OpenAI-संगत)',
+    'settings.connection.runner.scope': 'दायरा',
+    'settings.connection.runner.scope.user': 'user (निजी)',
+    'settings.connection.runner.scope.org': 'org (सदस्यों के साथ साझा)',
+    'settings.connection.runner.notRunning': 'चल नहीं रहा',
+    'settings.connection.runner.registered': 'पंजीकृत',
+    'settings.connection.runner.registeredWith': 'पंजीकृत · {id}',
+    'settings.connection.runner.notRegistered': 'पंजीकृत नहीं',
+    'settings.connection.runner.cert':
+      'लूपबैक प्रमाणपत्र {fingerprint}… · समाप्ति {expires}',
+    'settings.connection.runner.register': 'क्षेत्र में पंजीकृत करें',
+    'settings.connection.runner.stop': 'रोकें',
+    'settings.connection.runner.failed': 'पंजीकरण विफल',
+
+    'settings.integrations.nexusApps': 'Nexus ऐप्स',
+    'settings.integrations.certificates': 'विश्वसनीय प्रमाणपत्र',
+    'settings.integrations.lanAgents': 'LAN एसेट एजेंट',
+    'settings.integrations.lanAgents.help':
+      'एसेट नोड mDNS (_anx._tcp) के ज़रिए स्थानीय नेटवर्क पर स्वयं की घोषणा करते हैं। सक्षम होने पर, डेस्कटॉप क्षेत्र से रूट करने के बजाय अपने एसेट एजेंट तक सीधे LAN/इंट्रानेट पथ को प्राथमिकता देता है। किसी अन्य क्षेत्र के पीयर पर कभी भरोसा नहीं किया जाता।',
+    'settings.integrations.lanAgents.prefer': 'मेरे एसेट एजेंट तक स्थानीय पथ को प्राथमिकता दें',
+    'settings.integrations.lanAgents.hostsRooms': 'कमरे होस्ट करता है',
+    'settings.integrations.lanAgents.none':
+      'इस नेटवर्क पर कोई मेल खाता एसेट एजेंट नहीं मिला।',
+    'settings.integrations.lanAgents.scan': 'अभी स्कैन करें',
+    'settings.integrations.lanAgents.scanning': 'स्कैन हो रहा है…',
+    'settings.integrations.lanAgents.region': 'क्षेत्र {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'क्षेत्र {region} · {count} बाहरी अनदेखे',
+
+    'settings.localAi.models': 'स्थानीय मॉडल',
+    'settings.localAi.speech': 'स्थानीय वाणी मॉडल',
+    'settings.localAi.audio': 'ऑडियो डिवाइस',
+
+    'settings.workspaces': 'एजेंट वर्कस्पेस',
+    'settings.workspaces.help':
+      'वे निर्देशिकाएँ जिन्हें एजेंट पढ़ या लिख सकता है। मुख्य प्रक्रिया में लागू — इन रूट के बाहर के पथ (सिमलिंक एस्केप सहित) अस्वीकार कर दिए जाते हैं।',
+    'settings.workspaces.remove': 'हटाएँ',
+    'settings.workspaces.empty': 'अभी कोई वर्कस्पेस नहीं।',
+    'settings.workspaces.add': 'जोड़ें',
+    'settings.commands': 'स्थानीय कमांड कौशल',
+    'settings.commands.help':
+      'प्रति-OS कमांड जिन्हें एजेंट चला सकता है, क्लाइंट टूल के रूप में उपलब्ध। CPU + GPU लोड कौशल डिफ़ॉल्ट रूप से शामिल है (केवल-पढ़ने योग्य)।',
+  },
+
+  zh: {
+    'settings.nav.general': '常规',
+    'settings.nav.notifications': '通知',
+    'settings.nav.companion': '伙伴',
+    'settings.nav.agents': '智能体',
+    'settings.nav.wake': '唤醒词',
+    'settings.nav.localAi': '本地 AI',
+    'settings.nav.integrations': '集成',
+    'settings.nav.security': '安全',
+    'settings.nav.connection': '连接',
+    'settings.nav.developer': '开发者',
+    'settings.loading': '正在加载…',
+    'settings.general.help': '选择此应用的界面语言。',
+    'settings.companion.help': '3D 智能体伙伴的外观以及它在屏幕上的出现位置。',
+    'settings.agents.help': '为单个智能体覆盖头像、语音、唤醒昵称和伙伴行为。',
+    'settings.wake.help': '用说出的词语唤醒智能体，并选择唤醒时执行的操作。',
+    'settings.localAi.help': '设备上的模型、语音和音频路由。',
+    'settings.integrations.help': 'Nexus 应用、受信任证书以及你的局域网资产智能体。',
+    'settings.security.help': '在一段时间无操作后用 PIN 锁定界面。',
+    'settings.connection.help': '此桌面客户端连接的区域、网关和门户。',
+    'settings.developer.help': '工作区、本地命令技能、审计记录和聊天缓存。',
+
+    'settings.notifications.suppressWhenLocked.on': '开启 — 锁定时卡片不显示内容',
+    'settings.notifications.suppressWhenLocked.off': '关闭 — 即使锁定也显示内容',
+
+    'settings.appLock': '应用锁',
+    'settings.appLock.help':
+      '在一段时间无操作后用 PIN 锁定界面。锁定仅隐藏屏幕——它绝不会阻止登录、2FA 或任何安全操作。',
+    'settings.appLock.enable': '无操作后锁定应用',
+    'settings.appLock.needPin': '（请先设置 PIN）',
+    'settings.appLock.timeout': '在以下时间后锁定（无操作分钟数）',
+    'settings.appLock.minuteOne': '1 分钟',
+    'settings.appLock.minutes': '{count} 分钟',
+    'settings.appLock.replacePin': '更改 PIN',
+    'settings.appLock.setPin': '设置 PIN（{min}–12 位数字）',
+    'settings.appLock.replacePinAction': '更改 PIN',
+    'settings.appLock.setPinAction': '设置 PIN',
+    'settings.appLock.removePin': '移除 PIN',
+    'settings.appLock.lockNow': '立即锁定',
+    'settings.appLock.armed': '已启用 · {minutes} 分钟后锁定',
+    'settings.appLock.notArmed': '未启用',
+    'settings.appLock.recovery': '忘记 PIN？退出登录或切换用户即可清除。',
+
+    'settings.companion.avatar': '伙伴头像',
+    'settings.companion.avatar.help':
+      '3D 智能体伙伴的行为方式。头像在伙伴窗口内会跟随光标，当光标离开窗口后仍会继续在整个屏幕上跟踪。',
+    'settings.companion.clickNod': '点击时点头',
+    'settings.companion.clickNod.help': '— 点击伙伴时播放点头动作。',
+    'settings.companion.clickNodGesture': '点击点头动作',
+    'settings.companion.clickNodGesture.help': '智能体动作包中的片段 id（例如 nod、agree）。',
+    'settings.companion.gazeYaw': '头部转动范围 — {deg}°',
+    'settings.companion.gazeYaw.help':
+      '头部/颈部朝向光标转动的幅度（10–60°）。如果光标划过屏幕时跟踪显得僵硬，可调高此值。',
+    'settings.companion.gazePitch': '头部俯仰范围 — {deg}°',
+    'settings.companion.gazePitch.help': '头部朝光标上下点动的幅度（8–40°）。',
+    'settings.companion.placement': '伙伴放置位置',
+    'settings.companion.placement.help':
+      '新打开的伙伴窗口出现的位置。通过移动窗口直到能够容纳来避免重叠；当显示器断开时，会重新限制已记住的位置。',
+    'settings.companion.placement.mode': '默认位置',
+    'settings.companion.placement.mode.bottomRight': '右下',
+    'settings.companion.placement.mode.bottomLeft': '左下',
+    'settings.companion.placement.mode.topRight': '右上',
+    'settings.companion.placement.mode.topLeft': '左上',
+    'settings.companion.placement.mode.center': '居中',
+    'settings.companion.placement.mode.rightOfMain': '主窗口右侧',
+    'settings.companion.placement.mode.rememberLast': '记住上次位置',
+    'settings.companion.placement.gap': '边缘边距 — {px} px',
+    'settings.companion.placement.gap.help': '与屏幕边缘保持的距离。',
+    'settings.companion.placement.rememberPerAgent': '为每个智能体记住独立位置',
+    'settings.companion.placement.rememberPerAgent.help':
+      '供“记住上次位置”和按智能体覆盖使用。',
+    'settings.companion.placement.bringMainToFront': '将主窗口置于最前',
+    'settings.companion.placement.bringMainToFront.help':
+      '每当伙伴自动打开时，将主窗口置于最前。',
+    'settings.companion.debug': '伙伴调试',
+    'settings.companion.debug.help':
+      '3D 智能体伙伴的开发者界面。默认全部关闭；普通伙伴窗口保持整洁。',
+    'settings.companion.debug.motionFeed': '动作流面板',
+    'settings.companion.debug.motionFeed.help':
+      '实时动作流（来源 / 状态 / Δ / 操作 / 详情）。',
+    'settings.companion.debug.gestureTest': '动作测试器',
+    'settings.companion.debug.gestureTest.help': '播放任意已加载的片段，或运行所有一次性动作。',
+    'settings.companion.debug.statusMotions': '状态动作编辑器',
+    'settings.companion.debug.statusMotions.help': '智能体思考/写作时循环播放的片段。',
+    'settings.companion.debug.sceneMode': '可行走场景',
+    'settings.companion.debug.sceneMode.help': '地面网格 + 房间边界，使行走/靠近可见。',
+    'settings.companion.debug.forceHint':
+      '你也可以在伙伴窗口 URL 中添加 ?companionDebug=1 来强制开启所有这些功能。',
+
+    'settings.agents': '智能体',
+    'settings.agents.shared': '共享',
+    'settings.agents.empty': '尚无可用的智能体。请先登录并添加一个智能体。',
+    'settings.agents.avatar': '头像',
+    'settings.agents.avatar.default': '默认（智能体自带的）',
+    'settings.agents.placement': '伙伴位置',
+    'settings.agents.placement.inherit': '使用默认（{mode}）',
+    'settings.agents.wakeAliases': '唤醒昵称',
+    'settings.agents.wakeAliases.help': '除名称外，还能唤醒此智能体的额外短语。',
+    'settings.agents.ttsModel': '回复语音模型',
+    'settings.agents.ttsVoice': '回复语音',
+    'settings.agents.tts.inherit': '使用默认',
+    'settings.agents.ttsVoice.default': '默认语音',
+    'settings.agents.ttsVoice.none': '无语音',
+    'settings.agents.tts.save': '保存语音',
+    'settings.agents.tts.clear': '清除语音',
+    'settings.agents.tts.effective': '生效：{model} · {voice}',
+    'settings.agents.tts.failed': '无法保存语音。',
+    'settings.agents.openCompanion': '收到新消息时打开此智能体的伙伴窗口',
+
+    'settings.connection': '连接',
+    'settings.connection.region': '区域节点',
+    'settings.connection.gateway': '网关（可选——默认使用区域）',
+    'settings.connection.gateway.placeholder': '与区域节点相同',
+    'settings.connection.portal': '门户（可选——用于重定向）',
+    'settings.connection.portal.placeholder': '区域可公布自己的门户',
+    'settings.connection.customCa': '自定义 CA（PEM，用于本地/自签名区域节点）',
+    'settings.connection.save': '保存连接',
+    'settings.connection.saving': '正在保存…',
+    'settings.connection.saved': '已保存',
+    'settings.connection.runner': '本地 GPU 运行器（BYOK）',
+    'settings.connection.runner.help':
+      '将此机器的本地模型服务器开放给你的智能体。运行器提供一个回环 TLS 代理，并在区域中注册为 BYOK 的 edge_gpu_sidecar 提供商，使你的智能体无需购买云端 token 即可使用自己的 GPU。',
+    'settings.connection.runner.enabled': '登录时运行本地运行器',
+    'settings.connection.runner.name': '模型选择器中的标签',
+    'settings.connection.runner.upstream': '上游本地服务器（兼容 OpenAI）',
+    'settings.connection.runner.scope': '范围',
+    'settings.connection.runner.scope.user': 'user（私有）',
+    'settings.connection.runner.scope.org': 'org（与成员共享）',
+    'settings.connection.runner.notRunning': '未运行',
+    'settings.connection.runner.registered': '已注册',
+    'settings.connection.runner.registeredWith': '已注册 · {id}',
+    'settings.connection.runner.notRegistered': '未注册',
+    'settings.connection.runner.cert': '回环证书 {fingerprint}… · 到期 {expires}',
+    'settings.connection.runner.register': '在区域中注册',
+    'settings.connection.runner.stop': '停止',
+    'settings.connection.runner.failed': '注册失败',
+
+    'settings.integrations.nexusApps': 'Nexus 应用',
+    'settings.integrations.certificates': '受信任证书',
+    'settings.integrations.lanAgents': '局域网资产智能体',
+    'settings.integrations.lanAgents.help':
+      '资产节点通过 mDNS（_anx._tcp）在局域网上广播自身。启用后，桌面客户端会优先选择直连你自己的资产智能体的局域网/内网路径，而不是经由区域路由。来自其他区域的节点永远不会被信任。',
+    'settings.integrations.lanAgents.prefer': '优先使用到我的资产智能体的本地路径',
+    'settings.integrations.lanAgents.hostsRooms': '承载房间',
+    'settings.integrations.lanAgents.none': '在此网络上未找到匹配的资产智能体。',
+    'settings.integrations.lanAgents.scan': '立即扫描',
+    'settings.integrations.lanAgents.scanning': '正在扫描…',
+    'settings.integrations.lanAgents.region': '区域 {region}',
+    'settings.integrations.lanAgents.regionForeign': '区域 {region} · 已忽略 {count} 个外来节点',
+
+    'settings.localAi.models': '本地模型',
+    'settings.localAi.speech': '本地语音模型',
+    'settings.localAi.audio': '音频设备',
+
+    'settings.workspaces': '智能体工作区',
+    'settings.workspaces.help':
+      '智能体可读取或写入的目录。在主进程中强制执行——这些根目录之外的路径（包括符号链接逃逸）都会被拒绝。',
+    'settings.workspaces.remove': '移除',
+    'settings.workspaces.empty': '尚无工作区。',
+    'settings.workspaces.add': '添加',
+    'settings.commands': '本地命令技能',
+    'settings.commands.help':
+      '智能体可运行的分操作系统命令，以客户端工具的形式提供。CPU + GPU 负载技能默认随附（只读）。',
+  },
+
+  ja: {
+    'settings.nav.general': '一般',
+    'settings.nav.notifications': '通知',
+    'settings.nav.companion': 'コンパニオン',
+    'settings.nav.agents': 'エージェント',
+    'settings.nav.wake': 'ウェイクワード',
+    'settings.nav.localAi': 'ローカル AI',
+    'settings.nav.integrations': '連携',
+    'settings.nav.security': 'セキュリティ',
+    'settings.nav.connection': '接続',
+    'settings.nav.developer': '開発者',
+    'settings.loading': '読み込み中…',
+    'settings.general.help': 'このアプリのインターフェース言語を選択します。',
+    'settings.companion.help': '3D エージェントコンパニオンの見た目と画面での表示位置。',
+    'settings.agents.help':
+      '1 つのエージェントについてアバター、音声、ウェイクのニックネーム、コンパニオンの動作を上書きします。',
+    'settings.wake.help': '話した言葉でエージェントを呼び出し、呼び出し時の動作を選びます。',
+    'settings.localAi.help': 'デバイス上のモデル、音声、オーディオ出力のルーティング。',
+    'settings.integrations.help': 'Nexus アプリ、信頼済み証明書、LAN のアセットエージェント。',
+    'settings.security.help': '一定時間操作がないと PIN でインターフェースをロックします。',
+    'settings.connection.help': 'このデスクトップが接続するリージョン、ゲートウェイ、ポータル。',
+    'settings.developer.help':
+      'ワークスペース、ローカルコマンドスキル、監査トレイル、チャットキャッシュ。',
+
+    'settings.notifications.suppressWhenLocked.on':
+      'オン — ロック中のカードは内容を表示しません',
+    'settings.notifications.suppressWhenLocked.off':
+      'オフ — ロック中でも内容を表示します',
+
+    'settings.appLock': 'アプリロック',
+    'settings.appLock.help':
+      '一定時間操作がないと PIN でインターフェースをロックします。ロックは画面を隠すだけで、サインイン、2FA、安全な操作を妨げることはありません。',
+    'settings.appLock.enable': '操作がないとアプリをロック',
+    'settings.appLock.needPin': '（先に PIN を設定してください）',
+    'settings.appLock.timeout': '次の時間後にロック（操作なしの分数）',
+    'settings.appLock.minuteOne': '1 分',
+    'settings.appLock.minutes': '{count} 分',
+    'settings.appLock.replacePin': 'PIN を変更',
+    'settings.appLock.setPin': 'PIN を設定（{min}～12 桁）',
+    'settings.appLock.replacePinAction': 'PIN を変更',
+    'settings.appLock.setPinAction': 'PIN を設定',
+    'settings.appLock.removePin': 'PIN を削除',
+    'settings.appLock.lockNow': '今すぐロック',
+    'settings.appLock.armed': '有効 · {minutes} 分後にロック',
+    'settings.appLock.notArmed': '無効',
+    'settings.appLock.recovery':
+      'PIN を忘れましたか？サインアウトするかユーザーを切り替えると解除されます。',
+
+    'settings.companion.avatar': 'コンパニオンのアバター',
+    'settings.companion.avatar.help':
+      '3D エージェントコンパニオンの動作。アバターはコンパニオンウィンドウ内にいる間はカーソルを追い、ポインタがウィンドウを離れると画面全体で追跡を続けます。',
+    'settings.companion.clickNod': 'クリックでうなずく',
+    'settings.companion.clickNod.help':
+      '— コンパニオンをクリックしたときにうなずきのジェスチャーを再生します。',
+    'settings.companion.clickNodGesture': 'クリック時のうなずきジェスチャー',
+    'settings.companion.clickNodGesture.help':
+      'エージェントのジェスチャーパックのクリップ ID（例: nod、agree）。',
+    'settings.companion.gazeYaw': '頭の回転範囲 — {deg}°',
+    'settings.companion.gazeYaw.help':
+      '頭と首がカーソルの方向へ回る量（10～60°）。カーソルが画面を横切るときに追跡が硬く感じる場合は上げてください。',
+    'settings.companion.gazePitch': '頭の傾き範囲 — {deg}°',
+    'settings.companion.gazePitch.help':
+      '頭がカーソルの方向へ上下にうなずく量（8～40°）。',
+    'settings.companion.placement': 'コンパニオンの配置',
+    'settings.companion.placement.help':
+      '新しく開いたコンパニオンウィンドウが表示される位置。ウィンドウが収まるまでずらして重なりを避け、モニターが切断されると記憶した位置を再び制限します。',
+    'settings.companion.placement.mode': '既定の位置',
+    'settings.companion.placement.mode.bottomRight': '右下',
+    'settings.companion.placement.mode.bottomLeft': '左下',
+    'settings.companion.placement.mode.topRight': '右上',
+    'settings.companion.placement.mode.topLeft': '左上',
+    'settings.companion.placement.mode.center': '中央',
+    'settings.companion.placement.mode.rightOfMain': 'メインウィンドウの右',
+    'settings.companion.placement.mode.rememberLast': '最後の位置を記憶',
+    'settings.companion.placement.gap': '端の余白 — {px} px',
+    'settings.companion.placement.gap.help': '画面の端から保つ距離。',
+    'settings.companion.placement.rememberPerAgent': 'エージェントごとに別々の位置を記憶',
+    'settings.companion.placement.rememberPerAgent.help':
+      '「最後の位置を記憶」とエージェント単位の上書きで使用します。',
+    'settings.companion.placement.bringMainToFront': 'メインウィンドウを前面に出す',
+    'settings.companion.placement.bringMainToFront.help':
+      'コンパニオンが自動で開くたびにメインウィンドウを前面に持ち上げます。',
+    'settings.companion.debug': 'コンパニオンのデバッグ',
+    'settings.companion.debug.help':
+      '3D エージェントコンパニオン向けの開発者向け画面。既定ではすべてオフで、通常のコンパニオンウィンドウはすっきりしたままです。',
+    'settings.companion.debug.motionFeed': 'モーションフィードパネル',
+    'settings.companion.debug.motionFeed.help':
+      'ライブのアクションフィード（ソース / 状態 / Δ / 操作 / 詳細）。',
+    'settings.companion.debug.gestureTest': 'ジェスチャーテスター',
+    'settings.companion.debug.gestureTest.help':
+      '読み込んだ任意のクリップを再生、またはすべてのワンショットを実行します。',
+    'settings.companion.debug.statusMotions': 'ステータスモーションエディター',
+    'settings.companion.debug.statusMotions.help':
+      'エージェントが思考 / 執筆中に循環再生されるクリップ。',
+    'settings.companion.debug.sceneMode': '歩けるシーン',
+    'settings.companion.debug.sceneMode.help':
+      '床グリッド + 部屋の境界で、歩行 / 接近が見えるようにします。',
+    'settings.companion.debug.forceHint':
+      'コンパニオンウィンドウの URL に ?companionDebug=1 を付けてこれらすべてを強制することもできます。',
+
+    'settings.agents': 'エージェント',
+    'settings.agents.shared': '共有',
+    'settings.agents.empty':
+      '利用できるエージェントがまだありません。サインインして先にエージェントを追加してください。',
+    'settings.agents.avatar': 'アバター',
+    'settings.agents.avatar.default': '既定（エージェント自身のもの）',
+    'settings.agents.placement': 'コンパニオンの位置',
+    'settings.agents.placement.inherit': '既定を使用（{mode}）',
+    'settings.agents.wakeAliases': 'ウェイクのニックネーム',
+    'settings.agents.wakeAliases.help':
+      '名前以外にこのエージェントを呼び出せる追加のフレーズ。',
+    'settings.agents.ttsModel': '応答音声モデル',
+    'settings.agents.ttsVoice': '応答音声',
+    'settings.agents.tts.inherit': '既定を使用',
+    'settings.agents.ttsVoice.default': '既定の音声',
+    'settings.agents.ttsVoice.none': '音声なし',
+    'settings.agents.tts.save': '音声を保存',
+    'settings.agents.tts.clear': '音声を消去',
+    'settings.agents.tts.effective': '有効: {model} · {voice}',
+    'settings.agents.tts.failed': '音声を保存できませんでした。',
+    'settings.agents.openCompanion': '新着メッセージでこのエージェントのコンパニオンを開く',
+
+    'settings.connection': '接続',
+    'settings.connection.region': 'リージョンノード',
+    'settings.connection.gateway': 'ゲートウェイ（任意 — 既定はリージョン）',
+    'settings.connection.gateway.placeholder': 'リージョンノードと同じ',
+    'settings.connection.portal': 'ポータル（任意 — リダイレクト用）',
+    'settings.connection.portal.placeholder': 'リージョンが独自のものを通知できます',
+    'settings.connection.customCa':
+      'カスタム CA（PEM、ローカル/自己署名のリージョンノード用）',
+    'settings.connection.save': '接続を保存',
+    'settings.connection.saving': '保存中…',
+    'settings.connection.saved': '保存しました',
+    'settings.connection.runner': 'ローカル GPU ランナー（BYOK）',
+    'settings.connection.runner.help':
+      'このマシンのローカルモデルサーバーをエージェントに公開します。ランナーはループバック TLS プロキシを提供し、リージョンに BYOK の edge_gpu_sidecar プロバイダーとして登録されるため、エージェントはクラウドトークンを購入せずに自身の GPU を使用できます。',
+    'settings.connection.runner.enabled': 'サインイン中はローカルランナーを実行',
+    'settings.connection.runner.name': 'モデルピッカーでの表示名',
+    'settings.connection.runner.upstream': '上流のローカルサーバー（OpenAI 互換）',
+    'settings.connection.runner.scope': 'スコープ',
+    'settings.connection.runner.scope.user': 'user（プライベート）',
+    'settings.connection.runner.scope.org': 'org（メンバーと共有）',
+    'settings.connection.runner.notRunning': '実行していません',
+    'settings.connection.runner.registered': '登録済み',
+    'settings.connection.runner.registeredWith': '登録済み · {id}',
+    'settings.connection.runner.notRegistered': '未登録',
+    'settings.connection.runner.cert':
+      'ループバック証明書 {fingerprint}… · 有効期限 {expires}',
+    'settings.connection.runner.register': 'リージョンに登録',
+    'settings.connection.runner.stop': '停止',
+    'settings.connection.runner.failed': '登録に失敗しました',
+
+    'settings.integrations.nexusApps': 'Nexus アプリ',
+    'settings.integrations.certificates': '信頼済み証明書',
+    'settings.integrations.lanAgents': 'LAN アセットエージェント',
+    'settings.integrations.lanAgents.help':
+      'アセットノードは mDNS（_anx._tcp）でローカルネットワーク上に自身を通知します。有効にすると、デスクトップはリージョン経由ではなく、自分のアセットエージェントへの直接の LAN/イントラネット経路を優先します。別のリージョンのピアは決して信頼されません。',
+    'settings.integrations.lanAgents.prefer':
+      '自分のアセットエージェントへのローカル経路を優先する',
+    'settings.integrations.lanAgents.hostsRooms': 'ルームをホスト',
+    'settings.integrations.lanAgents.none':
+      'このネットワーク上に一致するアセットエージェントが見つかりません。',
+    'settings.integrations.lanAgents.scan': '今すぐスキャン',
+    'settings.integrations.lanAgents.scanning': 'スキャン中…',
+    'settings.integrations.lanAgents.region': 'リージョン {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      'リージョン {region} · 外部 {count} 件を無視',
+
+    'settings.localAi.models': 'ローカルモデル',
+    'settings.localAi.speech': 'ローカル音声モデル',
+    'settings.localAi.audio': 'オーディオデバイス',
+
+    'settings.workspaces': 'エージェントワークスペース',
+    'settings.workspaces.help':
+      'エージェントが読み書きできるディレクトリ。メインプロセスで強制され、これらのルート外のパス（シンボリックリンクによる脱出を含む）は拒否されます。',
+    'settings.workspaces.remove': '削除',
+    'settings.workspaces.empty': 'ワークスペースはまだありません。',
+    'settings.workspaces.add': '追加',
+    'settings.commands': 'ローカルコマンドスキル',
+    'settings.commands.help':
+      'エージェントが実行できる OS 別のコマンドで、クライアントツールとして公開されます。CPU + GPU 負荷スキルは既定で同梱されています（読み取り専用）。',
+  },
+
+  ko: {
+    'settings.nav.general': '일반',
+    'settings.nav.notifications': '알림',
+    'settings.nav.companion': '컴패니언',
+    'settings.nav.agents': '에이전트',
+    'settings.nav.wake': '웨이크 워드',
+    'settings.nav.localAi': '로컬 AI',
+    'settings.nav.integrations': '연동',
+    'settings.nav.security': '보안',
+    'settings.nav.connection': '연결',
+    'settings.nav.developer': '개발자',
+    'settings.loading': '불러오는 중…',
+    'settings.general.help': '이 앱의 인터페이스 언어를 선택하세요.',
+    'settings.companion.help': '3D 에이전트 컴패니언의 모습과 화면에서 나타나는 위치.',
+    'settings.agents.help':
+      '단일 에이전트의 아바타, 음성, 웨이크 별칭, 컴패니언 동작을 재정의합니다.',
+    'settings.wake.help': '말한 단어로 에이전트를 깨우고 웨이크 시 동작을 선택하세요.',
+    'settings.localAi.help': '기기 내 모델, 음성, 오디오 출력 라우팅.',
+    'settings.integrations.help': 'Nexus 앱, 신뢰할 수 있는 인증서, LAN 자산 에이전트.',
+    'settings.security.help': '일정 시간 입력이 없으면 PIN으로 인터페이스를 잠급니다.',
+    'settings.connection.help': '이 데스크톱이 연결하는 리전, 게이트웨이, 포털.',
+    'settings.developer.help':
+      '워크스페이스, 로컬 명령 스킬, 감사 기록, 채팅 캐시.',
+
+    'settings.notifications.suppressWhenLocked.on':
+      '켜짐 — 잠긴 카드는 내용을 표시하지 않음',
+    'settings.notifications.suppressWhenLocked.off':
+      '꺼짐 — 잠긴 상태에서도 내용을 표시',
+
+    'settings.appLock': '앱 잠금',
+    'settings.appLock.help':
+      '일정 시간 입력이 없으면 PIN으로 인터페이스를 잠급니다. 잠금은 화면만 가릴 뿐 로그인, 2FA, 보안 작업을 막지 않습니다.',
+    'settings.appLock.enable': '입력이 없으면 앱 잠금',
+    'settings.appLock.needPin': '(먼저 PIN을 설정하세요)',
+    'settings.appLock.timeout': '다음 시간 후 잠금(입력 없음 분)',
+    'settings.appLock.minuteOne': '1분',
+    'settings.appLock.minutes': '{count}분',
+    'settings.appLock.replacePin': 'PIN 변경',
+    'settings.appLock.setPin': 'PIN 설정({min}–12자리)',
+    'settings.appLock.replacePinAction': 'PIN 변경',
+    'settings.appLock.setPinAction': 'PIN 설정',
+    'settings.appLock.removePin': 'PIN 제거',
+    'settings.appLock.lockNow': '지금 잠금',
+    'settings.appLock.armed': '활성 · {minutes}분 후 잠금',
+    'settings.appLock.notArmed': '비활성',
+    'settings.appLock.recovery':
+      'PIN을 잊으셨나요? 로그아웃하거나 사용자를 전환하면 지워집니다.',
+
+    'settings.companion.avatar': '컴패니언 아바타',
+    'settings.companion.avatar.help':
+      '3D 에이전트 컴패니언의 동작 방식. 아바타는 컴패니언 창에 있는 동안 커서를 따라가며, 포인터가 창을 벗어나면 화면 전체에서 계속 추적합니다.',
+    'settings.companion.clickNod': '클릭 시 끄덕임',
+    'settings.companion.clickNod.help':
+      '— 컴패니언을 클릭하면 끄덕임 제스처를 재생합니다.',
+    'settings.companion.clickNodGesture': '클릭 시 끄덕임 제스처',
+    'settings.companion.clickNodGesture.help':
+      '에이전트 제스처 팩의 클립 id(예: nod, agree).',
+    'settings.companion.gazeYaw': '머리 회전 범위 — {deg}°',
+    'settings.companion.gazeYaw.help':
+      '머리와 목이 커서를 향해 회전하는 정도(10–60°). 커서가 화면을 가로지를 때 추적이 뻣뻣하면 값을 높이세요.',
+    'settings.companion.gazePitch': '머리 기울기 범위 — {deg}°',
+    'settings.companion.gazePitch.help':
+      '머리가 커서를 향해 위/아래로 끄덕이는 정도(8–40°).',
+    'settings.companion.placement': '컴패니언 배치',
+    'settings.companion.placement.help':
+      '새로 열린 컴패니언 창이 나타나는 위치. 창이 들어갈 때까지 밀어 겹침을 피하며, 모니터가 분리되면 기억된 위치를 다시 제한합니다.',
+    'settings.companion.placement.mode': '기본 위치',
+    'settings.companion.placement.mode.bottomRight': '오른쪽 아래',
+    'settings.companion.placement.mode.bottomLeft': '왼쪽 아래',
+    'settings.companion.placement.mode.topRight': '오른쪽 위',
+    'settings.companion.placement.mode.topLeft': '왼쪽 위',
+    'settings.companion.placement.mode.center': '가운데',
+    'settings.companion.placement.mode.rightOfMain': '기본 창 오른쪽',
+    'settings.companion.placement.mode.rememberLast': '마지막 위치 기억',
+    'settings.companion.placement.gap': '가장자리 여백 — {px} px',
+    'settings.companion.placement.gap.help': '화면 가장자리에서 유지하는 거리.',
+    'settings.companion.placement.rememberPerAgent': '에이전트별로 별도 위치 기억',
+    'settings.companion.placement.rememberPerAgent.help':
+      '“마지막 위치 기억”과 에이전트별 재정의에서 사용됩니다.',
+    'settings.companion.placement.bringMainToFront': '기본 창을 앞으로 가져오기',
+    'settings.companion.placement.bringMainToFront.help':
+      '컴패니언이 자동으로 열릴 때마다 기본 창을 앞으로 올립니다.',
+    'settings.companion.debug': '컴패니언 디버그',
+    'settings.companion.debug.help':
+      '3D 에이전트 컴패니언용 개발자 화면. 기본적으로 모두 꺼져 있으며, 일반 컴패니언 창은 깔끔하게 유지됩니다.',
+    'settings.companion.debug.motionFeed': '모션 피드 패널',
+    'settings.companion.debug.motionFeed.help':
+      '실시간 동작 피드(소스 / 상태 / Δ / 동작 / 세부 정보).',
+    'settings.companion.debug.gestureTest': '제스처 테스터',
+    'settings.companion.debug.gestureTest.help':
+      '불러온 아무 클립이나 재생하거나 모든 원샷을 실행합니다.',
+    'settings.companion.debug.statusMotions': '상태 모션 편집기',
+    'settings.companion.debug.statusMotions.help':
+      '에이전트가 생각/작성하는 동안 반복 재생되는 클립.',
+    'settings.companion.debug.sceneMode': '걸어다닐 수 있는 장면',
+    'settings.companion.debug.sceneMode.help':
+      '바닥 그리드 + 방 경계로 걷기/접근이 보이게 합니다.',
+    'settings.companion.debug.forceHint':
+      '컴패니언 창 URL에 ?companionDebug=1을 추가해 이 모두를 강제로 켤 수도 있습니다.',
+
+    'settings.agents': '에이전트',
+    'settings.agents.shared': '공유됨',
+    'settings.agents.empty':
+      '아직 사용할 수 있는 에이전트가 없습니다. 로그인한 뒤 먼저 에이전트를 추가하세요.',
+    'settings.agents.avatar': '아바타',
+    'settings.agents.avatar.default': '기본(에이전트 자체)',
+    'settings.agents.placement': '컴패니언 위치',
+    'settings.agents.placement.inherit': '기본 사용({mode})',
+    'settings.agents.wakeAliases': '웨이크 별칭',
+    'settings.agents.wakeAliases.help':
+      '이름 외에 이 에이전트를 깨우는 추가 문구.',
+    'settings.agents.ttsModel': '응답 음성 모델',
+    'settings.agents.ttsVoice': '응답 음성',
+    'settings.agents.tts.inherit': '기본 사용',
+    'settings.agents.ttsVoice.default': '기본 음성',
+    'settings.agents.ttsVoice.none': '음성 없음',
+    'settings.agents.tts.save': '음성 저장',
+    'settings.agents.tts.clear': '음성 지우기',
+    'settings.agents.tts.effective': '적용: {model} · {voice}',
+    'settings.agents.tts.failed': '음성을 저장하지 못했습니다.',
+    'settings.agents.openCompanion': '새 메시지에서 이 에이전트의 컴패니언 열기',
+
+    'settings.connection': '연결',
+    'settings.connection.region': '리전 노드',
+    'settings.connection.gateway': '게이트웨이(선택 — 기본값은 리전)',
+    'settings.connection.gateway.placeholder': '리전 노드와 동일',
+    'settings.connection.portal': '포털(선택 — 리디렉션용)',
+    'settings.connection.portal.placeholder': '리전이 자체 포털을 알릴 수 있음',
+    'settings.connection.customCa':
+      '사용자 지정 CA(PEM, 로컬/자체 서명 리전 노드용)',
+    'settings.connection.save': '연결 저장',
+    'settings.connection.saving': '저장 중…',
+    'settings.connection.saved': '저장됨',
+    'settings.connection.runner': '로컬 GPU 러너(BYOK)',
+    'settings.connection.runner.help':
+      '이 컴퓨터의 로컬 모델 서버를 에이전트에 노출합니다. 러너는 리전에 BYOK edge_gpu_sidecar 공급자로 등록된 루프백 TLS 프록시를 제공하므로, 에이전트가 클라우드 토큰을 구매하지 않고도 자체 GPU를 사용할 수 있습니다.',
+    'settings.connection.runner.enabled': '로그인한 동안 로컬 러너 실행',
+    'settings.connection.runner.name': '모델 선택기의 라벨',
+    'settings.connection.runner.upstream': '업스트림 로컬 서버(OpenAI 호환)',
+    'settings.connection.runner.scope': '범위',
+    'settings.connection.runner.scope.user': 'user(비공개)',
+    'settings.connection.runner.scope.org': 'org(멤버와 공유)',
+    'settings.connection.runner.notRunning': '실행 중이 아님',
+    'settings.connection.runner.registered': '등록됨',
+    'settings.connection.runner.registeredWith': '등록됨 · {id}',
+    'settings.connection.runner.notRegistered': '등록되지 않음',
+    'settings.connection.runner.cert':
+      '루프백 인증서 {fingerprint}… · 만료 {expires}',
+    'settings.connection.runner.register': '리전에 등록',
+    'settings.connection.runner.stop': '중지',
+    'settings.connection.runner.failed': '등록 실패',
+
+    'settings.integrations.nexusApps': 'Nexus 앱',
+    'settings.integrations.certificates': '신뢰할 수 있는 인증서',
+    'settings.integrations.lanAgents': 'LAN 자산 에이전트',
+    'settings.integrations.lanAgents.help':
+      '자산 노드는 mDNS(_anx._tcp)를 통해 로컬 네트워크에 자신을 알립니다. 활성화하면 데스크톱은 리전을 경유하는 대신 내 자산 에이전트로 가는 직접 LAN/인트라넷 경로를 우선합니다. 다른 리전의 피어는 절대 신뢰하지 않습니다.',
+    'settings.integrations.lanAgents.prefer': '내 자산 에이전트로 가는 로컬 경로 우선',
+    'settings.integrations.lanAgents.hostsRooms': '룸 호스팅',
+    'settings.integrations.lanAgents.none':
+      '이 네트워크에서 일치하는 자산 에이전트를 찾지 못했습니다.',
+    'settings.integrations.lanAgents.scan': '지금 검색',
+    'settings.integrations.lanAgents.scanning': '검색 중…',
+    'settings.integrations.lanAgents.region': '리전 {region}',
+    'settings.integrations.lanAgents.regionForeign':
+      '리전 {region} · 외부 {count}개 무시됨',
+
+    'settings.localAi.models': '로컬 모델',
+    'settings.localAi.speech': '로컬 음성 모델',
+    'settings.localAi.audio': '오디오 장치',
+
+    'settings.workspaces': '에이전트 워크스페이스',
+    'settings.workspaces.help':
+      '에이전트가 읽거나 쓸 수 있는 디렉터리. 메인 프로세스에서 적용되며, 이 루트 밖의 경로(심볼릭 링크 이탈 포함)는 거부됩니다.',
+    'settings.workspaces.remove': '제거',
+    'settings.workspaces.empty': '아직 워크스페이스가 없습니다.',
+    'settings.workspaces.add': '추가',
+    'settings.commands': '로컬 명령 스킬',
+    'settings.commands.help':
+      '에이전트가 실행할 수 있는 OS별 명령으로, 클라이언트 도구로 노출됩니다. CPU + GPU 부하 스킬은 기본 제공됩니다(읽기 전용).',
+  },
+};

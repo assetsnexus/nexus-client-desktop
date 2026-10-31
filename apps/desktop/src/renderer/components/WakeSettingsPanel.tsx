@@ -15,23 +15,16 @@
  *    transcript after the inactivity timeout;
  *  - run a live detection test right below the master switch.
  *
- * Layout is deliberately compact: each binding is a single dense card, and the
- * "readiness" checklist highlights exactly which field still needs configuring
- * so a user who installed a model can see *why* a wake is not listening yet.
+ * This file is the container: the "what a wake does" form lives here, and the
+ * heavier editors (binding card, nickname list, submit phrases, live test,
+ * readiness checklist) live under `components/wake/` so no single file grows
+ * unmanageable.
  *
  * TRUST: this panel only configures *detection*. The copy is explicit that a wake
  * word is not authentication and cannot approve anything.
  */
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   bridge,
   type LocalVoiceState,
@@ -45,22 +38,30 @@ import {
   type WakeWordBinding,
 } from '../bridge.js';
 import {
-  MAX_WAKE_ALIASES,
-  SUGGESTED_SUBMIT_PHRASES,
   WAKE_TIMEOUT_MAX_SECONDS,
   WAKE_TIMEOUT_MIN_SECONDS,
   aliasKey,
-  aliasesForPhrase,
-  bindingPhrases,
-  isLargeWakeModel,
-  normalizeAliasPhrase,
 } from '../../shared/wake.js';
 import { agentIsAutoMapped, isAutoBinding, phraseFromAgentName } from '../../shared/wake-automap.js';
 import { reloadWakeDirector } from '../wake/director-host.js';
-import { createUtteranceSource } from '../wake/utterance.js';
-import { startEnrollment, type EnrollmentSession } from '../wake/enroll.js';
-import { createWakeLiveTest, type WakeLiveTest, type WakeLiveTestState } from '../wake/live-test.js';
 import { useVoiceSnapshot } from '../voice/use-voice-store.js';
+import { AgentAliasesEditor } from './wake/AgentAliasesEditor.js';
+import { BindingEditor } from './wake/BindingEditor.js';
+import { LiveDetectionTest } from './wake/LiveDetectionTest.js';
+import { SpeechModelReadiness } from './wake/SpeechModelReadiness.js';
+import { SubmitPhraseEditor } from './wake/SubmitPhraseEditor.js';
+import {
+  SUGGESTED_PHRASES,
+  ExternalLink,
+  button,
+  card,
+  chip,
+  field,
+  input,
+  inputNeedsAttention,
+  section,
+  tinyButton,
+} from './wake/parts.js';
 
 /**
  * Where to learn how to train and add a custom wake-word model. The text-based
@@ -70,107 +71,6 @@ import { useVoiceSnapshot } from '../voice/use-voice-store.js';
 const CUSTOM_WAKE_GUIDE_URL = 'https://github.com/dscripka/openWakeWord#training-new-models';
 const CUSTOM_WAKE_NOTEBOOK_URL =
   'https://colab.research.google.com/drive/1q1oe2zOyZp7UsB3jJiQ1IFn8z5YfjwEb';
-
-const section: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 10,
-  padding: 14,
-  borderRadius: 12,
-  background: '#151b22',
-  border: '1px solid #2a333d',
-};
-
-const field: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 4,
-  fontSize: 12,
-  color: '#9aa7b5',
-};
-
-const input: CSSProperties = {
-  padding: '6px 9px',
-  borderRadius: 8,
-  border: '1px solid #3a4654',
-  background: '#0f1419',
-  color: '#e8eef4',
-  fontSize: 13,
-};
-
-/** Input that is missing a required value, so the user sees what to fill in. */
-const inputNeedsAttention: CSSProperties = {
-  ...input,
-  borderColor: '#a16207',
-  boxShadow: '0 0 0 2px rgba(234,179,8,0.14)',
-};
-
-const button: CSSProperties = {
-  alignSelf: 'flex-start',
-  padding: '5px 11px',
-  borderRadius: 8,
-  border: '1px solid #3f6cb0',
-  background: '#2f5c9e',
-  color: '#fff',
-  cursor: 'pointer',
-  fontSize: 12,
-  fontWeight: 600,
-};
-
-const ghostButton: CSSProperties = {
-  ...button,
-  background: '#1c2430',
-  borderColor: '#3a4654',
-  color: '#e8eef4',
-  fontWeight: 500,
-};
-
-const tinyButton: CSSProperties = {
-  ...ghostButton,
-  padding: '2px 8px',
-  fontSize: 11,
-};
-
-const recordButtonActive: CSSProperties = {
-  ...button,
-  background: '#9f1239',
-  borderColor: '#e11d48',
-};
-
-const card: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-  padding: 10,
-  borderRadius: 10,
-  background: '#0f1419',
-  border: '1px solid #2a333d',
-};
-
-const chip: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '2px 8px',
-  borderRadius: 999,
-  background: '#1c2430',
-  border: '1px solid #3a4654',
-  fontSize: 11,
-  color: '#cbd5e1',
-};
-
-const linkButton: CSSProperties = {
-  padding: 0,
-  border: 'none',
-  background: 'none',
-  color: '#7fb2ff',
-  cursor: 'pointer',
-  fontSize: 11,
-  textDecoration: 'underline',
-};
-
-/** Suggested phrases matching the built-in wake models. */
-const SUGGESTED_PHRASES = ['Hey Jarvis', 'Alexa', 'Hey Mycroft'];
 
 const ACTIVATION_MODES: { id: WakeActivationMode; label: string; help: string }[] = [
   {
@@ -240,770 +140,6 @@ function emptyBinding(): WakeWordBinding {
   };
 }
 
-/** A small inline link that opens a documentation URL in the system browser. */
-function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
-  return (
-    <button type="button" style={linkButton} title={href} onClick={() => void bridge.openExternal(href)}>
-      {children}
-    </button>
-  );
-}
-
-/**
- * Readiness checklist for speech-model (`stt_phrase`) wake words. Turns an opaque
- * "cannot listen yet" banner into a concrete list that highlights the exact step
- * still missing (install a model, install the runner, or free the port).
- */
-function SpeechModelReadiness({ status }: { status: WakeSttStatus | null }) {
-  const steps = useMemo(() => {
-    if (status?.usingCustomEndpoint) {
-      return [
-        {
-          label: status.ready
-            ? 'Local speech endpoint reachable'
-            : 'Configure a local (loopback/LAN) speech endpoint',
-          done: status.ready,
-        },
-      ];
-    }
-    const hasModel = Boolean(status?.modelId);
-    const hasRunner = status?.runnerInstalled === true;
-    return [
-      {
-        label: hasModel
-          ? `Speech model installed${status?.modelLabel ? ` — ${status.modelLabel}` : ''}`
-          : 'Install a speech-to-text model under “Local speech models” above',
-        done: hasModel,
-      },
-      {
-        label: hasRunner
-          ? 'Speech engine runner available (whisper-server)'
-          : 'Install the whisper.cpp runner (Speech engine runner → Install)',
-        done: hasRunner,
-      },
-    ];
-  }, [status]);
-
-  if (!status) return null;
-  if (status.ready) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 10px',
-          borderRadius: 8,
-          background: '#0f1f18',
-          border: '1px solid #2f7d5f',
-          fontSize: 11,
-          color: '#8fe3c0',
-        }}
-      >
-        <span style={{ color: '#4ade80' }}>✓</span>
-        <span>
-          Speech-model wakes are ready
-          {status.modelLabel ? ` — using ${status.modelLabel}` : ''}
-          {status.threads ? ` on ${status.threads} CPU threads` : ''}.{' '}
-          {isLargeWakeModel(status.modelLabel)
-            ? 'This model is large, so on-device recognition lags speech; install “Whisper Base/Tiny” for near-realtime wakes.'
-            : 'Near-realtime on-device recognition.'}
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        padding: '8px 10px',
-        borderRadius: 8,
-        background: '#2a2312',
-        border: '1px solid #6b5518',
-        fontSize: 11,
-        color: '#ffd479',
-      }}
-    >
-      <strong>A speech-model wake cannot listen yet</strong>
-      {status.reason ? <span>{status.reason}</span> : null}
-      <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {steps.map((step) => (
-          <li key={step.label} style={{ color: step.done ? '#8fe3c0' : '#ffd479' }}>
-            {step.done ? '✓ ' : '• '}
-            {step.label}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-/** Live detection test: arms one detector for the typed phrase and lights up. */
-function LiveDetectionTest({
-  phrase,
-  modelId,
-  sensitivity,
-  disabled,
-  blockedReason,
-}: {
-  phrase: string;
-  modelId: string | null;
-  sensitivity: number;
-  disabled: boolean;
-  /**
-   * Set when the test cannot possibly work (e.g. a speech model with the local
-   * runner missing). The reason is shown and Start is disabled, rather than
-   * letting the user talk into a listener that can never transcribe.
-   */
-  blockedReason?: string | null;
-}) {
-  const [test, setTest] = useState<WakeLiveTest | null>(null);
-  const [state, setState] = useState<WakeLiveTestState>('idle');
-  const [score, setScore] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    return () => {
-      void test?.stop();
-    };
-  }, [test]);
-
-  const start = useCallback(async () => {
-    setError(null);
-    try {
-      const session = createWakeLiveTest({
-        phrase,
-        modelId,
-        sensitivity,
-        onLevel: (level) => setScore(level),
-        onState: (next) => setState(next),
-      });
-      const ok = await session.start();
-      if (!ok) {
-        setError(blockedReason ?? 'No installed wake model matches this phrase yet — pick a model or install one.');
-        return;
-      }
-      setTest(session);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not start the test.');
-    }
-  }, [blockedReason, modelId, phrase, sensitivity]);
-
-  const stop = useCallback(async () => {
-    await test?.stop();
-    setTest(null);
-    setState('idle');
-    setScore(0);
-  }, [test]);
-
-  return (
-    <div style={{ ...card, background: '#101823' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <strong style={{ fontSize: 12, color: '#e8eef4' }}>Test detection</strong>
-        <span style={{ fontSize: 11, color: '#6b7784' }}>
-          runs on this machine; nothing is sent and nothing opens
-        </span>
-        <span style={{ flex: 1 }} />
-        {test ? (
-          <button type="button" style={tinyButton} onClick={() => void stop()}>
-            Stop
-          </button>
-        ) : (
-          <button
-            type="button"
-            style={{ ...button, padding: '3px 10px' }}
-            disabled={disabled || !phrase.trim() || Boolean(blockedReason)}
-            onClick={() => void start()}
-          >
-            Start
-          </button>
-        )}
-      </div>
-      {blockedReason ? <span style={{ fontSize: 11, color: '#ffd479' }}>{blockedReason}</span> : null}
-      {test ? (
-        <span
-          style={{
-            fontSize: 11,
-            color: state === 'unavailable' ? '#fbbf24' : state === 'fired' ? '#4ade80' : '#9aa7b5',
-          }}
-        >
-          {state === 'unavailable'
-            ? 'Detector unavailable'
-            : state === 'fired'
-              ? 'Detected — the phrase works'
-              : 'Listening — say the phrase'}
-        </span>
-      ) : null}
-      <div
-        style={{
-          position: 'relative',
-          height: 6,
-          borderRadius: 999,
-          background: '#0f1419',
-          border: '1px solid #2a333d',
-          overflow: 'hidden',
-        }}
-        aria-hidden
-      >
-        <div
-          style={{
-            height: '100%',
-            width: `${Math.round(Math.min(1, Math.max(0, score)) * 100)}%`,
-            background: 'linear-gradient(90deg,#2f7d5f,#4ade80)',
-            transition: 'width 0.08s linear',
-          }}
-        />
-      </div>
-      {error ? <span style={{ color: '#f87171', fontSize: 11 }}>{error}</span> : null}
-    </div>
-  );
-}
-
-/** One editable tag list for the 0..n submit phrases. */
-function SubmitPhraseEditor({
-  phrases,
-  busy,
-  onChange,
-}: {
-  phrases: string[];
-  busy: boolean;
-  onChange: (next: string[]) => void;
-}) {
-  const [draft, setDraft] = useState('');
-  const add = () => {
-    const value = draft.trim().replace(/\s+/g, ' ').toLowerCase();
-    setDraft('');
-    if (!value || phrases.includes(value)) return;
-    onChange([...phrases, value]);
-  };
-  return (
-    <div style={field}>
-      <span>Submit phrases (0 = submit only by clicking Send)</span>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {phrases.map((p) => (
-          <span key={p} style={chip}>
-            “{p}”
-            <button
-              type="button"
-              style={{ border: 'none', background: 'transparent', color: '#f2a1a1', cursor: 'pointer', fontSize: 12 }}
-              disabled={busy}
-              onClick={() => onChange(phrases.filter((x) => x !== p))}
-            >
-              ×
-            </button>
-          </span>
-        ))}
-        {!phrases.length ? <span style={{ color: '#6b7784' }}>None</span> : null}
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <input
-          style={{ ...input, flex: 1 }}
-          value={draft}
-          disabled={busy}
-          placeholder="e.g. submit, answer now"
-          list="wake-submit-suggestions"
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              add();
-            }
-          }}
-        />
-        <button type="button" style={tinyButton} disabled={busy || !draft.trim()} onClick={add}>
-          Add
-        </button>
-      </div>
-      <datalist id="wake-submit-suggestions">
-        {SUGGESTED_SUBMIT_PHRASES.filter((p) => !phrases.includes(p)).map((p) => (
-          <option key={p} value={p} />
-        ))}
-      </datalist>
-    </div>
-  );
-}
-
-/**
- * Alternate phrases for one binding ("Zeni" for "Xeni"). Aliases are matched by
- * on-device speech recognition, exactly like the primary phrase, and all route
- * to the same agent. Only meaningful for a speech-model (STT) engine — a fixed
- * keyword model can only fire on the phrase it was trained for — so the editor
- * says so rather than silently doing nothing.
- */
-function AliasEditor({
-  aliases,
-  primary,
-  enabled,
-  busy,
-  onChange,
-}: {
-  aliases: string[];
-  primary: string;
-  /** False when the chosen engine cannot match arbitrary phrases (fixed keyword). */
-  enabled: boolean;
-  busy: boolean;
-  onChange: (next: string[]) => void;
-}) {
-  const [draft, setDraft] = useState('');
-  const add = () => {
-    setDraft('');
-    const alias = normalizeAliasPhrase(draft, primary);
-    if (!alias) return;
-    if (aliases.some((a) => a.toLowerCase() === alias.toLowerCase())) return;
-    if (aliases.length >= MAX_WAKE_ALIASES) return;
-    onChange([...aliases, alias]);
-  };
-  return (
-    <div style={field}>
-      <span>Also wake on (aliases — e.g. a nickname)</span>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {aliases.map((a) => (
-          <span key={a} style={chip}>
-            “{a}”
-            <button
-              type="button"
-              style={{ border: 'none', background: 'transparent', color: '#f2a1a1', cursor: 'pointer', fontSize: 12 }}
-              disabled={busy}
-              onClick={() => onChange(aliases.filter((x) => x !== a))}
-            >
-              ×
-            </button>
-          </span>
-        ))}
-        {!aliases.length ? <span style={{ color: '#6b7784' }}>None</span> : null}
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <input
-          style={{ ...input, flex: 1 }}
-          value={draft}
-          disabled={busy || !enabled}
-          placeholder={enabled ? 'e.g. Zeni' : 'Pick a speech model to use aliases'}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              add();
-            }
-          }}
-        />
-        <button type="button" style={tinyButton} disabled={busy || !enabled || !draft.trim()} onClick={add}>
-          Add
-        </button>
-      </div>
-      <span style={{ color: '#6b7784' }}>
-        {enabled
-          ? 'Any of these phrases wakes the same agent. Matched by on-device speech recognition.'
-          : 'Aliases need a speech model — a wake-word model only fires on its own fixed phrase.'}
-      </span>
-    </div>
-  );
-}
-
-/**
- * One editable alias row for a single agent/word (a phrase + its nicknames).
- * Keyed by the phrase, not the agent id, so it works for auto-mapped agents
- * whose binding is re-derived on every arm and therefore cannot hold aliases.
- */
-function AliasRow({
-  phrase,
-  label,
-  aliases,
-  enabled,
-  busy,
-  onChange,
-}: {
-  phrase: string;
-  label: string;
-  aliases: string[];
-  enabled: boolean;
-  busy: boolean;
-  onChange: (next: string[]) => void;
-}) {
-  const [draft, setDraft] = useState('');
-  const add = () => {
-    setDraft('');
-    const alias = normalizeAliasPhrase(draft, phrase);
-    if (!alias) return;
-    if (aliases.some((a) => a.toLowerCase() === alias.toLowerCase())) return;
-    if (aliases.length >= MAX_WAKE_ALIASES) return;
-    onChange([...aliases, alias]);
-  };
-  return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 8,
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        padding: '6px 0',
-        borderTop: '1px solid #1f2833',
-      }}
-    >
-      <span style={{ minWidth: 120, fontSize: 12, color: '#e8eef4' }}>{label}</span>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1, minWidth: 140 }}>
-        {aliases.map((a) => (
-          <span key={a} style={chip}>
-            “{a}”
-            <button
-              type="button"
-              style={{ border: 'none', background: 'transparent', color: '#f2a1a1', cursor: 'pointer', fontSize: 12 }}
-              disabled={busy}
-              onClick={() => onChange(aliases.filter((x) => x !== a))}
-            >
-              ×
-            </button>
-          </span>
-        ))}
-        {!aliases.length ? <span style={{ fontSize: 11, color: '#6b7784' }}>No nicknames</span> : null}
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <input
-          style={{ ...input, width: 150 }}
-          value={draft}
-          disabled={busy || !enabled}
-          placeholder={enabled ? `e.g. ${phrase}…` : 'Needs a speech model'}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              add();
-            }
-          }}
-        />
-        <button type="button" style={tinyButton} disabled={busy || !enabled || !draft.trim()} onClick={add}>
-          Add
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Per-agent nicknames (e.g. "Zeni" for "Xeni"). Shown for every agent that a
- * wake can address — the auto-mapped ones included, which is the whole point:
- * an auto-mapped agent has no editable binding, so this list is where its alias
- * has to live. Only meaningful for speech-model wakes (a keyword model can only
- * fire on its trained phrase), so it is disabled when no speech model is set up.
- */
-function AgentAliasesEditor({
-  rows,
-  agentAliases,
-  enabled,
-  busy,
-  onChange,
-}: {
-  rows: { phrase: string; label: string }[];
-  agentAliases: Record<string, string[]>;
-  enabled: boolean;
-  busy: boolean;
-  onChange: (next: Record<string, string[]>) => void;
-}) {
-  const setAliases = (phrase: string, aliases: string[]) => {
-    const key = aliasKey(phrase);
-    const next = { ...agentAliases };
-    if (aliases.length) next[key] = aliases;
-    else delete next[key];
-    onChange(next);
-  };
-  return (
-    <div style={card}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <strong style={{ fontSize: 12, color: '#e8eef4' }}>Agent nicknames</strong>
-        <span style={{ flex: 1 }} />
-        {!enabled ? (
-          <span style={{ fontSize: 11, color: '#fbbf24' }}>Pick a speech model to use nicknames</span>
-        ) : null}
-      </div>
-      <span style={{ fontSize: 11, color: '#6b7784' }}>
-        Additional phrases that wake a given agent — e.g. “Zeni” for “Xeni”. Matched by on-device
-        speech recognition, exactly like the agent&apos;s name, and they work for auto-mapped agents
-        too.
-      </span>
-      {rows.length ? (
-        rows.map((row) => (
-          <AliasRow
-            key={row.phrase}
-            phrase={row.phrase}
-            label={row.label}
-            aliases={aliasesForPhrase(agentAliases, row.phrase)}
-            enabled={enabled}
-            busy={busy}
-            onChange={(aliases) => setAliases(row.phrase, aliases)}
-          />
-        ))
-      ) : (
-        <span style={{ fontSize: 11, color: '#6b7784' }}>
-          Sign in to list agents, or add a wake word below.
-        </span>
-      )}
-    </div>
-  );
-}
-
-function BindingEditor({
-  binding,
-  agents,
-  wakeModels,
-  busy,
-  isSttModel,
-  onChange,
-  onRemove,
-}: {
-  binding: WakeWordBinding;
-  agents: WakeAgentRow[];
-  wakeModels: LocalVoiceState['models'];
-  busy: boolean;
-  /** True when the chosen model transcribes on-device (a speech model). */
-  isSttModel: (modelId: string | null) => boolean;
-  onChange: (next: WakeWordBinding) => void;
-  onRemove: () => void;
-}) {
-  const [recording, setRecording] = useState<EnrollmentSession | null>(null);
-  const [recordError, setRecordError] = useState<string | null>(null);
-  const auto = isAutoBinding(binding);
-
-  const startRecording = useCallback(async () => {
-    setRecordError(null);
-    try {
-      const session = await startEnrollment(createUtteranceSource());
-      setRecording(session);
-    } catch (err) {
-      setRecordError(err instanceof Error ? err.message : 'Could not start recording.');
-    }
-  }, []);
-
-  const finishRecording = useCallback(async () => {
-    const session = recording;
-    setRecording(null);
-    if (!session) return;
-    const result = await session.finish();
-    if (!result) {
-      setRecordError('No audio was captured. Try again closer to the microphone.');
-      return;
-    }
-    // A recorded sample switches this binding to the on-device custom detector.
-    onChange({ ...binding, sampleFingerprint: result.fingerprint, sampleRef: null });
-  }, [binding, onChange, recording]);
-
-  // Highlight the fields that still block this binding from arming, so a user
-  // who added a wake word knows exactly what is left to configure.
-  const sttChosen = isSttModel(binding.modelId);
-  const missingPhrase = !binding.phrase.trim();
-  const missingAgent = !binding.agentId;
-  const missingModel = !binding.modelId && !binding.sampleFingerprint;
-  const modelNeedsInstall =
-    missingModel === false &&
-    !binding.sampleFingerprint &&
-    wakeModels.find((m) => m.id === binding.modelId)?.installState !== 'installed';
-
-  return (
-    <div style={card}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <input
-            type="checkbox"
-            checked={binding.enabled}
-            disabled={busy}
-            onChange={(e) => onChange({ ...binding, enabled: e.target.checked })}
-          />
-          <span style={{ color: '#e8eef4', fontWeight: 600 }}>
-            {binding.phrase || 'New wake word'}
-          </span>
-        </label>
-        {auto ? (
-          <span style={{ ...chip, borderColor: '#6a3f9e', color: '#d8a5ff' }} title="From the agent's name">
-            auto
-          </span>
-        ) : null}
-        {sttChosen ? (
-          <span style={{ ...chip, borderColor: '#2f5c9e', color: '#7fb2ff' }} title="Matched by on-device speech recognition">
-            any phrase
-          </span>
-        ) : null}
-        {sttChosen && binding.aliases.length ? (
-          <span
-            style={{ ...chip, borderColor: '#2f5c9e', color: '#7fb2ff' }}
-            title={`Also wakes on: ${bindingPhrases(binding).slice(1).join(', ')}`}
-          >
-            +{binding.aliases.length} alias{binding.aliases.length === 1 ? '' : 'es'}
-          </span>
-        ) : null}
-        <span style={{ flex: 1 }} />
-        <button type="button" style={tinyButton} disabled={busy} onClick={onRemove}>
-          {auto ? 'Remove (adds to the auto-map blocklist)' : 'Remove'}
-        </button>
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <label style={{ ...field, flex: 1, minWidth: 190 }}>
-          <span>
-            Spoken phrase
-            {missingPhrase ? <span style={{ color: '#fbbf24' }}> · required</span> : null}
-          </span>
-          <input
-            style={missingPhrase ? inputNeedsAttention : input}
-            value={binding.phrase}
-            placeholder="Hey Jarvis — or any phrase, e.g. an agent name"
-            list={`wake-phrases-${binding.id}`}
-            disabled={busy}
-            onChange={(e) => onChange({ ...binding, phrase: e.target.value })}
-          />
-          <datalist id={`wake-phrases-${binding.id}`}>
-            {SUGGESTED_PHRASES.map((p) => (
-              <option key={p} value={p} />
-            ))}
-          </datalist>
-        </label>
-
-        <label style={{ ...field, flex: 1, minWidth: 190 }}>
-          <span>
-            Activates agent
-            {missingAgent ? <span style={{ color: '#fbbf24' }}> · suggested</span> : null}
-          </span>
-          <select
-            style={missingAgent ? inputNeedsAttention : input}
-            value={binding.agentId ?? ''}
-            disabled={busy}
-            onChange={(e) => {
-              const agent = agents.find((a) => a.contactId === e.target.value) ?? null;
-              onChange({
-                ...binding,
-                agentId: agent?.contactId ?? null,
-                agentName: agent?.name ?? null,
-              });
-            }}
-          >
-            <option value="">Choose an agent…</option>
-            {agents.map((agent) => (
-              <option key={agent.contactId} value={agent.contactId}>
-                {agent.name}
-                {agent.canConfigure ? '' : ' (public)'}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <AliasEditor
-        aliases={binding.aliases}
-        primary={binding.phrase}
-        enabled={sttChosen}
-        busy={busy}
-        onChange={(aliases) => onChange({ ...binding, aliases })}
-      />
-
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <label style={{ ...field, flex: 1, minWidth: 190 }}>
-          <span>
-            Engine
-            {missingModel ? <span style={{ color: '#fbbf24' }}> · required</span> : null}
-          </span>
-
-          <select
-            style={missingModel || modelNeedsInstall ? inputNeedsAttention : input}
-            value={binding.modelId ?? ''}
-            disabled={busy || Boolean(binding.sampleFingerprint)}
-            onChange={(e) => onChange({ ...binding, modelId: e.target.value || null })}
-          >
-            <option value="">Choose a model…</option>
-            {wakeModels.some((m) => m.kind === 'stt') ? (
-              <optgroup label="Speech model — wake on ANY phrase (recommended for names)">
-                {wakeModels
-                  .filter((m) => m.kind === 'stt')
-                  .map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                      {model.installState === 'installed' ? ' ✓ installed' : ' (not installed)'}
-                    </option>
-                  ))}
-              </optgroup>
-            ) : null}
-            {wakeModels.some((m) => m.kind === 'wake') ? (
-              <optgroup label="Wake-word model — fires on its own fixed phrase only">
-                {wakeModels
-                  .filter((m) => m.kind === 'wake')
-                  .map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                      {model.installState === 'installed' ? ' ✓ installed' : ' (not installed)'}
-                    </option>
-                  ))}
-              </optgroup>
-            ) : null}
-          </select>
-          {binding.sampleFingerprint ? (
-            <span style={{ color: '#6b7784' }}>Using your recorded sample instead of a model.</span>
-          ) : sttChosen ? (
-            <span style={{ color: '#7fb2ff' }}>
-              Transcribes on this machine and matches the phrase as text — works for any phrase,
-              including this agent&apos;s name.
-            </span>
-          ) : missingModel ? (
-            <span style={{ color: '#fbbf24' }}>
-              Pick a speech model to wake on any phrase, or install a wake-word model.
-            </span>
-          ) : modelNeedsInstall ? (
-            <span style={{ color: '#fbbf24' }}>Download the chosen model above to use it.</span>
-          ) : (
-            <span style={{ color: '#6b7784' }}>
-              A wake-word model only fires on its own phrase. Pick a speech model to wake on any phrase.
-            </span>
-          )}
-        </label>
-
-        <label style={{ ...field, minWidth: 150 }}>
-          <span>Sensitivity</span>
-          <input
-            style={input}
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={binding.sensitivity}
-            disabled={busy}
-            onChange={(e) => onChange({ ...binding, sensitivity: Number(e.target.value) })}
-          />
-          <span style={{ color: '#6b7784' }}>{binding.sensitivity.toFixed(2)} · higher fires more easily</span>
-        </label>
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        {recording ? (
-          <button type="button" style={recordButtonActive} onClick={() => void finishRecording()}>
-            ■ Stop &amp; save sample
-          </button>
-        ) : (
-          <button type="button" style={tinyButton} disabled={busy} onClick={() => void startRecording()}>
-            ● Record a voice sample (optional)
-          </button>
-        )}
-        {recording ? (
-          <span style={{ color: '#fbbf24', fontSize: 11 }}>Recording… say “{binding.phrase || 'your phrase'}”.</span>
-        ) : null}
-        {binding.sampleFingerprint ? (
-          <button
-            type="button"
-            style={tinyButton}
-            disabled={busy}
-            onClick={() => onChange({ ...binding, sampleFingerprint: null })}
-          >
-            Clear sample
-          </button>
-        ) : null}
-        {recordError ? <span style={{ color: '#f87171', fontSize: 11 }}>{recordError}</span> : null}
-      </div>
-
-      <span style={{ fontSize: 11, color: '#6b7784' }}>
-        Detection runs entirely on this machine. A wake word is not sign-in: it only opens the
-        agent&apos;s chat and starts dictation — it can never approve a payment or a 2FA prompt.
-      </span>
-    </div>
-  );
-}
-
 export function WakeSettingsPanel() {
   const [settings, setSettings] = useState<WakeSettings | null>(null);
   const [agents, setAgents] = useState<WakeAgentRow[]>([]);
@@ -1045,22 +181,19 @@ export function WakeSettingsPanel() {
     }
   }, [settings]);
 
-  const persist = useCallback(
-    async (next: WakeSettings) => {
-      setBusy(true);
-      setSaved(false);
-      try {
-        const written = await bridge.wakeSetSettings(next);
-        setSettings(written);
-        // Reconcile the live director so the change applies without a restart.
-        await reloadWakeDirector();
-        setSaved(true);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [],
-  );
+  const persist = useCallback(async (next: WakeSettings) => {
+    setBusy(true);
+    setSaved(false);
+    try {
+      const written = await bridge.wakeSetSettings(next);
+      setSettings(written);
+      // Reconcile the live director so the change applies without a restart.
+      await reloadWakeDirector();
+      setSaved(true);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   /**
    * When auto-mapping is on but no model is chosen, default to the first
@@ -1471,7 +604,7 @@ export function WakeSettingsPanel() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <strong style={{ fontSize: 12, color: '#9aa7b5' }}>Your wake words</strong>
         <span style={{ flex: 1 }} />
-        <ExternalLink href={CUSTOM_WAKE_GUIDE_URL}>How to train a custom model</ExternalLink>
+        <ExternalWakeLinks />
       </div>
 
       {manualBindings.length ? (
@@ -1551,5 +684,12 @@ export function WakeSettingsPanel() {
         </span>
       ) : null}
     </section>
+  );
+}
+
+/** The "how to train a custom model" link, kept out of the main JSX for length. */
+function ExternalWakeLinks() {
+  return (
+    <ExternalLink href={CUSTOM_WAKE_GUIDE_URL}>How to train a custom model</ExternalLink>
   );
 }
