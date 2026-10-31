@@ -29,6 +29,12 @@ export type NotificationPayload = {
   preview: string | null;
   /** Conversation/agent title, used as the notification title. */
   title: string | null;
+  /**
+   * Set when the card came from the notification inbox (a push ping) rather than
+   * a chat message, so clicking it opens the Notifications tab on that row
+   * instead of routing to a conversation.
+   */
+  notificationId?: string | null;
 };
 
 /** The three window states that decide whether the user is "away". */
@@ -122,6 +128,33 @@ export function shouldNotify(input: {
   if (!input.supported) return false;
   if (!input.settings.enabled) return false;
   return isUnattended(input.attention);
+}
+
+/**
+ * What the renderer should additionally do about one inbound message, beyond the
+ * OS card itself: open the sender's companion window, and/or speak the message.
+ *
+ * Both are gated by their own opt-in setting *and* by the message being a real
+ * unattended arrival, so a replayed/idempotent report (or one that arrived while
+ * the user was looking at the app) never pops a window or talks over them.
+ */
+export type MessageActions = {
+  speak: boolean;
+  openCompanion: boolean;
+};
+
+export function resolveMessageActions(input: {
+  settings: NotificationSettings;
+  /** True when a card for this message was actually raised. */
+  raised: boolean;
+  /** The message carries an agent to address (a companion needs one). */
+  hasAgent: boolean;
+}): MessageActions {
+  if (!input.raised) return { speak: false, openCompanion: false };
+  return {
+    speak: input.settings.speakMessages,
+    openCompanion: input.settings.openCompanionOnMessage && input.hasAgent,
+  };
 }
 
 /** Minimal shape of an Electron `Notification` we depend on (for test doubles). */

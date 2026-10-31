@@ -24,6 +24,15 @@ const clusterSceneReact = resolve(
   'anx-libs/nexus-collaboration-vr/packages/cluster-scene-react/src/index.ts',
 );
 const sceneClient = resolve(repoRoot, 'anx-npm-modules/packages/scene-client/src/index.ts');
+/**
+ * Headless notification routing shared with the portal and the nexus app. It is
+ * consumed from source (like the scene client) so a change to the route catalog
+ * does not need a republish to reach the desktop renderer.
+ */
+const notificationsCore = resolve(
+  repoRoot,
+  'anx-npm-modules/packages/notifications-core/src/index.ts',
+);
 
 /**
  * Renderer build. Mirrors `chat-react/vite.webview.config.ts` aliasing so the
@@ -41,6 +50,7 @@ export default defineConfig({
       '@nexus/character-kit': characterKit,
       '@nexus/cluster-scene-react': clusterSceneReact,
       '@nexus/scene-client': sceneClient,
+      '@nexus/notifications-core': notificationsCore,
     },
     dedupe: ['three', 'react', 'react-dom'],
   },

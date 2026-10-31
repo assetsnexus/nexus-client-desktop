@@ -141,5 +141,7 @@ export function readNotificationSettings(raw: unknown): NotificationSettings {
     showPreview: bool('showPreview'),
     sound: bool('sound'),
     suppressWhenLocked: bool('suppressWhenLocked'),
+    openCompanionOnMessage: bool('openCompanionOnMessage'),
+    speakMessages: bool('speakMessages'),
   };
 }

@@ -35,6 +35,16 @@ import type {
 } from './wake.js';
 import type { AppLockSettings, AppLockState } from './app-lock.js';
 import type { CompanionPlacementSettings } from './companion-placement.js';
+import type {
+  NotificationListInput,
+  NotificationListResult,
+  NotificationMarkAllResult,
+  NotificationMutationResult,
+  NotificationUnreadSummary,
+  ZenSchedule,
+  ZenSnoozeStartInput,
+  ZenState,
+} from './notifications.js';
 import type { AudioSettings } from './audio.js';
 import type { LogoutChoice, LogoutReport, LogoutStep } from './logout.js';
 import type {
@@ -152,6 +162,30 @@ export type {
   PlacementPoint,
   PlacementRect,
 } from './companion-placement.js';
+export {
+  NOTIFICATION_PRIORITIES,
+  canUnmarkNotification,
+  countUnread,
+  highestPriority,
+  isNotificationUnread,
+  normalizeNotificationList,
+  normalizeNotificationPriority,
+  normalizeNotificationRow,
+} from './notifications.js';
+export type {
+  NotificationListInput,
+  NotificationListResult,
+  NotificationMarkAllResult,
+  NotificationMutationResult,
+  NotificationPriority,
+  NotificationRow,
+  NotificationTapTarget,
+  NotificationUnreadSummary,
+  NotificationVisibleAction,
+  ZenSchedule,
+  ZenSnoozeStartInput,
+  ZenState,
+} from './notifications.js';
 
 export type ConnectionConfigPatch = Partial<DesktopConnectionConfig>;
 
@@ -372,6 +406,17 @@ export type NotificationSettings = {
    * default; the user may explicitly turn it off.
    */
   suppressWhenLocked: boolean;
+  /**
+   * When an agent's chat message arrives while the app is unattended, also open
+   * (or raise) that agent's companion window so the message is not missed. Off by
+   * default: an agent popping a window up uninvited is intrusive.
+   */
+  openCompanionOnMessage: boolean;
+  /**
+   * Speak an incoming agent message aloud (TTS) while the app is unattended
+   * (e.g. a wake-word turn replying to an empty room). Off by default.
+   */
+  speakMessages: boolean;
 };
 
 /**
@@ -388,6 +433,10 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   sound: false,
   // On by default: a locked machine must not leak message content.
   suppressWhenLocked: true,
+  // Off by default: an agent opening a companion window uninvited is intrusive.
+  openCompanionOnMessage: false,
+  // Off by default: speaking every incoming message aloud is intrusive.
+  speakMessages: false,
 };
 
 /** What the renderer reports to main about an inbound message. */
@@ -399,6 +448,12 @@ export type DesktopNotificationPayload = {
   senderName: string | null;
   preview: string | null;
   title: string | null;
+  /**
+   * Set when the card came from the notification inbox (a push ping) rather than
+   * a chat message, so clicking it opens the Notifications tab on that row
+   * instead of routing to a conversation.
+   */
+  notificationId?: string | null;
 };
 
 /**
@@ -1506,11 +1561,32 @@ export type NexusBridge = {
   notifyIncoming(
     payload: DesktopNotificationPayload,
     opts?: { force?: boolean },
-  ): Promise<void>;
+  ): Promise<{ raised: boolean; speak: boolean }>;
   /** Subscribe to a notification click, to route the renderer to the message. */
   onNotificationActivated(
     listener: (payload: DesktopNotificationPayload) => void,
   ): () => void;
+  // Notification inbox (`anx.notification.*`). Region-node owns the records; the
+  // renderer only reads/acts through these, and rows are already normalized.
+  notifyList(input?: NotificationListInput): Promise<NotificationListResult>;
+  /** Unread count + top priority for the shell tab badge. */
+  notifySummary(): Promise<NotificationUnreadSummary>;
+  notifyGet(notificationId: string): Promise<NotificationMutationResult>;
+  notifyMarkRead(notificationId: string): Promise<NotificationMutationResult>;
+  notifyMarkUnread(notificationId: string): Promise<NotificationMutationResult>;
+  notifyMarkAllRead(): Promise<NotificationMarkAllResult>;
+  notifyActionInvoke(
+    notificationId: string,
+    actionId: string,
+  ): Promise<{ ok: boolean; status: string | null; error: string | null }>;
+  notifyZenStatus(): Promise<ZenState>;
+  notifyZenSnoozeStart(input?: ZenSnoozeStartInput): Promise<ZenState>;
+  notifyZenSnoozeStop(): Promise<ZenState>;
+  notifyZenScheduleList(): Promise<ZenSchedule[]>;
+  notifyZenScheduleUpsert(schedule: ZenSchedule): Promise<ZenState>;
+  notifyZenScheduleRemove(scheduleId: string): Promise<ZenState>;
+  /** A push ping arrived in main: refresh the open inbox / unread badge. */
+  onNotifyPush(listener: (ping: { notificationId: string | null }) => void): () => void;
   // Wake words (on-device detection + agent mapping).
   wakeGetSettings(): Promise<WakeSettings>;
   wakeSetSettings(next: WakeSettings): Promise<WakeSettings>;
@@ -1938,6 +2014,26 @@ export const IPC = {
   uiSettingsSet: 'nexus:ui-settings:set',
   notifyIncoming: 'nexus:notify:incoming',
   notifyActivated: 'nexus:notify:activated',
+  /**
+   * Notification inbox (`anx.notification.*`). `list`/`summary`/`get` read,
+   * `mark-read`/`mark-unread`/`mark-all-read`/`action-invoke` write, and the
+   * `zen-*` channels drive do-not-disturb. `push-ping` is main → renderer after a
+   * ntfy ping so the open tab refreshes without polling.
+   */
+  notifyList: 'nexus:notify:list',
+  notifySummary: 'nexus:notify:summary',
+  notifyGet: 'nexus:notify:get',
+  notifyMarkRead: 'nexus:notify:mark-read',
+  notifyMarkUnread: 'nexus:notify:mark-unread',
+  notifyMarkAllRead: 'nexus:notify:mark-all-read',
+  notifyActionInvoke: 'nexus:notify:action-invoke',
+  notifyZenStatus: 'nexus:notify:zen-status',
+  notifyZenSnoozeStart: 'nexus:notify:zen-snooze-start',
+  notifyZenSnoozeStop: 'nexus:notify:zen-snooze-stop',
+  notifyZenScheduleList: 'nexus:notify:zen-schedule-list',
+  notifyZenScheduleUpsert: 'nexus:notify:zen-schedule-upsert',
+  notifyZenScheduleRemove: 'nexus:notify:zen-schedule-remove',
+  notifyPushPing: 'nexus:notify:push-ping',
   wakeGetSettings: 'nexus:wake:get-settings',
   wakeSetSettings: 'nexus:wake:set-settings',
   wakeListAgents: 'nexus:wake:list-agents',

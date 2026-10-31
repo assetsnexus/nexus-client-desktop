@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { bridge, type AuthState, type DesktopConnectionConfig, type SessionHydrationState } from './bridge.js';
 import { LoginForm } from './components/LoginForm.js';
 import { ChatHost } from './components/ChatHost.js';
+import { NotificationsPanel } from './components/NotificationsPanel.js';
 import { SettingsPanel } from './components/SettingsPanel.js';
 import { StorageExplorer } from './components/StorageExplorer.js';
 import { SyncPanel } from './components/SyncPanel.js';
@@ -14,6 +15,7 @@ import { AppLockGate } from './components/AppLockGate.js';
 import { LogoutDialog } from './components/LogoutDialog.js';
 import { CertTrustPrompt } from './components/CertTrustPrompt.js';
 import { useI18n, type MessageKey } from './i18n/index.js';
+import { onBridge, hasBridgeMethod } from './bridge-compat.js';
 import { WakeBottomBar } from './components/WakeBottomBar.js';
 import { useWakeHost } from './wake/director-host.js';
 import { useRegionEnvironment } from './sandbox/use-region-environment.js';
@@ -28,7 +30,7 @@ import { resolveShellView } from '../shared/auth-view.js';
 import anxLogo from './assets/anx-logo.svg';
 
 /** Shell tabs, in display order. */
-const views = ['chat', 'storage', 'sync', 'mounts', 'calendar', 'meetings'] as const;
+const views = ['chat', 'notifications', 'storage', 'sync', 'mounts', 'calendar', 'meetings'] as const;
 
 const shellStyle: CSSProperties = {
   height: '100vh',
@@ -88,6 +90,8 @@ export function App() {
   const [showIdentities, setShowIdentities] = useState(false);
   const [version, setVersion] = useState('');
   const [openRoomId, setOpenRoomId] = useState<string | null>(null);
+  /** Unread notification count for the tab badge (0 hides the badge). */
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   /**
    * Startup hydration (Deliverable 2): what the shell should show before it
    * knows whether the stored session is still good. `null` = still deciding.
@@ -123,13 +127,14 @@ export function App() {
       setLocked(false);
       void bridge.getAuthState().then(setAuth);
     });
-    // A notification click focuses the window in main; here we surface the chat
-    // tab so the message the user was told about is actually on screen.
-    const offNotify = bridge.onNotificationActivated(() => {
+    // A notification click focuses the window in main; here we surface the tab the
+    // user was told about. An inbox row (tagged with `notificationId`) opens the
+    // Notifications tab; a chat-activity card opens the chat tab.
+    const offNotify = bridge.onNotificationActivated((payload) => {
       setShowSettings(false);
       setShowIdentities(false);
       setOpenRoomId(null);
-      setView('chat');
+      setView(payload?.notificationId ? 'notifications' : 'chat');
     });
     // Deliverable 2: the companion's avatar gallery links here to map agents to
     // library models, so a request from any window opens the Settings surface.
@@ -143,6 +148,19 @@ export function App() {
       offNotify();
       offSettings();
     };
+  }, []);
+
+  // Notification badge: seed the count at startup and refresh it on every push
+  // ping, so an unread arriving while the Inbox tab is closed still shows up. An
+  // older preload hides the badge rather than throwing.
+  useEffect(() => {
+    if (!hasBridgeMethod(bridge, 'notifySummary')) return;
+    const refresh = () => {
+      void bridge.notifySummary().then((s) => setUnreadNotifications(s.unread));
+    };
+    refresh();
+    const offPush = onBridge<{ notificationId: string | null }>(bridge, 'onNotifyPush', refresh);
+    return () => offPush();
   }, []);
 
   // Session hydration (Deliverable 2). Runs at startup and whenever the user hits
@@ -261,6 +279,7 @@ export function App() {
 
   const tabLabels: Record<(typeof views)[number], MessageKey> = {
     chat: 'shell.tab.chat',
+    notifications: 'shell.tab.notifications',
     storage: 'shell.tab.storage',
     sync: 'shell.tab.sync',
     mounts: 'shell.tab.mounts',
@@ -305,6 +324,21 @@ export function App() {
                 }}
               >
                 {t(tabLabels[tab])}
+                {tab === 'notifications' && unreadNotifications > 0 ? (
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      padding: '1px 6px',
+                      borderRadius: 999,
+                      background: '#4c8bf5',
+                      color: '#0b0f14',
+                      fontSize: 11,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -385,6 +419,13 @@ export function App() {
                   auth={auth}
                   connection={connection}
                   onClose={() => setOpenRoomId(null)}
+                />
+              ) : view === 'notifications' ? (
+                <NotificationsPanel
+                  onOpenConversation={() => {
+                    setView('chat');
+                  }}
+                  onUnreadChange={setUnreadNotifications}
                 />
               ) : view === 'storage' ? (
                 <StorageExplorer />

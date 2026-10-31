@@ -63,6 +63,8 @@ import { createCompanionWindowManager, defaultCompanionPreloadPath } from './com
 import { createGlobalCursorTracker } from './global-cursor.js';
 import { createLocalAvatarStore } from './local-avatar-store.js';
 import { createCompanionPositionStore } from './companion-position-store.js';
+import { createNotificationInbox } from './notification-inbox.js';
+import { createNotificationPush } from './notification-push.js';
 import {
   LOCAL_AVATAR_EXTENSIONS,
   LOCAL_AVATAR_HOST,
@@ -80,6 +82,7 @@ import { createLocalVoiceManager } from './local-voice-manager.js';
 import { pickDisplaySource } from './display-media.js';
 import {
   createNotificationManager,
+  resolveMessageActions,
   type NotificationPayload,
 } from './notifications.js';
 import { createWakeHost } from './wake-host.js';
@@ -111,11 +114,14 @@ import {
   type LoginRequest,
   type LogoutChoice,
   type LogoutStep,
+  type NotificationListInput,
   type StorageUploadRequest,
   type StorageUploadOneRequest,
   type ToolInvocation,
   type TwoFactorRequest,
   type UiSettings,
+  type ZenSchedule,
+  type ZenSnoozeStartInput,
 } from '../shared/ipc.js';
 import {
   isSafeExternalUrl,
@@ -725,8 +731,89 @@ const notificationManager = createNotificationManager({
   },
 });
 
-let tray: Tray | null = null;
+/**
+ * Notification inbox: a thin main-process bridge over the region's
+ * `anx.notification.*` surface. The renderer never talks to the region directly
+ * (its sandbox has no token), so every read/act goes through here.
+ */
+const notificationInbox = createNotificationInbox({
+  getSender: () => getAuthManager().createSender(),
+});
 
+/**
+ * Push bridge: subscribes to the device ntfy topic so a notification card can be
+ * raised even while the window sits in the tray. A ping carries only an opaque
+ * id, so main fetches the row, raises an OS card, and tells the renderer to
+ * refresh its open inbox — no polling, no content on the wire.
+ *
+ * Started only while signed in (see `startNotificationPushIfSignedIn`) and
+ * stopped on sign-out, so an unauthenticated app never holds a subscription.
+ */
+const notificationPush = createNotificationPush({
+  getSender: () => getAuthManager().createSender(),
+  onPing: (ping) => {
+    // Wake the renderer's open inbox first (cheap, no content).
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC.notifyPushPing, ping);
+    }
+    void handleNotificationPush(ping);
+  },
+});
+
+/**
+ * Fetch the row behind a push ping and, when the window is unattended, raise an
+ * OS card — reusing the same attention + privacy gates as chat notifications.
+ * A miss (deleted / not visible) is silently ignored.
+ */
+async function handleNotificationPush(ping: { notificationId: string | null }): Promise<void> {
+  if (!ping.notificationId) return;
+  const attention = mainWindow && !mainWindow.isDestroyed()
+    ? { minimized: mainWindow.isMinimized(), visible: mainWindow.isVisible(), focused: mainWindow.isFocused() }
+    : null;
+  if (!attention) return;
+  const row = await notificationInbox.fetchForPush(ping.notificationId).catch(() => null);
+  if (!row) return;
+  // The inbox row is not a chat message, so reuse the same card builder with a
+  // neutral payload: title/body only, honouring the same privacy settings.
+  notificationManager.notify(
+    {
+      messageId: `notification:${row.id}`,
+      conversationId: null,
+      contactId: null,
+      agentId: null,
+      senderName: row.sourceLabel || null,
+      preview: row.body || null,
+      title: row.title,
+      // Tag the card so a click opens this row in the Notifications tab rather
+      // than routing to a (non-existent) conversation.
+      notificationId: row.id,
+    },
+    // Only raise when the user is away; a focused window shows the inbox badge.
+    { force: false },
+  );
+}
+
+/**
+ * Open a companion window, applying the side effects every open shares: the
+ * OS-global cursor sampler starts with the first window, and an auto-open may
+ * pull the main window forward per the user's placement preference (an explicit
+ * per-launch request wins).
+ *
+ * Kept in one place so the popout IPC handler and the auto-open-on-message path
+ * can never drift in how they treat placement.
+ */
+function openCompanionWindow(launch: CompanionLaunch) {
+  const result = companionWindows.open(launch);
+  // Start the OS-global cursor sampler as soon as a companion exists.
+  if (companionWindows.openContactIds().length > 0) companionCursor.start();
+  const placement = settings.getUiSettings().companionPlacement;
+  if ((placement.bringMainToFront || launch.bringMainToFront) && result.opened) {
+    showMainWindow();
+  }
+  return result;
+}
+
+let tray: Tray | null = null;
 /**
  * Installed Nexus apps for the tray menu.
  *
@@ -1012,6 +1099,8 @@ function getAuthManager(): ReturnType<typeof createAuthManager> {
         // New session -> the tray's app list may change; refetch and rebuild.
         invalidateInstalledApps();
         void refreshTrayMenu();
+        // Start the device push subscription now that we have a token+device.
+        void notificationPush.start();
       },
       // Device removed in the portal (or token revoked): lose ALL access at once
       // — money-grade teardown of storage, sync schedules and mounts.
@@ -1042,6 +1131,14 @@ async function handleSessionLost(loss: { reason: string; deviceRevoked: boolean;
   }
   try {
     mountDaemon.dispose();
+  } catch {
+    /* best-effort */
+  }
+  // Stop the device push subscription: a revoked session must not keep a stream
+  // to the region, and cached inbox reads are stale for the next user.
+  try {
+    notificationPush.stop();
+    notificationInbox.invalidate();
   } catch {
     /* best-effort */
   }
@@ -1281,9 +1378,79 @@ function registerIpc(): void {
       pending.settle(decision?.trusted === true);
     },
   );
-  ipcMain.handle(IPC.notifyIncoming, (_e, payload: NotificationPayload, opts?: { force?: boolean }) => {
-    if (!payload || typeof payload !== 'object' || typeof payload.messageId !== 'string') return;
-    notificationManager.notify(payload, { force: opts?.force === true });
+  ipcMain.handle(
+    IPC.notifyIncoming,
+    (_e, payload: NotificationPayload, opts?: { force?: boolean }) => {
+      if (!payload || typeof payload !== 'object' || typeof payload.messageId !== 'string') {
+        return { raised: false, speak: false };
+      }
+      const raised = notificationManager.notify(payload, { force: opts?.force === true });
+      const actions = resolveMessageActions({
+        settings: settings.getUiSettings().notifications,
+        raised,
+        hasAgent: Boolean(payload.agentId || payload.contactId),
+      });
+      // Auto-open: pop the sender's companion so an unattended message is not
+      // missed. Placement (incl. `bringMainToFront`) is applied by the shared
+      // open path, so an auto-open lands exactly where a manual popout would.
+      if (actions.openCompanion && (payload.contactId || payload.agentId)) {
+        const contactId = payload.contactId ?? payload.agentId;
+        try {
+          openCompanionWindow({
+            contactId: contactId as string,
+            conversationId: payload.conversationId,
+            agentId: payload.agentId,
+          });
+        } catch {
+          // A failed auto-open must never break message handling.
+        }
+      }
+      return { raised, speak: actions.speak };
+    },
+  );
+
+  // Notification inbox (`anx.notification.*`). Inputs are validated here because
+  // the renderer is sandboxed and an IPC boundary is a trust boundary.
+  ipcMain.handle(IPC.notifyList, (_e, input?: NotificationListInput) =>
+    notificationInbox.list(input && typeof input === 'object' ? input : {}),
+  );
+  ipcMain.handle(IPC.notifySummary, () => notificationInbox.unreadSummary());
+  ipcMain.handle(IPC.notifyGet, (_e, id: string) => {
+    const notificationId = typeof id === 'string' ? id.trim() : '';
+    if (!notificationId) return { notification: null };
+    return notificationInbox.get(notificationId);
+  });
+  ipcMain.handle(IPC.notifyMarkRead, (_e, id: string) => {
+    const notificationId = typeof id === 'string' ? id.trim() : '';
+    if (!notificationId) return { notification: null };
+    return notificationInbox.markRead(notificationId);
+  });
+  ipcMain.handle(IPC.notifyMarkUnread, (_e, id: string) => {
+    const notificationId = typeof id === 'string' ? id.trim() : '';
+    if (!notificationId) return { notification: null };
+    return notificationInbox.markUnread(notificationId);
+  });
+  ipcMain.handle(IPC.notifyMarkAllRead, () => notificationInbox.markAllRead());
+  ipcMain.handle(IPC.notifyActionInvoke, (_e, id: string, actionId: string) =>
+    notificationInbox.invokeAction(
+      typeof id === 'string' ? id.trim() : '',
+      typeof actionId === 'string' ? actionId.trim() : '',
+    ),
+  );
+  ipcMain.handle(IPC.notifyZenStatus, () => notificationInbox.zenStatus());
+  ipcMain.handle(IPC.notifyZenSnoozeStart, (_e, input?: ZenSnoozeStartInput) =>
+    notificationInbox.zenSnoozeStart(input && typeof input === 'object' ? input : {}),
+  );
+  ipcMain.handle(IPC.notifyZenSnoozeStop, () => notificationInbox.zenSnoozeStop());
+  ipcMain.handle(IPC.notifyZenScheduleList, () => notificationInbox.zenScheduleList());
+  ipcMain.handle(IPC.notifyZenScheduleUpsert, (_e, schedule: ZenSchedule) => {
+    if (!schedule || typeof schedule !== 'object') return notificationInbox.zenStatus();
+    return notificationInbox.zenScheduleUpsert(schedule);
+  });
+  ipcMain.handle(IPC.notifyZenScheduleRemove, (_e, scheduleId: string) => {
+    const id = typeof scheduleId === 'string' ? scheduleId.trim() : '';
+    if (!id) return notificationInbox.zenStatus();
+    return notificationInbox.zenScheduleRemove(id);
   });
 
   ipcMain.handle(IPC.wakeGetSettings, () => wakeManager.getSettings());
@@ -1361,7 +1528,14 @@ function registerIpc(): void {
   ipcMain.handle(IPC.authDeviceLinkStart, () => getAuthManager().startDeviceLink());
   ipcMain.handle(IPC.authDeviceLinkPoll, () => getAuthManager().pollDeviceLink());
   ipcMain.handle(IPC.authLogout, () => getAuthManager().logout());
-  ipcMain.handle(IPC.authHydrate, () => getAuthManager().hydrateSession());
+  ipcMain.handle(IPC.authHydrate, async () => {
+    const state = await getAuthManager().hydrateSession();
+    // A restored session must (re)open the push subscription too: `onAuthenticated`
+    // only fires on an interactive sign-in, so a restarted app would otherwise
+    // never subscribe until the user signed out and back in.
+    if (state.view === 'signed_in') void notificationPush.start();
+    return state;
+  });
 
   // App PIN lock (Deliverable 3). A UI gate only; the PIN is hashed in main.
   ipcMain.handle(IPC.appLockGetState, () => appLockManager.getState());
@@ -1617,19 +1791,7 @@ function registerIpc(): void {
   });
 
   // Immersive companion window (Phase 7a).
-  ipcMain.handle(IPC.companionOpen, (_e, launch: CompanionLaunch) => {
-    const result = companionWindows.open(launch);
-    // Start the OS-global cursor sampler as soon as a companion exists.
-    if (companionWindows.openContactIds().length > 0) companionCursor.start();
-    // An auto-open (wake word / pushed message) can be asked to pull the main
-    // window forward: the user's `bringMainToFront` preference OR an explicit
-    // per-launch request. A user-initiated popout never sets the flag.
-    const placement = settings.getUiSettings().companionPlacement;
-    if (placement.bringMainToFront || launch.bringMainToFront) {
-      if (result.opened) showMainWindow();
-    }
-    return result;
-  });
+  ipcMain.handle(IPC.companionOpen, (_e, launch: CompanionLaunch) => openCompanionWindow(launch));
   ipcMain.handle(IPC.companionClose, (_e, contactId: string) => {
     const closed = companionWindows.close(contactId);
     if (companionWindows.openContactIds().length === 0) companionCursor.stop();
@@ -1890,6 +2052,7 @@ app.on('before-quit', () => {
   tray = null;
   companionWindows.closeAll();
   companionCursor.stop();
+  notificationPush.stop();
   syncManager.stop();
   mountDaemon.dispose();
   void localVoiceManager.dispose();

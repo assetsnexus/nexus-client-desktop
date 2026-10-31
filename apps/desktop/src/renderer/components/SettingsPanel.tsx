@@ -454,6 +454,36 @@ export function SettingsPanel({
               </span>
             </label>
 
+            <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={notifications.openCompanionOnMessage}
+                disabled={notificationsBusy}
+                onChange={(e) => void patchNotifications({ openCompanionOnMessage: e.target.checked })}
+              />
+              <span style={{ color: '#e8eef4' }}>
+                {t('settings.notifications.openCompanion')}{' '}
+                <span style={{ color: '#6b7784' }}>
+                  {t('settings.notifications.openCompanion.help')}
+                </span>
+              </span>
+            </label>
+
+            <label style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={notifications.speakMessages}
+                disabled={notificationsBusy}
+                onChange={(e) => void patchNotifications({ speakMessages: e.target.checked })}
+              />
+              <span style={{ color: '#e8eef4' }}>
+                {t('settings.notifications.speak')}{' '}
+                <span style={{ color: '#6b7784' }}>
+                  {t('settings.notifications.speak.help')}
+                </span>
+              </span>
+            </label>
+
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <button
                 type="button"

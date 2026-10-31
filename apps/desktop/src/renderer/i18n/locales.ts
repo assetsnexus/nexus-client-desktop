@@ -11,6 +11,7 @@
 
 import { AUDIT_LOCALE_MESSAGES } from './locales-audit.js';
 import { CHAT_CACHE_LOCALE_MESSAGES } from './locales-chat-cache.js';
+import { NOTIFICATIONS_LOCALE_MESSAGES } from './locales-notifications.js';
 
 export const SUPPORTED_LOCALES = [
   'en',
@@ -165,9 +166,37 @@ const en = {
   'settings.notifications.test': 'Send a test notification',
   'settings.notifications.testSent': 'Test notification sent.',
   'settings.notifications.suppressWhenLocked': "Hide message content while the app is locked",
+  'settings.notifications.openCompanion': 'Open the agent’s companion window for new messages',
+  'settings.notifications.openCompanion.help':
+    'While the app is in the background, also pop the sending agent’s companion so the message is not missed.',
+  'settings.notifications.speak': 'Speak new agent messages aloud',
+  'settings.notifications.speak.help':
+    'Read an incoming agent message with the agent’s configured voice while the window is unattended.',
+
+  // Notifications inbox
+  'notifications.title': 'Notifications',
+  'notifications.unreadOnly': 'Unread only',
+  'notifications.markRead': 'Mark as read',
+  'notifications.markUnread': 'Mark as unread',
+  'notifications.markAllRead': 'Mark all as read',
+  'notifications.refresh': 'Refresh',
+  'notifications.loadMore': 'Load more',
+  'notifications.loading': 'Loading notifications…',
+  'notifications.empty': 'No notifications yet.',
+  'notifications.emptyUnread': 'Nothing unread — you are all caught up.',
+  'notifications.unavailable': 'The notifications inbox needs a newer version of the desktop app.',
+  'notifications.priority.high': 'High',
+  'notifications.priority.highest': 'Urgent',
+  'notifications.zen.active': 'Zen mode is on — notifications are paused.',
+  'notifications.zen.stop': 'Resume',
+  'notifications.confirm.title': 'Are you sure?',
+  'notifications.confirm.body': 'This action cannot be undone.',
+  'notifications.confirm.ok': 'Confirm',
+  'notifications.confirm.cancel': 'Cancel',
 
   // Shell chrome
   'shell.tab.chat': 'Chat',
+  'shell.tab.notifications': 'Notifications',
   'shell.tab.storage': 'Storage',
   'shell.tab.sync': 'Sync',
   'shell.tab.mounts': 'Mounts',
@@ -1908,6 +1937,7 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
 for (const locale of SUPPORTED_LOCALES) {
   Object.assign(DICTIONARIES[locale], AUDIT_LOCALE_MESSAGES[locale]);
   Object.assign(DICTIONARIES[locale], CHAT_CACHE_LOCALE_MESSAGES[locale]);
+  Object.assign(DICTIONARIES[locale], NOTIFICATIONS_LOCALE_MESSAGES[locale]);
 }
 
 export const EN_MESSAGES = en;

@@ -29,6 +29,7 @@ import { resolveOrgLogoUrl } from '../../shared/org-logo.js';
 import { setToolAuditContext, resolveToolAuditContext } from '../tools/audit-context.js';
 import { createDesktopChatCacheAdapter } from '../chat-cache-adapter.js';
 import { createIncomingWatcher, resolveSenderName } from '../notifications/incoming.js';
+import { createMessageSpeaker } from '../notifications/speak.js';
 import { resolveCompanionLabelOrNull } from '../../shared/companion-label.js';
 import { createWakeChatRouter } from '../wake/router.js';
 import { bindWakeThread, resolveWakeSendConversationId } from '../wake/thread-binding.js';
@@ -177,6 +178,33 @@ export function ChatHost({
     [tools],
   );
 
+  /**
+   * TTS speaker for the opt-in "speak messages" setting. Main owns the decision
+   * (it alone knows the window is unattended) and reports `speak: true` from
+   * `notifyIncoming`; this only performs it. Lives per chat client so the voice
+   * is resolved through the same live session the chat uses.
+   */
+  const messageSpeakerRef = useRef<ReturnType<typeof createMessageSpeaker> | null>(null);
+  useEffect(() => {
+    if (!chat) return;
+    const speaker = createMessageSpeaker({
+      createSpeakTurn: ({ agentId }) =>
+        typeof chat.createSpeakTurn === 'function'
+          ? chat.createSpeakTurn({ agentId })
+          : { speak: async () => undefined, cancel: () => undefined },
+    });
+    messageSpeakerRef.current = speaker;
+    // Speaking is only for an unattended window, so regaining focus (the user is
+    // back) stops the current utterance and drops the queue.
+    const onFocus = () => speaker.cancel();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      speaker.reset();
+      messageSpeakerRef.current = null;
+    };
+  }, [chat]);
+
   // Keep the client-tool audit correlation fresh. Every tool call forwarded to
   // main carries the agent + conversation of the active panel, so the audit UI
   // can trace a call back to its conversation. Audit metadata only.
@@ -277,18 +305,27 @@ export function ChatHost({
         agentName: contact?.name ?? null,
         conversationTitle: null,
       });
-      void bridge.notifyIncoming({
-        // A stored message id dedupes across a replay; a preview-only beat falls
-        // back to a synthetic id so it still raises exactly one card.
-        messageId:
-          data.messageId || `activity:${conversationId}:${data.preview ?? kind}:${Date.now()}`,
-        conversationId,
-        contactId: contact?.id ?? panel?.contactId ?? null,
-        agentId: contact?.agentId ?? agentId,
-        senderName,
-        preview: data.preview ?? null,
-        title: senderName,
-      });
+      void bridge
+        .notifyIncoming({
+          // A stored message id dedupes across a replay; a preview-only beat falls
+          // back to a synthetic id so it still raises exactly one card.
+          messageId:
+            data.messageId || `activity:${conversationId}:${data.preview ?? kind}:${Date.now()}`,
+          conversationId,
+          contactId: contact?.id ?? panel?.contactId ?? null,
+          agentId: contact?.agentId ?? agentId,
+          senderName,
+          preview: data.preview ?? null,
+          title: senderName,
+        })
+        .then((result) => {
+          // Main already gated this on the unattended-window rule + the opt-in
+          // setting; speak the preview it will have shown on the card.
+          if (result?.speak && data.preview) {
+            messageSpeakerRef.current?.speak(data.preview, contact?.agentId ?? agentId);
+          }
+        })
+        .catch(() => undefined);
     },
     [bridge, chat],
   );
@@ -314,15 +351,22 @@ export function ChatHost({
         conversationTitle: null,
       });
       for (const message of incoming) {
-        void bridge.notifyIncoming({
-          messageId: message.id,
-          conversationId: panel?.conversationId ?? state.conversationId ?? null,
-          contactId: panel?.contactId ?? null,
-          agentId: contact?.agentId ?? null,
-          senderName,
-          preview: message.content,
-          title: senderName,
-        });
+        void bridge
+          .notifyIncoming({
+            messageId: message.id,
+            conversationId: panel?.conversationId ?? state.conversationId ?? null,
+            contactId: panel?.contactId ?? null,
+            agentId: contact?.agentId ?? null,
+            senderName,
+            preview: message.content,
+            title: senderName,
+          })
+          .then((result) => {
+            if (result?.speak && message.content) {
+              messageSpeakerRef.current?.speak(message.content, contact?.agentId ?? null);
+            }
+          })
+          .catch(() => undefined);
       }
     };
     // Establish the baseline for whatever is already on screen.

@@ -4,6 +4,7 @@ import {
   buildNotificationContent,
   createNotificationManager,
   isUnattended,
+  resolveMessageActions,
   shouldNotify,
   truncatePreview,
   type NotificationContent,
@@ -192,6 +193,52 @@ function fakeNotification() {
   };
   return { notification, listeners };
 }
+
+describe('resolveMessageActions', () => {
+  it('does nothing when no card was raised', () => {
+    expect(
+      resolveMessageActions({
+        settings: settings({ speakMessages: true, openCompanionOnMessage: true }),
+        raised: false,
+        hasAgent: true,
+      }),
+    ).toEqual({ speak: false, openCompanion: false });
+  });
+
+  it('honours the speak setting independently of the companion setting', () => {
+    expect(
+      resolveMessageActions({
+        settings: settings({ speakMessages: true, openCompanionOnMessage: false }),
+        raised: true,
+        hasAgent: true,
+      }),
+    ).toEqual({ speak: true, openCompanion: false });
+  });
+
+  it('only opens a companion when the message addresses an agent', () => {
+    expect(
+      resolveMessageActions({
+        settings: settings({ openCompanionOnMessage: true }),
+        raised: true,
+        hasAgent: false,
+      }),
+    ).toEqual({ speak: false, openCompanion: false });
+    expect(
+      resolveMessageActions({
+        settings: settings({ openCompanionOnMessage: true }),
+        raised: true,
+        hasAgent: true,
+      }),
+    ).toEqual({ speak: false, openCompanion: true });
+  });
+
+  it('is off by default', () => {
+    expect(resolveMessageActions({ settings: settings(), raised: true, hasAgent: true })).toEqual({
+      speak: false,
+      openCompanion: false,
+    });
+  });
+});
 
 describe('createNotificationManager', () => {
   it('raises a card only when the window is unattended', () => {

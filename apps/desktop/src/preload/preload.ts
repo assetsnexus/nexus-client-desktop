@@ -28,6 +28,26 @@ const bridge: NexusBridge = {
     ipcRenderer.on(IPC.notifyActivated, handler);
     return () => ipcRenderer.removeListener(IPC.notifyActivated, handler);
   },
+  // Notification inbox (region `anx.notification.*`).
+  notifyList: (input) => ipcRenderer.invoke(IPC.notifyList, input),
+  notifySummary: () => ipcRenderer.invoke(IPC.notifySummary),
+  notifyGet: (notificationId) => ipcRenderer.invoke(IPC.notifyGet, notificationId),
+  notifyMarkRead: (notificationId) => ipcRenderer.invoke(IPC.notifyMarkRead, notificationId),
+  notifyMarkUnread: (notificationId) => ipcRenderer.invoke(IPC.notifyMarkUnread, notificationId),
+  notifyMarkAllRead: () => ipcRenderer.invoke(IPC.notifyMarkAllRead),
+  notifyActionInvoke: (notificationId, actionId) =>
+    ipcRenderer.invoke(IPC.notifyActionInvoke, notificationId, actionId),
+  notifyZenStatus: () => ipcRenderer.invoke(IPC.notifyZenStatus),
+  notifyZenSnoozeStart: (input) => ipcRenderer.invoke(IPC.notifyZenSnoozeStart, input),
+  notifyZenSnoozeStop: () => ipcRenderer.invoke(IPC.notifyZenSnoozeStop),
+  notifyZenScheduleList: () => ipcRenderer.invoke(IPC.notifyZenScheduleList),
+  notifyZenScheduleUpsert: (schedule) => ipcRenderer.invoke(IPC.notifyZenScheduleUpsert, schedule),
+  notifyZenScheduleRemove: (scheduleId) => ipcRenderer.invoke(IPC.notifyZenScheduleRemove, scheduleId),
+  onNotifyPush: (listener) => {
+    const handler = (_e: unknown, ping: { notificationId: string | null }) => listener(ping);
+    ipcRenderer.on(IPC.notifyPushPing, handler);
+    return () => ipcRenderer.removeListener(IPC.notifyPushPing, handler);
+  },
   wakeGetSettings: () => ipcRenderer.invoke(IPC.wakeGetSettings),
   wakeSetSettings: (next) => ipcRenderer.invoke(IPC.wakeSetSettings, next),
   wakeListAgents: () => ipcRenderer.invoke(IPC.wakeListAgents),
