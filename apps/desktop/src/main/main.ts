@@ -62,6 +62,7 @@ import { createBonjourBackend } from './mdns-bonjour.js';
 import { createCompanionWindowManager, defaultCompanionPreloadPath } from './companion-window.js';
 import { createGlobalCursorTracker } from './global-cursor.js';
 import { createLocalAvatarStore } from './local-avatar-store.js';
+import { createCompanionPositionStore } from './companion-position-store.js';
 import {
   LOCAL_AVATAR_EXTENSIONS,
   LOCAL_AVATAR_HOST,
@@ -466,6 +467,22 @@ const companionWindows = createCompanionWindowManager({
   onClosed: () => {
     if (companionWindows.listWindows().length === 0) companionCursor.stop();
   },
+  // Spawn placement: the user's preference, the main window (for
+  // `right-of-main`), and the per-agent remembered spot — all read fresh per open
+  // so a settings change applies to the next companion without a restart.
+  getPlacement: () => settings.getUiSettings().companionPlacement,
+  getMainBounds: () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return null;
+    return mainWindow.getBounds();
+  },
+  getRememberedPosition: (contactId) => companionPositions.get(contactId),
+  rememberPosition: (contactId, point) => {
+    // Only persist when the user opted into remembering positions; otherwise a
+    // drag on a `bottom-right` companion would silently write a spot that mode
+    // never reads.
+    if (!settings.getUiSettings().companionPlacement.rememberPerAgent) return;
+    companionPositions.set(contactId, point);
+  },
 });
 
 /**
@@ -544,6 +561,13 @@ const localModelsStore = createLocalModelsStore();
  * add/remove/map behaviour is unit-tested with a temp dir.
  */
 const localAvatarStore = createLocalAvatarStore();
+
+/**
+ * Per-agent remembered companion positions, powering the `remember-last`
+ * placement mode. Kept out of `settings.json` because a drag updates it often and
+ * rewriting the whole settings blob on every drag would be wasteful.
+ */
+const companionPositions = createCompanionPositionStore();
 
 /**
  * Local-only STT for `stt_phrase` wake words. A wake word must never stream
@@ -1597,6 +1621,13 @@ function registerIpc(): void {
     const result = companionWindows.open(launch);
     // Start the OS-global cursor sampler as soon as a companion exists.
     if (companionWindows.openContactIds().length > 0) companionCursor.start();
+    // An auto-open (wake word / pushed message) can be asked to pull the main
+    // window forward: the user's `bringMainToFront` preference OR an explicit
+    // per-launch request. A user-initiated popout never sets the flag.
+    const placement = settings.getUiSettings().companionPlacement;
+    if (placement.bringMainToFront || launch.bringMainToFront) {
+      if (result.opened) showMainWindow();
+    }
     return result;
   });
   ipcMain.handle(IPC.companionClose, (_e, contactId: string) => {
@@ -1838,6 +1869,13 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });
 });
+
+// A monitor unplugged while companions are open would leave any window parked on
+// it unreachable; pull the fully off-screen ones back onto a connected display.
+// `display-removed` fires with the *remaining* displays already applied, so the
+// re-clamp sees the true new layout.
+screen.on('display-removed', () => companionWindows.reclampOffScreen());
+screen.on('display-metrics-changed', () => companionWindows.reclampOffScreen());
 
 app.on('window-all-closed', () => {
   // With a tray the app keeps running (and receiving messages) with no window;

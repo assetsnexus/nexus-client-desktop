@@ -36,6 +36,15 @@ import {
   type SttOwnerElection,
 } from '../shared/companion.js';
 import { IPC, type CompanionToolId } from '../shared/ipc.js';
+import {
+  DEFAULT_COMPANION_PLACEMENT_SETTINGS,
+  computeCompanionBounds,
+  clampToWorkArea,
+  normalizeCompanionPlacementSettings,
+  type CompanionPlacementSettings,
+  type PlacementPoint,
+  type PlacementRect,
+} from '../shared/companion-placement.js';
 
 /** Default size of a detached companion tool window (Deliverable 3). */
 const TOOL_DEFAULT_SIZE = { width: 460, height: 560 } as const;
@@ -52,7 +61,46 @@ export type CompanionWindowOptions = {
   harden?: (contents: Electron.WebContents) => void;
   /** Called after a companion window closes. */
   onClosed?: (contactId: string) => void;
+  /**
+   * The user's spawn-placement preference (defaults to bottom-right). Read at
+   * each open so a settings change applies to the next companion without a
+   * restart.
+   */
+  getPlacement?: () => CompanionPlacementSettings;
+  /** Main window bounds, used for `right-of-main` and target-display resolution. */
+  getMainBounds?: () => PlacementRect | null;
+  /** Remembered last position for a contact (only used by `remember-last`). */
+  getRememberedPosition?: (contactId: string) => PlacementPoint | null;
+  /** Persist a contact's position after the user drags/resizes its companion. */
+  rememberPosition?: (contactId: string, point: PlacementPoint) => void;
+  /**
+   * Work area + all display work areas. Injectable so the placement math is
+   * testable without a real multi-monitor setup; defaults to Electron `screen`.
+   */
+  getDisplays?: () => {
+    primaryWorkArea: PlacementRect;
+    /** Work area of the display the main window is on, else the primary's. */
+    targetWorkArea: PlacementRect;
+    allWorkAreas: PlacementRect[];
+  };
 };
+
+/** Resolve placement context from the injected displays (or Electron `screen`). */
+function resolveDisplays(options: CompanionWindowOptions): {
+  primaryWorkArea: PlacementRect;
+  targetWorkArea: PlacementRect;
+  allWorkAreas: PlacementRect[];
+} {
+  if (options.getDisplays) return options.getDisplays();
+  const primaryWorkArea = screen.getPrimaryDisplay().workArea;
+  const allWorkAreas = screen.getAllDisplays().map((d) => d.workArea);
+  const mainBounds = options.getMainBounds?.() ?? null;
+  const targetWorkArea =
+    mainBounds && typeof screen.getDisplayMatching === 'function'
+      ? screen.getDisplayMatching(mainBounds).workArea
+      : primaryWorkArea;
+  return { primaryWorkArea, targetWorkArea, allWorkAreas };
+}
 
 export type CompanionWindowManager = ReturnType<typeof createCompanionWindowManager>;
 
@@ -86,6 +134,84 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
    * the STT election already is.
    */
   const lastSessions = new Map<string, CompanionSessionView>();
+
+  /** Live bounds of every open window (companions + tools), for overlap checks. */
+  function occupiedRects(): PlacementRect[] {
+    const rects: PlacementRect[] = [];
+    for (const win of [...windows.values(), ...toolWindows.values()]) {
+      if (win.isDestroyed()) continue;
+      if (typeof win.getBounds === 'function') rects.push(win.getBounds());
+    }
+    return rects;
+  }
+
+  /**
+   * Decide where a window of `size` should spawn, honouring the user's placement
+   * preference, avoiding the windows already on screen, and never landing off a
+   * connected display.
+   */
+  function resolveSpawn(contactId: string, size: { width: number; height: number }): PlacementPoint {
+    const placement = options.getPlacement
+      ? options.getPlacement()
+      : DEFAULT_COMPANION_PLACEMENT_SETTINGS;
+    const settings = normalizeCompanionPlacementSettings(placement);
+    const { targetWorkArea, allWorkAreas } = resolveDisplays(options);
+    const remembered = options.getRememberedPosition?.(contactId) ?? null;
+    return computeCompanionBounds({
+      mode: settings.mode,
+      size,
+      workArea: targetWorkArea,
+      mainBounds: options.getMainBounds?.() ?? null,
+      occupied: occupiedRects(),
+      gapPx: settings.gapPx,
+      remembered: settings.rememberPerAgent ? remembered : null,
+      allWorkAreas,
+    });
+  }
+
+  /** Remember a window's top-left after a user move/resize (drag-to-place). */
+  function trackPosition(contactId: string, win: BrowserWindow): void {
+    const save = () => {
+      if (win.isDestroyed()) return;
+      if (typeof win.getBounds !== 'function') return;
+      const bounds = win.getBounds();
+      options.rememberPosition?.(contactId, { x: bounds.x, y: bounds.y });
+    };
+    win.on('moved', save);
+    win.on('resized', save);
+  }
+
+  /**
+   * Pull any window that is entirely off every connected display back on-screen.
+   * Runs on `display-removed`, where a companion stashed on a now-gone monitor
+   * would otherwise be unreachable.
+   */
+  function reclampOffScreen(): void {
+    const { allWorkAreas, targetWorkArea } = resolveDisplays(options);
+    const areas = allWorkAreas.length ? allWorkAreas : [targetWorkArea];
+    const visible = (rect: PlacementRect): boolean =>
+      areas.some(
+        (area) =>
+          rect.x < area.x + area.width &&
+          rect.x + rect.width > area.x &&
+          rect.y < area.y + area.height &&
+          rect.y + rect.height > area.y,
+      );
+    for (const win of [...windows.values(), ...toolWindows.values()]) {
+      if (win.isDestroyed() || typeof win.getBounds !== 'function') continue;
+      const bounds = win.getBounds();
+      if (!bounds.width || !bounds.height) continue;
+      // Only touch a window that is fully off *every* display: one still partly
+      // visible (or on a still-connected monitor) is left exactly where it is.
+      if (visible(bounds)) continue;
+      const point = clampToWorkArea(bounds, areas[0], { x: areas[0].x, y: areas[0].y });
+      if (typeof win.setBounds === 'function') {
+        win.setBounds({ ...bounds, x: point.x, y: point.y });
+      } else if (typeof win.setPosition === 'function') {
+        win.setPosition(point.x, point.y);
+      }
+    }
+  }
 
   /**
    * Send the **current** election to every open companion, unconditionally.
@@ -205,10 +331,14 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     }
 
     const { width, height } = COMPANION_DEFAULT_SIZE;
-    const display = screen.getPrimaryDisplay().workAreaSize;
+    const { targetWorkArea } = resolveDisplays(options);
+    const size = { width: Math.min(width, targetWorkArea.width), height: Math.min(height, targetWorkArea.height) };
+    const { x, y } = resolveSpawn(launch.contactId, size);
     const win = new BrowserWindow({
-      width: Math.min(width, display.width),
-      height: Math.min(height, display.height),
+      x,
+      y,
+      width: size.width,
+      height: size.height,
       minWidth: COMPANION_MIN_SIZE.width,
       minHeight: COMPANION_MIN_SIZE.height,
       backgroundColor: '#0b0f14',
@@ -230,6 +360,9 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
 
     windows.set(launch.contactId, win);
     pinned.set(launch.contactId, alwaysOnTop);
+    // Remember where the user drags this agent's companion (used by
+    // `remember-last` on the next open).
+    trackPosition(launch.contactId, win);
     // Bringing a companion to the front (or opening it) makes it the active STT
     // owner, so the mic follows the window the user is looking at.
     win.on('focus', () => applyElection(launch.contactId, 'focus'));
@@ -319,10 +452,17 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
       return { contactId: input.contactId, tool: input.tool };
     }
 
-    const display = screen.getPrimaryDisplay().workAreaSize;
+    const { targetWorkArea } = resolveDisplays(options);
+    const toolSize = {
+      width: Math.min(TOOL_DEFAULT_SIZE.width, targetWorkArea.width),
+      height: Math.min(TOOL_DEFAULT_SIZE.height, targetWorkArea.height),
+    };
+    const { x, y } = resolveSpawn(input.contactId, toolSize);
     const win = new BrowserWindow({
-      width: Math.min(TOOL_DEFAULT_SIZE.width, display.width),
-      height: Math.min(TOOL_DEFAULT_SIZE.height, display.height),
+      x,
+      y,
+      width: toolSize.width,
+      height: toolSize.height,
       backgroundColor: '#0b0f14',
       // `<Tool> · <Agent Name>`; the agent name is a live-updatable hint (the
       // companion re-titles this window once it resolves the agent), and an
@@ -560,6 +700,13 @@ export function createCompanionWindowManager(options: CompanionWindowOptions) {
     openContactIds(): string[] {
       return [...windows.keys()];
     },
+
+    /**
+     * Pull every open companion/tool window that is now entirely off-screen back
+     * onto a connected display. Wired to `screen`'s `display-removed` so a window
+     * parked on an unplugged monitor does not become unreachable.
+     */
+    reclampOffScreen,
 
     /**
      * Live companion windows with their `BrowserWindow` handles, for the

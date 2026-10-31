@@ -191,6 +191,13 @@ export type CompanionLaunch = {
    * pin toggle that flips this live.
    */
   alwaysOnTop?: boolean;
+  /**
+   * Force the main app window forward too, even when the companion opens in the
+   * background. Used by the auto-open-on-message path together with the user's
+   * `bringMainToFront` preference; a user-initiated popout leaves it unset (the
+   * user is already looking at the app).
+   */
+  bringMainToFront?: boolean;
 };
 
 /**

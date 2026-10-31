@@ -16,6 +16,36 @@ describe('createSettingsStore — ui settings', () => {
     expect(ui.notifications).toEqual(DEFAULT_NOTIFICATION_SETTINGS);
   });
 
+  it('defaults companion placement to bottom-right without stealing focus', () => {
+    const ui = createSettingsStore(tempFile()).getUiSettings();
+    expect(ui.companionPlacement).toEqual({
+      mode: 'bottom-right',
+      gapPx: 16,
+      rememberPerAgent: false,
+      bringMainToFront: false,
+    });
+  });
+
+  it('persists a companion placement choice and repairs a hand-edited one', () => {
+    const path = tempFile();
+    const store = createSettingsStore(path);
+    const next = store.setUiSettings({
+      companionPlacement: { mode: 'center', gapPx: 24, rememberPerAgent: true, bringMainToFront: true },
+    });
+    expect(next.companionPlacement.mode).toBe('center');
+    expect(createSettingsStore(path).getUiSettings().companionPlacement).toEqual({
+      mode: 'center',
+      gapPx: 24,
+      rememberPerAgent: true,
+      bringMainToFront: true,
+    });
+    // A bogus mode falls back to the default rather than reaching the window code.
+    writeFileSync(path, JSON.stringify({ ui: { companionPlacement: { mode: 'moon', gapPx: -3 } } }), 'utf8');
+    const repaired = createSettingsStore(path).getUiSettings().companionPlacement;
+    expect(repaired.mode).toBe('bottom-right');
+    expect(repaired.gapPx).toBe(0);
+  });
+
   it('persists a picked login country, upper-cased', () => {
     const path = tempFile();
     const store = createSettingsStore(path);

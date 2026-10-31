@@ -34,6 +34,7 @@ import type {
   WakeEngineKind,
 } from './wake.js';
 import type { AppLockSettings, AppLockState } from './app-lock.js';
+import type { CompanionPlacementSettings } from './companion-placement.js';
 import type { AudioSettings } from './audio.js';
 import type { LogoutChoice, LogoutReport, LogoutStep } from './logout.js';
 import type {
@@ -140,6 +141,17 @@ export {
   MAX_CUSTOM_TRAY_APPS,
   isSafeExternalUrl,
 } from './nexus-apps.js';
+export {
+  COMPANION_PLACEMENT_MODES,
+  DEFAULT_COMPANION_PLACEMENT_SETTINGS,
+  normalizeCompanionPlacementSettings,
+} from './companion-placement.js';
+export type {
+  CompanionPlacementMode,
+  CompanionPlacementSettings,
+  PlacementPoint,
+  PlacementRect,
+} from './companion-placement.js';
 
 export type ConnectionConfigPatch = Partial<DesktopConnectionConfig>;
 
@@ -167,6 +179,12 @@ export type UiSettings = {
   companionDebug: CompanionDebugSettings;
   /** Companion avatar behaviour (non-debug): click nod, etc. */
   companionAvatar: CompanionAvatarSettings;
+  /**
+   * Where a newly opened companion window appears: corner/edge preference,
+   * edge margin, per-agent position memory, and whether an auto-opened companion
+   * also brings the main window forward.
+   */
+  companionPlacement: CompanionPlacementSettings;
   /** Audio device preferences: primary/allowed speakers + primary/wake microphones. */
   audio: AudioSettings;
 };

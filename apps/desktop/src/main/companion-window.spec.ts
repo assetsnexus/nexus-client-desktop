@@ -31,6 +31,29 @@ class FakeWindow {
     created.push(this);
     this.alwaysOnTop = (options.alwaysOnTop as boolean) ?? false;
     this.title = (options.title as string) ?? '';
+    this.bounds = {
+      x: (options.x as number) ?? 0,
+      y: (options.y as number) ?? 0,
+      width: (options.width as number) ?? 0,
+      height: (options.height as number) ?? 0,
+    };
+  }
+  /** Current bounds; seeded from the create-time x/y/width/height options. */
+  bounds: { x: number; y: number; width: number; height: number };
+  getBounds() {
+    return { ...this.bounds };
+  }
+  setBounds(next: { x: number; y: number; width: number; height: number }) {
+    this.bounds = { ...next };
+    this.emit('moved');
+  }
+  setPosition(x: number, y: number) {
+    this.bounds = { ...this.bounds, x, y };
+    this.emit('moved');
+  }
+  /** Test hook: fire one of the window's own events (moved/resized/closed). */
+  emit(event: string) {
+    for (const l of this.listeners[event] ?? []) l();
   }
   setTitle(title: string) {
     this.title = title;
@@ -73,17 +96,22 @@ class FakeWindow {
 
 vi.mock('electron', () => ({
   BrowserWindow: FakeWindow,
-  screen: { getPrimaryDisplay: () => ({ workAreaSize: { width: 1920, height: 1080 } }) },
+  screen: {
+    getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+    getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }],
+    getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+  },
 }));
 
 const { createCompanionWindowManager, defaultCompanionPreloadPath } = await import(
   './companion-window.js'
 );
 
-function manager() {
+function manager(over: Partial<Parameters<typeof createCompanionWindowManager>[0]> = {}) {
   return createCompanionWindowManager({
     resolveRendererUrl: () => 'file:///app/index.html',
     preloadPath: '/app/preload.cjs',
+    ...over,
   });
 }
 
@@ -416,6 +444,109 @@ describe('companion window manager', () => {
     const sessions = created[1].sent.filter((s) => s.channel === 'nexus:companion:session');
     // A fresh window must not show the previous window's finished turn.
     expect(sessions).toEqual([]);
+  });
+});
+
+describe('companion spawn placement', () => {
+  const work = { x: 0, y: 0, width: 1920, height: 1080 };
+  const displays = () => ({ primaryWorkArea: work, targetWorkArea: work, allWorkAreas: [work] });
+
+  it('passes an explicit x/y rather than letting Electron centre the window', () => {
+    const m = manager({ getDisplays: displays });
+    m.open({ contactId: 've-1' });
+    const { x, y, width, height } = created[0].options as Record<string, number>;
+    expect(typeof x).toBe('number');
+    expect(typeof y).toBe('number');
+    // Default bottom-right with the default 16px gap.
+    expect(x).toBe(work.width - width - 16);
+    expect(y).toBe(work.height - height - 16);
+  });
+
+  it('spawns a second companion to the left of the first (no stacking)', () => {
+    const m = manager({ getDisplays: displays });
+    m.open({ contactId: 've-1' });
+    m.open({ contactId: 've-2' });
+    const first = created[0].options as Record<string, number>;
+    const second = created[1].options as Record<string, number>;
+    expect(second.y).toBe(first.y);
+    expect(second.x).toBe((first.x as number) - (first.width as number) - 16);
+  });
+
+  it('honours a non-default placement mode from settings', () => {
+    const m = manager({
+      getDisplays: displays,
+      getPlacement: () => ({ mode: 'top-left', gapPx: 20, rememberPerAgent: false, bringMainToFront: false }),
+    });
+    m.open({ contactId: 've-1' });
+    const { x, y } = created[0].options as Record<string, number>;
+    expect(x).toBe(20);
+    expect(y).toBe(20);
+  });
+
+  it('reopens a remembered agent at its last position', () => {
+    const m = manager({
+      getDisplays: displays,
+      getPlacement: () => ({ mode: 'remember-last', gapPx: 16, rememberPerAgent: true, bringMainToFront: false }),
+      getRememberedPosition: () => ({ x: 300, y: 240 }),
+    });
+    m.open({ contactId: 've-1' });
+    const { x, y } = created[0].options as Record<string, number>;
+    expect({ x, y }).toEqual({ x: 300, y: 240 });
+  });
+
+  it('clamps a remembered position that is now off every display', () => {
+    const m = manager({
+      getDisplays: displays,
+      getPlacement: () => ({ mode: 'remember-last', gapPx: 16, rememberPerAgent: true, bringMainToFront: false }),
+      getRememberedPosition: () => ({ x: 99_999, y: 500 }),
+    });
+    m.open({ contactId: 've-1' });
+    const { x, y, width, height } = created[0].options as Record<string, number>;
+    expect(x).toBeLessThanOrEqual(work.width - (width as number));
+    expect(x).toBeGreaterThanOrEqual(0);
+    expect(y + (height as number)).toBeLessThanOrEqual(work.height);
+  });
+
+  it('persists a moved position through `rememberPosition`', () => {
+    const saved: Array<{ contactId: string; x: number; y: number }> = [];
+    const m = manager({
+      getDisplays: displays,
+      getPlacement: () => ({ mode: 'remember-last', gapPx: 16, rememberPerAgent: true, bringMainToFront: false }),
+      rememberPosition: (contactId, point) => saved.push({ contactId, ...point }),
+    });
+    m.open({ contactId: 've-1' });
+    created[0].setBounds({ x: 42, y: 64, width: 560, height: 740 });
+    expect(saved.at(-1)).toEqual({ contactId: 've-1', x: 42, y: 64 });
+  });
+
+  it('re-clamps a fully off-screen window back onto a display', () => {
+    const m = manager({ getDisplays: displays });
+    m.open({ contactId: 've-1' });
+    created[0].setBounds({ x: 5000, y: 5000, width: 560, height: 740 });
+    m.reclampOffScreen();
+    const { x, y, width, height } = created[0].getBounds();
+    expect(x).toBeLessThanOrEqual(work.width - width);
+    expect(y).toBeLessThanOrEqual(work.height - height);
+    expect(x).toBeGreaterThanOrEqual(0);
+  });
+
+  it('leaves a window on a still-connected display untouched', () => {
+    const m = manager({ getDisplays: displays });
+    m.open({ contactId: 've-1' });
+    created[0].setBounds({ x: 100, y: 100, width: 560, height: 740 });
+    m.reclampOffScreen();
+    expect(created[0].getBounds()).toEqual({ x: 100, y: 100, width: 560, height: 740 });
+  });
+
+  it('places a companion right of the main window and flips left when it overflows', () => {
+    const m = manager({
+      getDisplays: displays,
+      getPlacement: () => ({ mode: 'right-of-main', gapPx: 16, rememberPerAgent: false, bringMainToFront: false }),
+      getMainBounds: () => ({ x: 100, y: 120, width: 800, height: 600 }),
+    });
+    m.open({ contactId: 've-1' });
+    const { x } = created[0].options as Record<string, number>;
+    expect(x).toBe(100 + 800 + 16);
   });
 });
 

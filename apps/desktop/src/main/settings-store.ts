@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { app } from 'electron';
 import { resolveConnectionConfig, type DesktopConnectionConfig } from '@nexus/node-core';
-import { DEFAULT_NOTIFICATION_SETTINGS, normalizeCompanionDebugSettings, normalizeCompanionAvatarSettings, DEFAULT_COMPANION_AVATAR_SETTINGS, type NotificationSettings, type CompanionDebugSettings, type CompanionAvatarSettings } from '../shared/ipc.js';
+import { DEFAULT_NOTIFICATION_SETTINGS, normalizeCompanionDebugSettings, normalizeCompanionAvatarSettings, DEFAULT_COMPANION_AVATAR_SETTINGS, normalizeCompanionPlacementSettings, DEFAULT_COMPANION_PLACEMENT_SETTINGS, type NotificationSettings, type CompanionDebugSettings, type CompanionAvatarSettings, type CompanionPlacementSettings } from '../shared/ipc.js';
 import { DEFAULT_APP_LOCK_SETTINGS, normalizeAppLockSettings, type AppLockSettings } from '../shared/app-lock.js';
 import {
   DEFAULT_AUDIO_SETTINGS,
@@ -42,6 +42,8 @@ export type UiSettings = {
   companionDebug: CompanionDebugSettings;
   /** Companion avatar behaviour (click nod); re-validated on every read. */
   companionAvatar: CompanionAvatarSettings;
+  /** Companion spawn placement; re-validated on every read. */
+  companionPlacement: CompanionPlacementSettings;
   /** Audio device preferences; re-validated on every read. */
   audio: AudioSettings;
 };
@@ -91,6 +93,9 @@ export function createSettingsStore(filePath?: string): SettingsStore {
       companionDebug: normalizeCompanionDebugSettings(ui.companionDebug),
       companionAvatar: normalizeCompanionAvatarSettings(
         ui.companionAvatar ?? DEFAULT_COMPANION_AVATAR_SETTINGS,
+      ),
+      companionPlacement: normalizeCompanionPlacementSettings(
+        ui.companionPlacement ?? DEFAULT_COMPANION_PLACEMENT_SETTINGS,
       ),
       audio: normalizeAudioSettings(ui.audio ?? DEFAULT_AUDIO_SETTINGS),
     };
