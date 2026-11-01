@@ -45,8 +45,8 @@ const RENDER_GUARD_HEAD_BYTES = 2048;
  * never be rendered as file content (a broken `<img>` or a PDF viewer showing
  * XML). The declared MIME is only honoured when the file's own type allows it.
  */
-async function loadObjectUrl(file: StorageFileRow, kind: 'image' | 'pdf'): Promise<string> {
-  const res = await bridge.storagePreviewBytes(file.id);
+async function loadObjectUrl(file: StorageFileRow, kind: 'image' | 'pdf', identityKey?: string): Promise<string> {
+  const res = await bridge.storagePreviewBytes(file.id, identityKey);
   if (!res.ok) {
     throw new Error(res.tooLarge ? 'too-large' : res.error || 'preview unavailable');
   }
@@ -66,7 +66,10 @@ async function loadObjectUrl(file: StorageFileRow, kind: 'image' | 'pdf'): Promi
  * Inline preview for one selected file. `reload` re-fetches after a transient
  * failure; the object URL is revoked on every change/unmount.
  */
-export function useStoragePreview(file: StorageFileRow | null): PreviewState & { reload: () => void } {
+export function useStoragePreview(
+  file: StorageFileRow | null,
+  identityKey?: string,
+): PreviewState & { reload: () => void } {
   const [state, setState] = useState<PreviewState>({ status: 'idle' });
   const [nonce, setNonce] = useState(0);
   const urlRef = useRef<string | null>(null);
@@ -95,7 +98,7 @@ export function useStoragePreview(file: StorageFileRow | null): PreviewState & {
       return;
     }
     setState({ status: 'loading' });
-    loadObjectUrl(file, kind)
+    loadObjectUrl(file, kind, identityKey)
       .then((url) => {
         if (cancelled) {
           URL.revokeObjectURL(url);
@@ -113,7 +116,7 @@ export function useStoragePreview(file: StorageFileRow | null): PreviewState & {
     return () => {
       cancelled = true;
     };
-  }, [file?.id, file?.name, file?.mimeType, file?.sizeBytes, nonce, setUrl]);
+  }, [file?.id, file?.name, file?.mimeType, file?.sizeBytes, nonce, setUrl, identityKey]);
 
   // Final revoke when the hook unmounts.
   useEffect(() => () => setUrl(null), [setUrl]);
@@ -130,12 +133,21 @@ const THUMB_CONCURRENCY = 3;
  * small images are fetched (`canThumbnail`), at most `THUMB_CONCURRENCY` at a
  * time; every object URL is revoked when the explorer unmounts.
  */
-export function useStorageThumbnails(items: StorageFileRow[]): Record<string, string> {
+export function useStorageThumbnails(items: StorageFileRow[], identityKey?: string): Record<string, string> {
   const [urls, setUrls] = useState<Record<string, string>>({});
   const cache = useRef(new Map<string, string>());
   const pending = useRef(new Set<string>());
   const active = useRef(0);
   const queue = useRef<Array<() => void>>([]);
+
+  // A different identity means a different file set: drop cached urls so a
+  // same-id file from another org can never show the wrong thumbnail.
+  useEffect(() => {
+    for (const url of cache.current.values()) URL.revokeObjectURL(url);
+    cache.current.clear();
+    pending.current.clear();
+    setUrls({});
+  }, [identityKey]);
 
   useEffect(() => {
     const wanted = items.filter((f) => canThumbnail(previewKindFor(f.name, f.mimeType), f.sizeBytes));
@@ -152,7 +164,7 @@ export function useStorageThumbnails(items: StorageFileRow[]): Record<string, st
       if (cache.current.has(file.id) || pending.current.has(file.id)) continue;
       pending.current.add(file.id);
       queue.current.push(() => {
-        loadObjectUrl(file, 'image')
+        loadObjectUrl(file, 'image', identityKey)
           .then((url) => {
             cache.current.set(file.id, url);
             setUrls((cur) => ({ ...cur, [file.id]: url }));
@@ -171,7 +183,7 @@ export function useStorageThumbnails(items: StorageFileRow[]): Record<string, st
       // Stop queued work on unmount; completed URLs are revoked below.
       queue.current = [];
     };
-  }, [items]);
+  }, [items, identityKey]);
 
   useEffect(
     () => () => {

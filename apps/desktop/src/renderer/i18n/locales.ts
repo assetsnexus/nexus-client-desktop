@@ -13,6 +13,7 @@ import { AUDIT_LOCALE_MESSAGES } from './locales-audit.js';
 import { CHAT_CACHE_LOCALE_MESSAGES } from './locales-chat-cache.js';
 import { NOTIFICATIONS_LOCALE_MESSAGES } from './locales-notifications.js';
 import { SETTINGS_LOCALE_MESSAGES } from './locales-settings.js';
+import { STORAGE_LOCALE_MESSAGES } from './locales-storage.js';
 
 export const SUPPORTED_LOCALES = [
   'en',
@@ -203,8 +204,6 @@ const en = {
   'shell.tab.chat': 'Chat',
   'shell.tab.notifications': 'Notifications',
   'shell.tab.storage': 'Storage',
-  'shell.tab.sync': 'Sync',
-  'shell.tab.mounts': 'Mounts',
   'shell.tab.calendar': 'Calendar',
   'shell.tab.meetings': 'Meetings',
   'shell.identities': 'Identities',
@@ -251,6 +250,124 @@ const en = {
   'settings.chatCache.evicted': '{count} evicted',
   'settings.chatCache.clear': 'Clear chat cache',
 
+  // Storage hub (unified Storage / Mounts / Sync / Agent folders / Access).
+  // English values live here; per-locale translations merge from
+  // `locales-storage.ts`.
+  'storage.title': 'Storage',
+  'storage.done': 'Done',
+  'storage.nav.browse': 'Browse',
+  'storage.nav.mounts': 'Mounts',
+  'storage.nav.sync': 'Sync',
+  'storage.nav.folders': 'Agent folders',
+  'storage.nav.access': 'Access',
+  'storage.browse.help': 'Browse and manage files in your Nexus storage buckets.',
+  'storage.mounts.help':
+    'Make a bucket sub-directory appear as a local folder — with an optional lifetime and restart behaviour.',
+  'storage.sync.help': 'Keep a bucket sub-directory and a local directory in step, automatically.',
+  'storage.folders.help':
+    'The local folders agents may read or write, and which agents may use each one.',
+  'storage.access.help':
+    'See which agents can reach a path, mount, sync, or folder — and grant access.',
+
+  // Mounts.
+  'storage.mounts.capabilities': 'Delivery',
+  'storage.mounts.helper': 'native helper',
+  'storage.mounts.helperMissing': 'native helper not installed — mirroring instead',
+  'storage.mounts.new': 'New mount',
+  'storage.mounts.workspace': 'Bucket / workspace',
+  'storage.mounts.folder': 'Bucket sub-directory',
+  'storage.mounts.folderRoot': '/ (bucket root)',
+  'storage.mounts.mountpoint': 'Local mountpoint',
+  'storage.mounts.browse': 'Browse…',
+  'storage.mounts.mode': 'Access',
+  'storage.mounts.mode.readOnly': 'read-only',
+  'storage.mounts.mode.readWrite': 'read-write',
+  'storage.mounts.volumeName': 'Volume name',
+  'storage.mounts.add': 'Add mount',
+  'storage.mounts.empty': 'No mounts yet. Add one above to project a bucket onto your disk.',
+  'storage.mounts.advanced': 'Advanced',
+  'storage.mounts.expires': 'Expires after',
+  'storage.mounts.expires.never': 'Never (until stopped)',
+  'storage.mounts.expires.minutes': 'Minutes',
+  'storage.mounts.expires.hours': 'Hours',
+  'storage.mounts.expires.days': 'Days',
+  'storage.mounts.expires.weeks': 'Weeks',
+  'storage.mounts.expires.value': 'Amount',
+  'storage.mounts.expires.help':
+    'The mount stops by itself once this time passes. Leave as “Never” to keep it until you stop it.',
+  'storage.mounts.expiresAt': 'Expires {when}',
+  'storage.mounts.persist': 'Survive app / OS restarts',
+  'storage.mounts.persist.help':
+    'Re-mount this automatically the next time the app starts. Off keeps it stopped until you start it.',
+  'storage.mounts.state': 'State',
+  'storage.mounts.delivery': 'Delivery',
+  'storage.mounts.start': 'Mount',
+  'storage.mounts.stop': 'Unmount',
+  'storage.mounts.remove': 'Remove',
+
+  // Sync.
+  'storage.sync.header': '{count} links · scheduler {state}',
+  'storage.sync.running': 'running',
+  'storage.sync.stopped': 'stopped',
+  'storage.sync.refresh': 'Refresh',
+  'storage.sync.all': 'Sync all',
+  'storage.sync.new': 'Link a bucket sub-directory to a local directory',
+  'storage.sync.name': 'Name (optional)',
+  'storage.sync.namePlaceholder': 'Clients folder',
+  'storage.sync.workspace': 'Bucket / workspace',
+  'storage.sync.folder': 'Bucket sub-directory',
+  'storage.sync.localDir': 'Local directory',
+  'storage.sync.localDirPlaceholder': '/home/me/nexus/clients',
+  'storage.sync.mode': 'Direction',
+  'storage.sync.policy': 'Conflict policy',
+  'storage.sync.interval': 'Interval (seconds, 0 = manual)',
+  'storage.sync.exclude': 'Exclude (comma-separated)',
+  'storage.sync.excludePlaceholder': 'node_modules, .git',
+  'storage.sync.add': 'Add sync',
+  'storage.sync.empty': 'No syncs yet. Link a bucket sub-directory above.',
+  'storage.sync.manual': 'manual',
+  'storage.sync.every': 'every {seconds}s',
+  'storage.sync.pause': 'Pause',
+  'storage.sync.resume': 'Resume',
+  'storage.sync.now': 'Sync now',
+  'storage.sync.remove': 'Remove',
+  'storage.sync.neverRun': 'never run',
+  'storage.sync.runRunning': 'running…',
+  'storage.sync.runError': 'error: {error}',
+  'storage.sync.upToDate': 'up to date',
+  'storage.sync.advanced': 'Advanced',
+
+  // Agent folders.
+  'storage.folders.title': 'Agent folders',
+  'storage.folders.add': 'Add',
+  'storage.folders.pathPlaceholder': '/absolute/path/to/project',
+  'storage.folders.empty':
+    'No folders yet. Agents cannot read local files until you grant a folder.',
+  'storage.folders.remove': 'Remove',
+  'storage.folders.agents': 'Agents',
+  'storage.folders.agents.all': 'All agents',
+  'storage.folders.agents.some': '{count} agents',
+  'storage.folders.agents.none': 'No agents',
+  'storage.folders.agents.help':
+    'Choose which agents may use this folder. “All agents” grants it to every current and future agent.',
+
+  // Access preview.
+  'storage.access.byAgent': 'By agent',
+  'storage.access.byPath': 'By path',
+  'storage.access.pathPlaceholder': '/absolute/path/to/check',
+  'storage.access.check': 'Check',
+  'storage.access.reachable': 'Reachable by these roots',
+  'storage.access.unreachable':
+    'No agent can reach this path — it sits outside every granted folder.',
+  'storage.access.everyone': 'All agents',
+  'storage.access.agentCount': '{count} agents',
+  'storage.access.noAgents': 'No agents can use this folder.',
+  'storage.access.grant': 'Grant access…',
+  'storage.access.mounts': 'Mounts',
+  'storage.access.syncs': 'Syncs',
+  'storage.access.empty': 'Add an agent folder to grant access.',
+
+
   // Settings shell + per-section copy. The English values live here (so
   // `MessageKey` and `EN_MESSAGES` see them); the per-locale translations are
   // merged from `locales-settings.ts`.
@@ -281,7 +398,7 @@ const en = {
   'settings.security.help': 'Lock the interface behind a PIN after a period of inactivity.',
   'settings.connection.help': 'The region, gateway and portal this desktop connects to.',
   'settings.developer.help':
-    'Workspaces, local command skills, the audit trail and the chat cache.',
+    'Local command skills, the audit trail and the chat cache.',
   'settings.notifications.suppressWhenLocked.on': 'on — locked cards show no content',
   'settings.notifications.suppressWhenLocked.off':
     'off — content is shown even while locked',
@@ -634,8 +751,6 @@ const de: Dictionary = {
   'settings.notifications.suppressWhenLocked': "Nachrichteninhalt ausblenden, während die App gesperrt ist",
   'shell.tab.chat': 'Chat',
   'shell.tab.storage': 'Speicher',
-  'shell.tab.sync': 'Synchronisierung',
-  'shell.tab.mounts': 'Laufwerke',
   'shell.tab.calendar': 'Kalender',
   'shell.tab.meetings': 'Besprechungen',
   'shell.identities': 'Identitäten',
@@ -740,8 +855,6 @@ const es: Dictionary = {
   'settings.notifications.suppressWhenLocked': "Ocultar el contenido del mensaje mientras la app está bloqueada",
   'shell.tab.chat': 'Chat',
   'shell.tab.storage': 'Almacenamiento',
-  'shell.tab.sync': 'Sincronización',
-  'shell.tab.mounts': 'Unidades',
   'shell.tab.calendar': 'Calendario',
   'shell.tab.meetings': 'Reuniones',
   'shell.identities': 'Identidades',
@@ -846,8 +959,6 @@ const fr: Dictionary = {
   'settings.notifications.suppressWhenLocked': "Masquer le contenu du message lorsque l'application est verrouillée",
   'shell.tab.chat': 'Discussion',
   'shell.tab.storage': 'Stockage',
-  'shell.tab.sync': 'Synchronisation',
-  'shell.tab.mounts': 'Lecteurs',
   'shell.tab.calendar': 'Calendrier',
   'shell.tab.meetings': 'Réunions',
   'shell.identities': 'Identités',
@@ -952,7 +1063,6 @@ const ru: Dictionary = {
   'settings.notifications.suppressWhenLocked': "Скрывать текст сообщения, пока приложение заблокировано",
   'shell.tab.chat': 'Чат',
   'shell.tab.storage': 'Хранилище',
-  'shell.tab.sync': 'Синхронизация',  'shell.tab.mounts': 'Диски',
   'shell.tab.calendar': 'Календарь',
   'shell.tab.meetings': 'Встречи',
   'shell.identities': 'Идентичности',
@@ -1057,8 +1167,6 @@ const uk: Dictionary = {
   'settings.notifications.suppressWhenLocked': "Приховувати вміст повідомлення, поки застосунок заблоковано",
   'shell.tab.chat': 'Чат',
   'shell.tab.storage': 'Сховище',
-  'shell.tab.sync': 'Синхронізація',
-  'shell.tab.mounts': 'Диски',
   'shell.tab.calendar': 'Календар',
   'shell.tab.meetings': 'Зустрічі',
   'shell.identities': 'Ідентичності',
@@ -1163,8 +1271,6 @@ const et: Dictionary = {
   'settings.notifications.suppressWhenLocked': "Peida sõnumi sisu, kui rakendus on lukustatud",
   'shell.tab.chat': 'Vestlus',
   'shell.tab.storage': 'Salvestusruum',
-  'shell.tab.sync': 'Sünkroonimine',
-  'shell.tab.mounts': 'Kettad',
   'shell.tab.calendar': 'Kalender',
   'shell.tab.meetings': 'Kohtumised',
   'shell.identities': 'Identiteedid',
@@ -1269,8 +1375,6 @@ const it: Dictionary = {
   'settings.notifications.suppressWhenLocked': "Nascondi il contenuto del messaggio mentre l'app è bloccata",
   'shell.tab.chat': 'Chat',
   'shell.tab.storage': 'Archivio',
-  'shell.tab.sync': 'Sincronizzazione',
-  'shell.tab.mounts': 'Unità',
   'shell.tab.calendar': 'Calendario',
   'shell.tab.meetings': 'Riunioni',
   'shell.identities': 'Identità',
@@ -1375,8 +1479,6 @@ const pt: Dictionary = {
   'settings.notifications.suppressWhenLocked': "Ocultar o conteúdo da mensagem enquanto a app está bloqueada",
   'shell.tab.chat': 'Conversa',
   'shell.tab.storage': 'Armazenamento',
-  'shell.tab.sync': 'Sincronização',
-  'shell.tab.mounts': 'Unidades',
   'shell.tab.calendar': 'Calendário',
   'shell.tab.meetings': 'Reuniões',
   'shell.identities': 'Identidades',
@@ -1481,8 +1583,6 @@ const nl: Dictionary = {
   'settings.notifications.suppressWhenLocked': "Berichtinhoud verbergen terwijl de app vergrendeld is",
   'shell.tab.chat': 'Chat',
   'shell.tab.storage': 'Opslag',
-  'shell.tab.sync': 'Synchronisatie',
-  'shell.tab.mounts': 'Schijven',
   'shell.tab.calendar': 'Agenda',
   'shell.tab.meetings': 'Vergaderingen',
   'shell.identities': 'Identiteiten',
@@ -1587,8 +1687,6 @@ const pl: Dictionary = {
   'settings.notifications.suppressWhenLocked': "Ukryj treść wiadomości, gdy aplikacja jest zablokowana",
   'shell.tab.chat': 'Czat',
   'shell.tab.storage': 'Pamięć',
-  'shell.tab.sync': 'Synchronizacja',
-  'shell.tab.mounts': 'Dyski',
   'shell.tab.calendar': 'Kalendarz',
   'shell.tab.meetings': 'Spotkania',
   'shell.identities': 'Tożsamości',
@@ -1693,8 +1791,6 @@ const tr: Dictionary = {
   'settings.notifications.suppressWhenLocked': "Uygulama kilitliyken mesaj içeriğini gizle",
   'shell.tab.chat': 'Sohbet',
   'shell.tab.storage': 'Depolama',
-  'shell.tab.sync': 'Eşitleme',
-  'shell.tab.mounts': 'Sürücüler',
   'shell.tab.calendar': 'Takvim',
   'shell.tab.meetings': 'Toplantılar',
   'shell.identities': 'Kimlikler',
@@ -1799,8 +1895,6 @@ const ar: Dictionary = {
   'settings.notifications.suppressWhenLocked': "إخفاء محتوى الرسالة أثناء قفل التطبيق",
   'shell.tab.chat': 'المحادثة',
   'shell.tab.storage': 'التخزين',
-  'shell.tab.sync': 'المزامنة',
-  'shell.tab.mounts': 'الأقراص',
   'shell.tab.calendar': 'التقويم',
   'shell.tab.meetings': 'الاجتماعات',
   'shell.identities': 'الهويات',
@@ -1905,8 +1999,6 @@ const hi: Dictionary = {
   'settings.notifications.suppressWhenLocked': "ऐप लॉक रहने के दौरान संदेश सामग्री छिपाएँ",
   'shell.tab.chat': 'चैट',
   'shell.tab.storage': 'संग्रहण',
-  'shell.tab.sync': 'सिंक',
-  'shell.tab.mounts': 'ड्राइव',
   'shell.tab.calendar': 'कैलेंडर',
   'shell.tab.meetings': 'मीटिंग्स',
   'shell.identities': 'पहचान',
@@ -2008,8 +2100,6 @@ const zh: Dictionary = {
   'settings.notifications.suppressWhenLocked': "应用锁定时隐藏消息内容",
   'shell.tab.chat': '聊天',
   'shell.tab.storage': '存储',
-  'shell.tab.sync': '同步',
-  'shell.tab.mounts': '挂载',
   'shell.tab.calendar': '日历',
   'shell.tab.meetings': '会议',
   'shell.identities': '身份',
@@ -2114,8 +2204,6 @@ const ja: Dictionary = {
   'settings.notifications.suppressWhenLocked': "アプリのロック中はメッセージ内容を隠す",
   'shell.tab.chat': 'チャット',
   'shell.tab.storage': 'ストレージ',
-  'shell.tab.sync': '同期',
-  'shell.tab.mounts': 'ドライブ',
   'shell.tab.calendar': 'カレンダー',
   'shell.tab.meetings': '会議',
   'shell.identities': 'ID',
@@ -2220,8 +2308,6 @@ const ko: Dictionary = {
   'settings.notifications.suppressWhenLocked': "앱이 잠겨 있는 동안 메시지 내용 숨기기",
   'shell.tab.chat': '채팅',
   'shell.tab.storage': '저장소',
-  'shell.tab.sync': '동기화',
-  'shell.tab.mounts': '드라이브',
   'shell.tab.calendar': '캘린더',
   'shell.tab.meetings': '회의',
   'shell.identities': 'ID',
@@ -2265,6 +2351,7 @@ for (const locale of SUPPORTED_LOCALES) {
   Object.assign(DICTIONARIES[locale], CHAT_CACHE_LOCALE_MESSAGES[locale]);
   Object.assign(DICTIONARIES[locale], NOTIFICATIONS_LOCALE_MESSAGES[locale]);
   Object.assign(DICTIONARIES[locale], SETTINGS_LOCALE_MESSAGES[locale]);
+  Object.assign(DICTIONARIES[locale], STORAGE_LOCALE_MESSAGES[locale]);
 }
 
 export const EN_MESSAGES = en;

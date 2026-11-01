@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { bridge, type AuthState, type DesktopConnectionConfig, type SessionHydrationState, type SettingsSectionId } from './bridge.js';
+import { bridge, type AuthState, type DesktopConnectionConfig, type SessionHydrationState, type SettingsSectionId, type StorageHubSectionId } from './bridge.js';
 import { LoginForm } from './components/LoginForm.js';
 import { ChatHost } from './components/ChatHost.js';
 import { NotificationsPanel } from './components/NotificationsPanel.js';
 import { SettingsPanel } from './components/SettingsPanel.js';
-import { StorageExplorer } from './components/StorageExplorer.js';
-import { SyncPanel } from './components/SyncPanel.js';
-import { MountPanel } from './components/MountPanel.js';
+import { StorageHubPanel } from './components/storage-hub/StorageHubPanel.js';
 import { IdentitySwitcher } from './components/IdentitySwitcher.js';
 import { CalendarPanel } from './components/CalendarPanel.js';
 import { MeetingRoomPanel } from './components/MeetingRoomPanel.js';
@@ -30,7 +28,7 @@ import { resolveShellView } from '../shared/auth-view.js';
 import anxLogo from './assets/anx-logo.svg';
 
 /** Shell tabs, in display order. */
-const views = ['chat', 'notifications', 'storage', 'sync', 'mounts', 'calendar', 'meetings'] as const;
+const views = ['chat', 'notifications', 'storage', 'calendar', 'meetings'] as const;
 
 const shellStyle: CSSProperties = {
   height: '100vh',
@@ -91,6 +89,12 @@ export function App() {
    * the user last was" — a plain gear click must not be hijacked to a section.
    */
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId | null>(null);
+  /**
+   * Section a deep-link (`onOpenStorage`) asked for, and whether the Storage hub
+   * is open as an overlay. Storage is also a top-bar tab; a plain tab click opens
+   * the hub without a section, while a deep-link jumps to one.
+   */
+  const [storageSection, setStorageSection] = useState<StorageHubSectionId | null>(null);
   const [view, setView] = useState<(typeof views)[number]>('chat');
   const [showIdentities, setShowIdentities] = useState(false);
   const [version, setVersion] = useState('');
@@ -149,10 +153,19 @@ export function App() {
       setSettingsSection(section ?? null);
       setShowSettings(true);
     });
+    // A companion (or another window) can deep-link straight to a Storage section.
+    const offStorage = bridge.onOpenStorage((section) => {
+      setShowSettings(false);
+      setShowIdentities(false);
+      setOpenRoomId(null);
+      setStorageSection(section ?? null);
+      setView('storage');
+    });
     return () => {
       off();
       offNotify();
       offSettings();
+      offStorage();
     };
   }, []);
 
@@ -287,8 +300,6 @@ export function App() {
     chat: 'shell.tab.chat',
     notifications: 'shell.tab.notifications',
     storage: 'shell.tab.storage',
-    sync: 'shell.tab.sync',
-    mounts: 'shell.tab.mounts',
     calendar: 'shell.tab.calendar',
     meetings: 'shell.tab.meetings',
   };
@@ -321,6 +332,9 @@ export function App() {
                   setView(tab);
                   setOpenRoomId(null);
                   setShowSettings(false);
+                  // A manual tab click starts the hub fresh; a deep-link only
+                  // applies while it is the most recent request.
+                  if (tab === 'storage') setStorageSection(null);
                 }}
                 style={{
                   ...btnStyle,
@@ -445,11 +459,15 @@ export function App() {
                   onUnreadChange={setUnreadNotifications}
                 />
               ) : view === 'storage' ? (
-                <StorageExplorer />
-              ) : view === 'sync' ? (
-                <SyncPanel />
-              ) : view === 'mounts' ? (
-                <MountPanel />
+                <StorageHubPanel
+                  initialSection={storageSection}
+                  baseUrl={connection?.gatewayUrl ?? connection?.regionUrl ?? null}
+                  onSectionChange={setStorageSection}
+                  onClose={() => {
+                    setStorageSection(null);
+                    setView('chat');
+                  }}
+                />
               ) : view === 'calendar' ? (
                 <CalendarPanel />
               ) : view === 'meetings' ? (

@@ -59,7 +59,10 @@ export function createToolAuditor(deps: ToolAuditorDeps): ToolAuditor {
       const args = toolArgsOf(req);
 
       try {
-        const result = await runTool(req as never, options);
+        const result = await runTool(req as never, {
+          ...options,
+          agentContactId: agentId,
+        });
         deps.audit.append({
           tool: req.name,
           agentId,

@@ -198,4 +198,88 @@ describe('identity manager', () => {
     reloaded.switchAccount('u1');
     expect(reloaded.activeToken()).toBe('t1');
   });
+
+  describe('storageIdentities (storage fan-out)', () => {
+    function orgManager(sender: (command: string, payload?: unknown) => Promise<unknown>) {
+      return createIdentityManager({
+        getSender: async () => ({ send: sender as never }),
+        filePath: tempFile(),
+      });
+    }
+
+    it('returns the personal context plus one per stored org, even when the region membership list fails', async () => {
+      // A membership login stores a business identity carrying the orgId, so the
+      // fan-out must be able to list every org's storage from local state alone.
+      const sender = vi.fn(async (command: string) => {
+        if (command === 'anx.membership.login') {
+          return {
+            responseCode: 200,
+            responseObject: { token: { token: 'biz', orgId: 'o9', role: 'owner', userId: 'u1' } },
+          };
+        }
+        // The membership list is throttled/unavailable under load.
+        return {
+          responseCode: 429,
+          errorObjects: [{ code: 'lane_throttled', message: "Lane 'read' throttled" }],
+        };
+      });
+      const m = orgManager(sender);
+      m.recordLogin({ userId: 'u1', token: 't-session', deviceId: 'dev-1' });
+      await m.startMembership({ membershipId: 'm1', businessEmail: 'a@b.c' });
+
+      const contexts = await m.storageIdentities();
+      expect(contexts.map((c) => c.key)).toContain('org:o9');
+    });
+
+    it('uses the private (user-session) token and device for every context', async () => {
+      const sender = vi.fn(async (command: string) => {
+        if (command === 'anx.membership.login') {
+          return {
+            responseCode: 200,
+            responseObject: { token: { token: 'biz', orgId: 'o1', role: 'owner', userId: 'u1' } },
+          };
+        }
+        return { responseCode: 200, responseObject: { memberships: [] } };
+      });
+      const m = orgManager(sender);
+      m.recordLogin({ userId: 'u1', token: 't-session', deviceId: 'dev-1' });
+      await m.startMembership({ membershipId: 'm1', businessEmail: 'a@b.c' });
+
+      const contexts = await m.storageIdentities();
+      expect(contexts.length).toBeGreaterThanOrEqual(2);
+      for (const c of contexts) {
+        // The stale per-org business token must never be used as the authority.
+        expect(c.token).toBe('t-session');
+        expect(c.deviceId).toBe('dev-1');
+      }
+    });
+
+    it('enriches locally stored orgs with the region name/logo when available', async () => {
+      const sender = vi.fn(async (command: string) => {
+        if (command === 'anx.membership.login') {
+          return {
+            responseCode: 200,
+            responseObject: { token: { token: 'biz', orgId: 'o1', role: 'owner', userId: 'u1' } },
+          };
+        }
+        return {
+          responseCode: 200,
+          responseObject: {
+            memberships: [
+              { membershipId: 'm1', orgId: 'o1', orgName: 'Acme Inc', orgLogo: 'https://cdn/a.png' },
+            ],
+          },
+        };
+      });
+      const m = orgManager(sender);
+      m.recordLogin({ userId: 'u1', token: 't1', deviceId: 'd1' });
+      await m.startMembership({ membershipId: 'm1', businessEmail: 'a@b.c' });
+
+      const contexts = await m.storageIdentities();
+      const org = contexts.find((c) => c.key === 'org:o1');
+      expect(org).toBeTruthy();
+      expect(org?.orgName).toBe('Acme Inc');
+      expect(org?.orgLogo).toBe('https://cdn/a.png');
+    });
+  });
 });

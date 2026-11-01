@@ -19,8 +19,14 @@ import type {
 } from '../shared/ipc.js';
 
 export type StorageManagerOptions = {
-  /** Resolve the token-bearing region sender (from the auth manager). */
-  getSender: () => Promise<{ send: StorageCommandSender }>;
+  /**
+   * Resolve the token-bearing region sender for an identity context. The
+   * `identityKey` is the owning workspace's context (`personal` / `org:<id>`);
+   * an absent key means the personal context. Every storage call carries it so
+   * an org workspace is reached with the org context even when a different
+   * identity is currently active.
+   */
+  getSender: (identityKey?: string | null) => Promise<{ send: StorageCommandSender }>;
   /** Region base URL, used for the non-presign proxy fallback. */
   getRegionUrl: () => string;
   /** Optional fetch override for tests. */
@@ -30,16 +36,16 @@ export type StorageManagerOptions = {
 export type StorageManager = ReturnType<typeof createStorageManager>;
 
 export function createStorageManager(options: StorageManagerOptions) {
-  const client = async () => {
-    const sender = await options.getSender();
+  const client = async (identityKey?: string | null) => {
+    const sender = await options.getSender(identityKey);
     // The sender exposes `.send`; adapt it to the narrow storage function shape.
     const adapter: StorageCommandSender = (command, payload) => sender.send(command, payload);
     return createStorageClient(adapter);
   };
 
   return {
-    async workspaces(): Promise<StorageWorkspaceRow[]> {
-      const rows = await (await client()).listWorkspaces();
+    async workspaces(identityKey?: string | null): Promise<StorageWorkspaceRow[]> {
+      const rows = await (await client(identityKey)).listWorkspaces();
       return rows.map((w) => ({
         id: w.id,
         name: w.name,
@@ -60,8 +66,10 @@ export function createStorageManager(options: StorageManagerOptions) {
       search?: string;
       status?: string;
       limit?: number;
+      identityKey?: string;
     }): Promise<StoragePage> {
-      const page = await (await client()).listBucketFiles(input);
+      const { identityKey, ...rest } = input;
+      const page = await (await client(identityKey)).listBucketFiles(rest);
       return {
         items: page.items.map(toRow),
         total: page.total,
@@ -70,13 +78,13 @@ export function createStorageManager(options: StorageManagerOptions) {
       };
     },
 
-    async capabilities(kind?: string): Promise<StorageCapabilities> {
-      return (await client()).backendCapabilities(kind);
+    async capabilities(kind?: string, identityKey?: string | null): Promise<StorageCapabilities> {
+      return (await client(identityKey)).backendCapabilities(kind);
     },
 
     async upload(req: StorageUploadRequest): Promise<StorageFileRow> {
       const bytes = Buffer.from(req.base64Data, 'base64');
-      const file = await (await client()).upload({
+      const file = await (await client(req.identityKey)).upload({
         workspaceId: req.workspaceId,
         folderId: req.folderId,
         name: req.name,
@@ -87,29 +95,29 @@ export function createStorageManager(options: StorageManagerOptions) {
       return toRow(file);
     },
 
-    async downloadUrl(fileId: string) {
-      return (await client()).resolveDownloadUrl({ fileId, regionBaseUrl: options.getRegionUrl() });
+    async downloadUrl(fileId: string, identityKey?: string | null) {
+      return (await client(identityKey)).resolveDownloadUrl({ fileId, regionBaseUrl: options.getRegionUrl() });
     },
 
-    async trashFile(fileId: string) {
-      await (await client()).trashFile(fileId);
+    async trashFile(fileId: string, identityKey?: string | null) {
+      await (await client(identityKey)).trashFile(fileId);
     },
 
-    async restoreFile(fileId: string) {
-      await (await client()).restoreFile(fileId);
+    async restoreFile(fileId: string, identityKey?: string | null) {
+      await (await client(identityKey)).restoreFile(fileId);
     },
 
-    async renameFile(fileId: string, newName: string) {
-      await (await client()).renameFile(fileId, newName);
+    async renameFile(fileId: string, newName: string, identityKey?: string | null) {
+      await (await client(identityKey)).renameFile(fileId, newName);
     },
 
-    async moveFile(fileId: string, targetFolderId: string | null) {
-      await (await client()).moveFile({ fileId, targetFolderId });
+    async moveFile(fileId: string, targetFolderId: string | null, identityKey?: string | null) {
+      await (await client(identityKey)).moveFile({ fileId, targetFolderId });
     },
 
-    async listRevisions(fileId: string, limit?: number) {
+    async listRevisions(fileId: string, limit?: number, identityKey?: string | null) {
       try {
-        const page = await (await client()).listRevisions({ fileId, limit });
+        const page = await (await client(identityKey)).listRevisions({ fileId, limit });
         return {
           fileId: page.fileId,
           currentRevisionNo: page.currentRevisionNo,
@@ -149,8 +157,8 @@ export function createStorageManager(options: StorageManagerOptions) {
       }
     },
 
-    async revertRevision(fileId: string, revisionNo: number) {
-      const out = await (await client()).revertRevision({ fileId, revisionNo });
+    async revertRevision(fileId: string, revisionNo: number, identityKey?: string | null) {
+      const out = await (await client(identityKey)).revertRevision({ fileId, revisionNo });
       return { revertedTo: out.revertedTo, revisionNo: out.revisionNo };
     },
   };

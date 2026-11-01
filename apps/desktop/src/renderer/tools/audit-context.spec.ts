@@ -7,24 +7,25 @@ import {
 } from './audit-context.js';
 
 describe('resolveToolAuditContext', () => {
-  it('prefers the active panel conversation and its agent contact', () => {
+  it('prefers the active panel conversation and its contact id', () => {
     const ctx = resolveToolAuditContext({
       panels: [{ contactId: 'contact-1', conversationId: 'conv-1' }],
       activePanelIndex: 0,
       conversationId: 'state-conv',
       contacts: [{ id: 'contact-1', agentId: 'agent-1' }],
     });
-    expect(ctx).toEqual({ agentId: 'agent-1', conversationId: 'conv-1' });
+    // The contact id (not the region agent id) is the ACL key.
+    expect(ctx).toEqual({ agentId: 'contact-1', conversationId: 'conv-1' });
   });
 
-  it('falls back to the contact id when the agent id is absent', () => {
+  it('leaves the agent id null when the panel has no contact', () => {
     const ctx = resolveToolAuditContext({
-      panels: [{ contactId: 'contact-1', conversationId: null }],
+      panels: [{ conversationId: null }],
       activePanelIndex: 0,
       conversationId: 'state-conv',
-      contacts: [{ id: 'contact-1', agentId: null }],
+      contacts: [{ id: 'contact-1', agentId: 'agent-1' }],
     });
-    expect(ctx.agentId).toBe('contact-1');
+    expect(ctx.agentId).toBeNull();
     expect(ctx.conversationId).toBe('state-conv');
   });
 

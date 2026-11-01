@@ -49,8 +49,17 @@ import type {
 } from '../shared/ipc.js';
 
 export type SyncManagerOptions = {
-  getSender: () => Promise<{ send: StorageCommandSender }>;
+  /**
+   * Resolve the token-bearing region sender for an identity context, so a sync
+   * of an org workspace reads/writes with that org's context.
+   */
+  getSender: (identityKey?: string | null) => Promise<{ send: StorageCommandSender }>;
   getRegionUrl: () => string;
+  /**
+   * Resolve a display name for a workspace id across *all* storage identities, so
+   * an org binding's name is correct even when another identity is active.
+   */
+  resolveWorkspaceNames?: () => Promise<Map<string, string>>;
   /** Overridable for tests. */
   filePath?: string;
   fetchFn?: typeof fetch;
@@ -118,8 +127,8 @@ export function createSyncManager(options: SyncManagerOptions) {
 
   // ─── region helpers ───────────────────────────────────────────────────────
 
-  async function client() {
-    const sender = await options.getSender();
+  async function client(identityKey?: string | null) {
+    const sender = await options.getSender(identityKey);
     return createStorageClient((command, payload) => sender.send(command, payload));
   }
 
@@ -146,7 +155,7 @@ export function createSyncManager(options: SyncManagerOptions) {
 
   /** List remote files under a binding's sub-dir, as entries relative to it. */
   async function listRemoteEntries(binding: SyncBinding): Promise<RemoteEntry[]> {
-    const c = await client();
+    const c = await client(binding.identityKey);
     const folders = await c.folderTree(binding.workspaceId);
     let targetFolderId = binding.remoteFolderId;
     if (targetFolderId == null) {
@@ -234,7 +243,7 @@ export function createSyncManager(options: SyncManagerOptions) {
     binding: SyncBinding,
     actions: SyncAction[],
   ): Promise<{ ok: number; failed: Array<{ relPath: string; error: string }> }> {
-    const c = await client();
+    const c = await client(binding.identityKey);
     let ok = 0;
     const failed: Array<{ relPath: string; error: string }> = [];
     const remoteFolderId = binding.remoteFolderId ?? null;
@@ -445,16 +454,18 @@ export function createSyncManager(options: SyncManagerOptions) {
 
   async function workspaceNameMap(): Promise<Map<string, string>> {
     try {
-      const c = await client();
-      const rows = await c.listWorkspaces();
+      // Prefer the injected cross-identity resolver so an org workspace's name is
+      // correct even when a different identity is active.
+      if (options.resolveWorkspaceNames) return await options.resolveWorkspaceNames();
+      const rows = await (await client()).listWorkspaces();
       return new Map(rows.map((w) => [w.id, w.name]));
     } catch {
       return new Map();
     }
   }
 
-  async function listRemoteFolders(workspaceId: string): Promise<StorageRemoteFolderRow[]> {
-    const c = await client();
+  async function listRemoteFolders(workspaceId: string, identityKey?: string | null): Promise<StorageRemoteFolderRow[]> {
+    const c = await client(identityKey);
     const folders = await c.folderTree(workspaceId);
     return folders
       .map((f) => ({ id: f.id, name: f.name, path: pathOfFolder(f.id, folders, null), parentFolderId: f.parentFolderId }))
@@ -539,6 +550,7 @@ function toRow(b: SyncBinding, workspaceName: string | null): StorageSyncBinding
     id: b.id,
     name: b.name,
     workspaceId: b.workspaceId,
+    identityKey: b.identityKey ?? null,
     workspaceName,
     remoteFolderId: b.remoteFolderId,
     remoteFolderPath: b.remoteFolderPath,

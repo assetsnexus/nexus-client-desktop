@@ -35,6 +35,12 @@ import type {
   MembershipLoginStart,
   MembershipRow,
 } from '../shared/ipc.js';
+import {
+  buildStorageIdentities,
+  type StorageIdentityContext,
+  type StorageMembership,
+  type StorageUserSession,
+} from './storage-identities.js';
 
 export type IdentityManagerOptions = {
   /** Region command sender (token optional; caller supplies the token per call). */
@@ -271,6 +277,66 @@ export function createIdentityManager(options: IdentityManagerOptions) {
     async listMemberships(): Promise<MembershipRow[]> {
       const sender = await options.getSender();
       return listMemberships(sender.send as MembershipSend);
+    },
+
+    /**
+     * Every storage identity context for the signed-in user: the personal
+     * (user-session) context plus one per organisation membership. The Storage
+     * hub lists **all** of these, so every org's storage appears in one view
+     * rather than only whichever identity happens to be active.
+     *
+     * The token authority is the account's **private** session: a business
+     * token goes stale when that membership is signed out, whereas the user
+     * session stays valid and the region authorises a matching `orgId` on the
+     * envelope. Memberships are what carry the org display name + logo.
+     */
+    async storageIdentities(): Promise<StorageIdentityContext[]> {
+      const account = state.accounts.find((a) => a.userId === state.activeUserId);
+      if (!account) return [];
+      const personal = account.identities.find((i) => i.kind === 'private' && i.token);
+      if (!personal?.token) return [];
+
+      const userSession: StorageUserSession = {
+        userId: personal.userId,
+        token: personal.token,
+        deviceId: personal.deviceId,
+      };
+
+      // The **stored** business identities are the source of truth for which orgs
+      // to fan out to: they are persisted locally from each membership login, so
+      // every org the user has joined is present even when the region's membership
+      // list is throttled or briefly unavailable. The region list is then merged in
+      // as best-effort *enrichment* (display name + logo) and as a safety net for
+      // an org that has a membership but no stored token yet.
+      const storedByOrg = new Map<string, { orgName: string | null; orgLogo: string | null }>();
+      for (const identity of account.identities) {
+        if (identity.kind !== 'business' || !identity.orgId) continue;
+        storedByOrg.set(identity.orgId, {
+          orgName: identity.label && identity.label !== 'Organization' ? identity.label : null,
+          orgLogo: null,
+        });
+      }
+
+      try {
+        const sender = await options.getSender();
+        const rows = await listMemberships(sender.send as MembershipSend);
+        for (const m of rows) {
+          if (!m.orgId) continue;
+          const prev = storedByOrg.get(m.orgId);
+          storedByOrg.set(m.orgId, {
+            orgName: m.orgName ?? prev?.orgName ?? null,
+            orgLogo: m.orgLogo ?? prev?.orgLogo ?? null,
+          });
+        }
+      } catch {
+        // Region list unavailable — keep the locally stored orgs where possible.
+      }
+
+      const memberships: StorageMembership[] = Array.from(storedByOrg.entries()).map(
+        ([orgId, meta]) => ({ orgId, orgName: meta.orgName, orgLogo: meta.orgLogo }),
+      );
+
+      return buildStorageIdentities({ userSession, memberships });
     },
 
     /**

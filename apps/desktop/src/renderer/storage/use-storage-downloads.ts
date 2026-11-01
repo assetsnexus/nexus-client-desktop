@@ -21,13 +21,17 @@ export type SaveManyOutcome = { saved: number; cancelled: boolean; error?: strin
 
 export type UseStorageDownloads = {
   /** Save one file via the native save dialog. */
-  saveOne: (file: StorageFileRef) => Promise<SaveOutcome>;
+  saveOne: (file: StorageFileRef, identityKey?: string) => Promise<SaveOutcome>;
   /** Save many files into a user-picked directory. */
-  saveMany: (files: StorageFileRef[]) => Promise<SaveManyOutcome>;
+  saveMany: (files: StorageFileRef[], identityKey?: string) => Promise<SaveManyOutcome>;
   /** Pre-stage a temp copy so a subsequent drag-out is instant. */
-  warmDrag: (file: StorageFileRef) => void;
+  warmDrag: (file: StorageFileRef, identityKey?: string) => void;
   /** `dragstart` handler: begin the OS drag of an already-staged file. */
-  onDragStart: (event: { dataTransfer: DataTransfer | null; preventDefault: () => void }, file: StorageFileRef) => void;
+  onDragStart: (
+    event: { dataTransfer: DataTransfer | null; preventDefault: () => void },
+    file: StorageFileRef,
+    identityKey?: string,
+  ) => void;
   /** `dragend` handler: clean up the staged temp copy. */
   onDragEnd: (file: StorageFileRef) => void;
   /** The file id currently being dragged out (for row styling). */
@@ -38,18 +42,18 @@ export function useStorageDownloads(): UseStorageDownloads {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const warmInFlight = useRef(new Set<string>());
 
-  const warmDrag = useCallback((file: StorageFileRef) => {
+  const warmDrag = useCallback((file: StorageFileRef, identityKey?: string) => {
     if (warmInFlight.current.has(file.id)) return;
     warmInFlight.current.add(file.id);
     void bridge
-      .storagePrepareDrag(file.id, file.name)
+      .storagePrepareDrag(file.id, file.name, identityKey)
       .catch(() => undefined)
       .finally(() => warmInFlight.current.delete(file.id));
   }, []);
 
-  const saveOne = useCallback(async (file: StorageFileRef): Promise<SaveOutcome> => {
+  const saveOne = useCallback(async (file: StorageFileRef, identityKey?: string): Promise<SaveOutcome> => {
     try {
-      const result = await bridge.storageSaveFile(file.id, file.name);
+      const result = await bridge.storageSaveFile(file.id, file.name, identityKey);
       return { saved: result.saved, cancelled: result.cancelled, error: result.error ?? null };
     } catch (err) {
       return { saved: false, cancelled: false, error: err instanceof Error ? err.message : 'save failed' };
@@ -57,11 +61,12 @@ export function useStorageDownloads(): UseStorageDownloads {
   }, []);
 
   const saveMany = useCallback(
-    async (files: StorageFileRef[]): Promise<SaveManyOutcome> => {
+    async (files: StorageFileRef[], identityKey?: string): Promise<SaveManyOutcome> => {
       if (!files.length) return { saved: 0, cancelled: false, error: null };
       try {
         const result = await bridge.storageSaveFilesToDir(
           files.map((f) => ({ fileId: f.id, name: f.name })),
+          identityKey,
         );
         return {
           saved: result.saved,
@@ -76,7 +81,11 @@ export function useStorageDownloads(): UseStorageDownloads {
   );
 
   const onDragStart = useCallback(
-    (event: { dataTransfer: DataTransfer | null; preventDefault: () => void }, file: StorageFileRef) => {
+    (
+      event: { dataTransfer: DataTransfer | null; preventDefault: () => void },
+      file: StorageFileRef,
+      identityKey?: string,
+    ) => {
       // CRITICAL: cancel the default HTML5 drag. Left alone, Chromium starts a
       // *text* drag from this `draggable` element, which the OS lands as a
       // generic `dropped text.txt` whose content is whatever string the drag
@@ -87,7 +96,7 @@ export function useStorageDownloads(): UseStorageDownloads {
       setDraggingId(file.id);
       // Main stages on demand if the hover warm-up has not finished yet, then
       // starts the OS drag with the staged file.
-      void bridge.storageStartDrag(file.id, file.name).catch(() => undefined);
+      void bridge.storageStartDrag(file.id, file.name, identityKey).catch(() => undefined);
     },
     [],
   );

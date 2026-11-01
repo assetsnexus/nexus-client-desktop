@@ -32,6 +32,8 @@ import {
 export type UploadTarget = {
   workspaceId: string;
   folderId: string | null;
+  /** Identity context owning the workspace; routes the upload's token. */
+  identityKey?: string;
 };
 
 export type EnqueueResult = {
@@ -47,6 +49,7 @@ export function toUploadTask(plan: PlannedUpload, target: UploadTarget): UploadT
     absPath: plan.absPath,
     workspaceId: target.workspaceId,
     folderId: target.folderId,
+    identityKey: target.identityKey,
     prefix: plan.prefix,
     name: plan.name,
     contentType: plan.contentType,
@@ -102,6 +105,7 @@ export function useStorageUploads(): UseStorageUploads {
             transferId: itemId,
             workspaceId: task.workspaceId,
             folderId: task.folderId,
+            identityKey: task.identityKey,
             prefix: task.prefix,
             name: task.name,
             absPath: task.absPath,

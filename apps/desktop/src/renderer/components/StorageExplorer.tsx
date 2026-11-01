@@ -7,6 +7,7 @@ import {
   type StorageRevisionPage,
   type StorageWorkspaceRow,
 } from '../bridge.js';
+import { resolveOrgLogoUrl, orgInitials } from '../../shared/org-logo.js';
 import { useStorageUploads } from '../storage/use-storage-uploads.js';
 import { useStorageDropZone } from '../storage/use-storage-drop-zone.js';
 import { useStorageDownloads } from '../storage/use-storage-downloads.js';
@@ -75,12 +76,20 @@ type ViewMode = 'active' | 'trash';
 /**
  * Storage bucket explorer (Phase 2).
  *
- * Browses the signed-in user's Nexus storage workspaces via the main-process
+ * Browses **every** Nexus storage workspace the signed-in user can reach — the
+ * personal context plus one per organisation membership — via the main-process
  * `@nexus/storage-browser` adapter. All byte transfer goes through the
  * capability fallbacks in that package; the renderer only reads/sends base64
  * through the IPC bridge.
+ *
+ * Each workspace is tagged with the identity context that owns it (`identityKey`),
+ * so opening an org workspace routes its commands to that org's context rather
+ * than whichever identity happens to be active. Org workspaces show the org's
+ * logo (or an initials monogram) beside them.
+ *
+ * @param baseUrl Region/gateway origin used to absolutise a relative org logo.
  */
-export function StorageExplorer() {
+export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null }) {
   const [workspaces, setWorkspaces] = useState<StorageWorkspaceRow[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [page, setPage] = useState<StoragePage | null>(null);
@@ -88,6 +97,7 @@ export function StorageExplorer() {
   const [mode, setMode] = useState<ViewMode>('active');
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [workspacesError, setWorkspacesError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<StorageFileRow | null>(null);
   const [revisions, setRevisions] = useState<StorageRevisionPage | null>(null);
@@ -105,10 +115,18 @@ export function StorageExplorer() {
   // a recursive drop zone, and save/drag-out for getting files back out.
   const uploads = useStorageUploads();
   const downloads = useStorageDownloads();
+
+  /** The workspace currently open, and the identity context that owns it. */
+  const activeWorkspace = useMemo(
+    () => workspaces.find((w) => w.id === activeWorkspaceId) ?? null,
+    [workspaces, activeWorkspaceId],
+  );
+  const activeIdentityKey = activeWorkspace?.isOrg ? activeWorkspace.identityKey : undefined;
+
   // Inline image/PDF preview for the selected file, plus small row thumbnails.
-  const preview = useStoragePreview(selected);
+  const preview = useStoragePreview(selected, activeIdentityKey);
   const items = page?.items ?? [];
-  const thumbnails = useStorageThumbnails(items);
+  const thumbnails = useStorageThumbnails(items, activeIdentityKey);
 
   // Track the pane width so the layout choice follows the real container, not a
   // guessed viewport (the explorer is one tab among many in the shell).
@@ -126,19 +144,25 @@ export function StorageExplorer() {
   const loadWorkspaces = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setWorkspacesError(null);
     try {
       const rows = await bridge.storageWorkspaces();
       setWorkspaces(rows);
-      setActiveWorkspaceId((cur) => cur ?? rows[0]?.id ?? null);
+      // Keep the current selection when it still exists; otherwise default to the
+      // first row (org storage sorts first) so a selection is always present —
+      // the list is never rendered with nothing selectable.
+      setActiveWorkspaceId((cur) => (cur && rows.some((r) => r.id === cur) ? cur : rows[0]?.id ?? null));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'failed to list workspaces');
+      const message = err instanceof Error ? err.message : 'failed to list workspaces';
+      setError(message);
+      setWorkspacesError(message);
     } finally {
       setBusy(false);
     }
   }, []);
 
   const loadFiles = useCallback(
-    async (workspaceId: string, view: ViewMode, query: string) => {
+    async (workspaceId: string, view: ViewMode, query: string, identityKey?: string) => {
       setBusy(true);
       setError(null);
       try {
@@ -147,6 +171,7 @@ export function StorageExplorer() {
           search: query || undefined,
           status: view === 'trash' ? 'deleted' : undefined,
           limit: 50,
+          identityKey,
         });
         setPage(next);
       } catch (err) {
@@ -163,24 +188,24 @@ export function StorageExplorer() {
   }, [loadWorkspaces]);
 
   useEffect(() => {
-    void bridge.storageCapabilities('workspace').then(setCaps).catch(() => setCaps(null));
-  }, []);
+    void bridge.storageCapabilities('workspace', activeIdentityKey).then(setCaps).catch(() => setCaps(null));
+  }, [activeIdentityKey]);
 
   useEffect(() => {
-    if (activeWorkspaceId) void loadFiles(activeWorkspaceId, mode, search);
-  }, [activeWorkspaceId, mode, search, loadFiles]);
+    if (activeWorkspaceId) void loadFiles(activeWorkspaceId, mode, search, activeIdentityKey);
+  }, [activeWorkspaceId, mode, search, loadFiles, activeIdentityKey]);
 
   const refresh = useCallback(() => {
-    if (activeWorkspaceId) void loadFiles(activeWorkspaceId, mode, search);
-  }, [activeWorkspaceId, mode, search, loadFiles]);
+    if (activeWorkspaceId) void loadFiles(activeWorkspaceId, mode, search, activeIdentityKey);
+  }, [activeWorkspaceId, mode, search, loadFiles, activeIdentityKey]);
 
   // A dropped path list (files and/or folders) starts a queued batch upload.
   const onDroppedPaths = useCallback(
     (paths: string[]) => {
       if (!activeWorkspaceId) return;
-      void uploads.enqueuePaths(paths, { workspaceId: activeWorkspaceId, folderId: null });
+      void uploads.enqueuePaths(paths, { workspaceId: activeWorkspaceId, folderId: null, identityKey: activeIdentityKey });
     },
-    [activeWorkspaceId, uploads],
+    [activeWorkspaceId, activeIdentityKey, uploads],
   );
   const dropZone = useStorageDropZone(onDroppedPaths, { enabled: Boolean(activeWorkspaceId) && mode === 'active' });
 
@@ -210,54 +235,54 @@ export function StorageExplorer() {
         return;
       }
       setError(null);
-      await uploads.enqueuePaths([path], { workspaceId: activeWorkspaceId, folderId: null });
+      await uploads.enqueuePaths([path], { workspaceId: activeWorkspaceId, folderId: null, identityKey: activeIdentityKey });
       if (fileInput.current) fileInput.current.value = '';
     },
-    [activeWorkspaceId, uploads],
+    [activeWorkspaceId, activeIdentityKey, uploads],
   );
 
   const onDownload = useCallback(
     async (file: StorageFileRow) => {
-      const outcome = await downloads.saveOne({ id: file.id, name: file.name });
+      const outcome = await downloads.saveOne({ id: file.id, name: file.name }, activeIdentityKey);
       if (outcome.error) setError(outcome.error);
     },
-    [downloads],
+    [downloads, activeIdentityKey],
   );
 
   /** Save a multi-selection into one folder chosen with a native dialog. */
   const onDownloadMany = useCallback(
     async (files: StorageFileRow[]) => {
-      const outcome = await downloads.saveMany(files.map((f) => ({ id: f.id, name: f.name })));
+      const outcome = await downloads.saveMany(files.map((f) => ({ id: f.id, name: f.name })), activeIdentityKey);
       if (outcome.error) setError(outcome.error);
       else if (outcome.saved > 0) setError(null);
     },
-    [downloads],
+    [downloads, activeIdentityKey],
   );
 
   const onTrash = useCallback(
     async (file: StorageFileRow) => {
       try {
-        await bridge.storageTrashFile(file.id);
+        await bridge.storageTrashFile(file.id, activeIdentityKey);
         setSelected(null);
         refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'trash failed');
       }
     },
-    [refresh],
+    [refresh, activeIdentityKey],
   );
 
   const onRestore = useCallback(
     async (file: StorageFileRow) => {
       try {
-        await bridge.storageRestoreFile(file.id);
+        await bridge.storageRestoreFile(file.id, activeIdentityKey);
         setSelected(null);
         refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'restore failed');
       }
     },
-    [refresh],
+    [refresh, activeIdentityKey],
   );
 
   const onRename = useCallback(
@@ -265,13 +290,13 @@ export function StorageExplorer() {
       const next = window.prompt('New name', file.name);
       if (!next || next === file.name) return;
       try {
-        await bridge.storageRenameFile(file.id, next);
+        await bridge.storageRenameFile(file.id, next, activeIdentityKey);
         refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'rename failed');
       }
     },
-    [refresh],
+    [refresh, activeIdentityKey],
   );
 
   const checkedFiles = useMemo(() => items.filter((f) => checkedIds.has(f.id)), [items, checkedIds]);
@@ -284,12 +309,12 @@ export function StorageExplorer() {
     });
   }, []);
 
-  const loadRevisions = useCallback(async (file: StorageFileRow) => {
+  const loadRevisions = useCallback(async (file: StorageFileRow, identityKey?: string) => {
     setRevisionsBusy(true);
     setError(null);
     setRevisionsTransportError(null);
     try {
-      const page = await bridge.storageListRevisions(file.id, 100);
+      const page = await bridge.storageListRevisions(file.id, 100, identityKey);
       setRevisions(page);
       // A region without the revision surface answers COMMAND_NOT_FOUND; that is
       // a deliberate unsupported state, never a raw error toast.
@@ -314,14 +339,14 @@ export function StorageExplorer() {
     async (file: StorageFileRow, revisionNo: number) => {
       if (!window.confirm(`Revert "${file.name}" to revision ${revisionNo}? This writes a new revision.`)) return;
       try {
-        await bridge.storageRevertRevision(file.id, revisionNo);
-        await loadRevisions(file);
+        await bridge.storageRevertRevision(file.id, revisionNo, activeIdentityKey);
+        await loadRevisions(file, activeIdentityKey);
         refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'revert failed');
       }
     },
-    [loadRevisions, refresh],
+    [loadRevisions, refresh, activeIdentityKey],
   );
 
   // Load revision history whenever the selected file changes.
@@ -332,9 +357,9 @@ export function StorageExplorer() {
       setRevisionsTransportError(null);
       return;
     }
-    void loadRevisions(selected);
+    void loadRevisions(selected, activeIdentityKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.id]);
+  }, [selected?.id, activeIdentityKey]);
 
   return (
     <div
@@ -370,26 +395,116 @@ export function StorageExplorer() {
             Workspaces
           </div>
           {workspaces.length === 0 && !busy ? (
-            <p style={{ color: '#6b7784', fontSize: 12, padding: 6 }}>No storage workspaces.</p>
+            workspacesError ? (
+              <div style={{ padding: 6 }}>
+                <p style={{ color: '#f2a1a1', fontSize: 12, margin: '0 0 6px' }}>
+                  Could not load workspaces.
+                </p>
+                <button type="button" style={{ ...btnStyle, width: '100%' }} onClick={() => void loadWorkspaces()}>
+                  Retry
+                </button>
+              </div>
+            ) : (
+              <p style={{ color: '#6b7784', fontSize: 12, padding: 6 }}>No storage workspaces.</p>
+            )
           ) : null}
-          {workspaces.map((w) => (
-            <button
-              key={w.id}
-              type="button"
-              onClick={() => setActiveWorkspaceId(w.id)}
-              style={{
-                ...btnStyle,
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                marginBottom: 4,
-                background: w.id === activeWorkspaceId ? '#243244' : '#1c2430',
-                borderColor: w.id === activeWorkspaceId ? '#3f7fd6' : '#3a4654',
-              }}
-            >
-              {w.name}
-            </button>
-          ))}
+          {workspaces.map((w) => {
+            const active = w.id === activeWorkspaceId;
+            const logoUrl = w.isOrg ? resolveOrgLogoUrl(w.orgLogo, baseUrl) : null;
+            const orgLabel = w.isOrg ? w.orgName || 'Organization' : null;
+            return (
+              <button
+                key={w.id}
+                type="button"
+                data-testid={`storage-workspace-${w.id}`}
+                data-active={active ? 'true' : 'false'}
+                onClick={() => {
+                  setActiveWorkspaceId(w.id);
+                  setSelected(null);
+                }}
+                style={{
+                  ...btnStyle,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  textAlign: 'left',
+                  marginBottom: 4,
+                  background: active ? '#243244' : '#1c2430',
+                  borderColor: active ? '#3f7fd6' : '#3a4654',
+                }}
+              >
+                {w.isOrg ? (
+                  logoUrl ? (
+                    <img
+                      src={logoUrl}
+                      alt=""
+                      data-testid={`storage-workspace-logo-${w.id}`}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        flexShrink: 0,
+                        objectFit: 'cover',
+                        borderRadius: 5,
+                        border: '1px solid #2a333d',
+                        background: '#0b1015',
+                      }}
+                    />
+                  ) : (
+                    <span
+                      aria-hidden
+                      data-testid={`storage-workspace-initials-${w.id}`}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        flexShrink: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 5,
+                        background: '#2b3a4d',
+                        color: '#cfe0f5',
+                        fontSize: 10,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {orgInitials(w.orgName)}
+                    </span>
+                  )
+                ) : (
+                  <span aria-hidden style={{ width: 20, flexShrink: 0, textAlign: 'center' }}>
+                    🗂️
+                  </span>
+                )}
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span
+                    style={{
+                      display: 'block',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {w.name}
+                  </span>
+                  {orgLabel ? (
+                    <span
+                      style={{
+                        display: 'block',
+                        fontSize: 10,
+                        color: '#8a97a5',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {orgLabel}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
           <div style={{ marginTop: 12, borderTop: '1px solid #2a333d', paddingTop: 8 }}>
             <button
               type="button"
@@ -481,8 +596,8 @@ export function StorageExplorer() {
               <div
                 key={f.id}
                 draggable={mode === 'active'}
-                onMouseEnter={() => downloads.warmDrag({ id: f.id, name: f.name })}
-                onDragStart={(e) => downloads.onDragStart(e, { id: f.id, name: f.name })}
+                onMouseEnter={() => downloads.warmDrag({ id: f.id, name: f.name }, activeIdentityKey)}
+                onDragStart={(e) => downloads.onDragStart(e, { id: f.id, name: f.name }, activeIdentityKey)}
                 onDragEnd={() => downloads.onDragEnd({ id: f.id, name: f.name })}
                 style={{
                   display: 'flex',
@@ -629,8 +744,8 @@ export function StorageExplorer() {
                     style={btnStyle}
                     title="Drag this row to copy the file to another app (Finder / Explorer / Photos)"
                     data-testid="storage-detail-drag"
-                    onMouseEnter={() => downloads.warmDrag({ id: selected.id, name: selected.name })}
-                    onDragStart={(e) => downloads.onDragStart(e, { id: selected.id, name: selected.name })}
+                    onMouseEnter={() => downloads.warmDrag({ id: selected.id, name: selected.name }, activeIdentityKey)}
+                    onDragStart={(e) => downloads.onDragStart(e, { id: selected.id, name: selected.name }, activeIdentityKey)}
                     onDragEnd={() => downloads.onDragEnd({ id: selected.id, name: selected.name })}
                     draggable
                   >

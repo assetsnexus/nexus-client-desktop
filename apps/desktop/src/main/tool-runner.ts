@@ -14,10 +14,12 @@ import {
   editFile,
   readFile,
   resolveWithinWorkspace,
+  rootsForAgent,
   runBash,
   writeFile,
   type BashPolicy,
   type FileRevision,
+  type WorkspaceRoot,
 } from '@nexus/client-tools';
 import type { ToolsStore } from './tools-store.js';
 
@@ -41,6 +43,13 @@ export type ToolRunnerOptions = {
   policy?: BashPolicy;
   /** Renderer-provided confirmation for `ask` commands (from the approval card). */
   confirm?: (command: string, reason?: string) => Promise<boolean>;
+  /**
+   * The calling agent's desktop contact id. It selects which workspace roots the
+   * call may touch (per-agent ACL). A missing id resolves to roots shared with
+   * every agent only, and filesystem/shell tools are denied when the resulting
+   * root set is empty — fail closed, never fall back to "all roots".
+   */
+  agentContactId?: string | null;
 };
 
 export async function runTool(
@@ -48,16 +57,20 @@ export async function runTool(
   options: ToolRunnerOptions,
 ): Promise<ToolResult> {
   const { workspaces } = options.store.get();
+  // The roots this specific agent may touch. Filesystem tool calls without an
+  // agent id resolve to the shared-`*` roots only; if nothing matches, the
+  // sandbox below refuses every path.
+  const visibleRoots: WorkspaceRoot[] = rootsForAgent(workspaces, options.agentContactId ?? null);
   try {
     switch (req.name) {
       case 'app.shell.run': {
         const cwd =
           req.cwd ??
-          workspaces[0]?.path ??
+          visibleRoots[0]?.path ??
           '';
         const result = await runBash(
           { argv: req.argv, cwd, timeoutMs: req.timeoutMs },
-          { roots: workspaces, policy: options.policy, confirm: options.confirm },
+          { roots: visibleRoots, policy: options.policy, confirm: options.confirm },
         );
         return { ok: result.ok, data: result, error: result.ok ? undefined : result.reason };
       }
@@ -67,11 +80,11 @@ export async function runTool(
         const skill = localCommands.find((s) => s.skillId === req.skillId);
         const variant = skill?.commands.find((c) => c.os === os);
         if (!variant) return { ok: false, error: `no command for ${os} in skill ${req.skillId}` };
-        const cwd = variant.cwd ?? workspaces[0]?.path ?? '';
+        const cwd = variant.cwd ?? visibleRoots[0]?.path ?? '';
         const result = await runBash(
           { argv: variant.argv, cwd, envAllowlist: variant.envAllowlist },
           {
-            roots: workspaces,
+            roots: visibleRoots,
             policy:
               variant.access === 'read'
                 ? { allow: [{ commandPattern: '.*', action: 'allow' }], deny: [], fallback: 'allow' }
@@ -82,13 +95,13 @@ export async function runTool(
         return { ok: result.ok, data: result, error: result.ok ? undefined : result.reason };
       }
       case 'app.fs.read': {
-        const result = readFile(req.path, { roots: workspaces });
+        const result = readFile(req.path, { roots: visibleRoots });
         return result.ok
           ? { ok: true, data: result.value }
           : { ok: false, error: result.reason };
       }
       case 'app.fs.list': {
-        const sandbox = resolveWithinWorkspace(req.path, workspaces, 'read');
+        const sandbox = resolveWithinWorkspace(req.path, visibleRoots, 'read');
         if (!sandbox.ok) return { ok: false, error: sandbox.message };
         if (!existsSync(sandbox.realPath)) return { ok: false, error: 'path not found' };
         const entries = readdirSync(sandbox.realPath).map((name) => {
@@ -106,14 +119,14 @@ export async function runTool(
       }
       case 'app.fs.write': {
         const result = writeFile(req.path, req.content, {
-          roots: workspaces,
+          roots: visibleRoots,
           expectedRevision: req.expectedRevision,
         });
         return result.ok ? { ok: true, data: result.value } : { ok: false, error: result.reason };
       }
       case 'app.fs.edit': {
         const result = editFile(req.path, {
-          roots: workspaces,
+          roots: visibleRoots,
           oldText: req.oldText,
           newText: req.newText,
           expectedRevision: req.expectedRevision,
@@ -121,7 +134,7 @@ export async function runTool(
         return result.ok ? { ok: true, data: result.value } : { ok: false, error: result.reason };
       }
       case 'app.fs.delete': {
-        const result = deleteFile(req.path, { roots: workspaces });
+        const result = deleteFile(req.path, { roots: visibleRoots });
         if (!result.ok) return { ok: false, error: result.reason };
         const { unlinkSync } = await import('node:fs');
         unlinkSync(req.path);

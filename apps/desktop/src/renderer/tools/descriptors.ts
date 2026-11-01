@@ -33,6 +33,8 @@ function forward(name: string, args: unknown): Promise<ToolInvocationResult> {
   // an audit entry that traces this call back to its conversation. Metadata
   // only — the main process never trusts these for policy.
   const { agentId, conversationId } = getToolAuditContext();
+  // `agentId` is the chat contact id the ACL keys on; the main process selects
+  // this call's workspace roots from it.
   const payload: ToolInvocation = { name, ...(args as Record<string, unknown>), agentId, conversationId };
   return bridge.runTool(payload);
 }

@@ -198,10 +198,11 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.localAi.speech': 'Local speech models',
     'settings.localAi.audio': 'Audio devices',
 
-    // Developer: workspaces + local command skills (audit/cache live in their own modules).
+    // Developer: local command skills + a pointer to the moved workspace UI.
+    // (Workspaces + the per-agent ACL now live in Storage → Agent folders.)
     'settings.workspaces': 'Agent workspaces',
     'settings.workspaces.help':
-      'Directories the agent may read or write. Enforced in the main process — paths outside these roots (including symlink escapes) are refused.',
+      'Directories an agent may read or write. Enforced in the main process — paths outside the granted roots (including symlink escapes) are refused. Now managed in Storage → Agent folders, with per-agent access.',
     'settings.workspaces.remove': 'Remove',
     'settings.workspaces.empty': 'No workspaces yet.',
     'settings.workspaces.add': 'Add',

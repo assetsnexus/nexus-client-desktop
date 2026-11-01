@@ -48,8 +48,12 @@ import type {
 } from '../shared/ipc.js';
 
 export type StorageTransferManagerOptions = {
-  /** Resolve the authenticated region sender (from the auth manager). */
-  getSender: () => Promise<{ send: StorageCommandSender }>;
+  /**
+   * Resolve the authenticated region sender for an identity context. Storage
+   * fan-out routes per-identity, so an upload/download to an org workspace uses
+   * that org's context even when a different identity is active.
+   */
+  getSender: (identityKey?: string | null) => Promise<{ send: StorageCommandSender }>;
   /** Region base URL for the non-presign proxy fallback. */
   getRegionUrl: () => string;
   /** The window that should receive progress pushes / own OS drag-outs. */
@@ -86,8 +90,8 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
   // the staging root is debris from a crash/quit and is removed up front.
   pruneStagingRoot(tempRoot);
 
-  const client = async () => {
-    const sender = await options.getSender();
+  const client = async (identityKey?: string | null) => {
+    const sender = await options.getSender(identityKey);
     return createStorageClient((command, payload) => sender.send(command, payload));
   };
 
@@ -184,8 +188,8 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
 
     try {
       const bytes = await readSourceSize(req.absPath);
-      const targetFolderId = await resolveFolderId(req.workspaceId, req.folderId ?? null, req.prefix);
-      const sender = await options.getSender();
+      const targetFolderId = await resolveFolderId(req.workspaceId, req.folderId ?? null, req.prefix, req.identityKey);
+      const sender = await options.getSender(req.identityKey);
       const send = (command: string, payload?: Record<string, unknown>) => sender.send(command, payload);
 
       // 1. upload-init decides the transport: it is the authoritative per-file
@@ -299,8 +303,8 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
   // ─── download / save ──────────────────────────────────────────────────────
 
   /** Presigned GET when the backend can sign, else the region `/files` proxy. */
-  async function downloadLink(fileId: string): Promise<StorageDownloadLink> {
-    const sender = await options.getSender();
+  async function downloadLink(fileId: string, identityKey?: string | null): Promise<StorageDownloadLink> {
+    const sender = await options.getSender(identityKey);
     const raw = await sender.send('anx.storage.presign.get', { fileId });
     // A *failed* presign command is not the same as "the backend cannot sign".
     // Falling back to the region proxy URL on a failure would point at a path
@@ -324,8 +328,8 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
    * mismatched/empty body) is never written to the user's disk as if it were the
    * real file. When the guard rejects the bytes nothing is left behind.
    */
-  async function streamToPath(fileId: string, targetPath: string, expectedName?: string): Promise<number> {
-    const { url } = await downloadLink(fileId);
+  async function streamToPath(fileId: string, targetPath: string, expectedName?: string, identityKey?: string | null): Promise<number> {
+    const { url } = await downloadLink(fileId, identityKey);
     const fetchFn = options.fetchFn ?? fetch;
     const res = await fetchFn(url);
     if (!res.ok) throw new Error(`download failed (${res.status})`);
@@ -391,6 +395,7 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
     fileId: string,
     suggestedName: string,
     choosePath: (name: string) => Promise<string | null>,
+    identityKey?: string | null,
   ): Promise<StorageSaveResult> {
     let target: string | null;
     try {
@@ -400,7 +405,7 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
     }
     if (!target) return { saved: false, cancelled: true, path: null, bytes: 0 };
     try {
-      const bytes = await streamToPath(fileId, target, suggestedName);
+      const bytes = await streamToPath(fileId, target, suggestedName, identityKey);
       return { saved: true, cancelled: false, path: target, bytes };
     } catch (err) {
       return {
@@ -417,6 +422,7 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
   async function saveFilesToDir(
     files: Array<{ fileId: string; name: string }>,
     chooseDir: () => Promise<string | null>,
+    identityKey?: string | null,
   ): Promise<{ saved: number; cancelled: boolean; dir: string | null; error?: string }> {
     const dir = await chooseDir();
     if (!dir) return { saved: 0, cancelled: true, dir: null };
@@ -426,7 +432,7 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
       const safe = sanitizeFileName(file.name) || file.fileId;
       const target = uniqueTarget(dir, safe);
       try {
-        await streamToPath(file.fileId, target, safe);
+        await streamToPath(file.fileId, target, safe, identityKey);
         saved += 1;
       } catch (err) {
         errors.push(`${file.name}: ${err instanceof Error ? err.message : 'failed'}`);
@@ -451,14 +457,14 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
    * land under the wrong name. A private dir per file also keeps same-named
    * files apart without ever renaming the dragged file.
    */
-  async function prepareDrag(fileId: string, name: string): Promise<{ path: string | null; error?: string; name?: string }> {
+  async function prepareDrag(fileId: string, name: string, identityKey?: string | null): Promise<{ path: string | null; error?: string; name?: string }> {
     const existing = staged.get(fileId);
     if (existing && existsSync(existing.filePath)) return { path: existing.filePath, name: realDragName(name) };
     const realName = realDragName(name);
     const dir = join(tempRoot, `${fileId.slice(0, 8)}-${randomUUID().slice(0, 8)}`);
     const target = join(dir, realName);
     try {
-      await streamToPath(fileId, target, realName);
+      await streamToPath(fileId, target, realName, identityKey);
       staged.set(fileId, { dir, filePath: target });
       return { path: target, name: realName };
     } catch (err) {
@@ -517,12 +523,12 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
    */
   async function readBytesForPreview(
     fileId: string,
-    opts: { maxBytes?: number; fallbackType?: string } = {},
+    opts: { maxBytes?: number; fallbackType?: string; identityKey?: string | null } = {},
   ): Promise<StoragePreviewBytes> {
     const maxBytes = opts.maxBytes ?? PREVIEW_MAX_BYTES;
     let url: string;
     try {
-      ({ url } = await downloadLink(fileId));
+      ({ url } = await downloadLink(fileId, opts.identityKey));
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : 'preview link failed' };
     }
@@ -576,13 +582,14 @@ export function createStorageTransferManager(options: StorageTransferManagerOpti
     workspaceId: string,
     baseFolderId: string | null,
     prefix: string,
+    identityKey?: string | null,
   ): Promise<string | null> {
     const segments = String(prefix ?? '')
       .replace(/\\/g, '/')
       .split('/')
       .filter(Boolean);
     if (!segments.length) return baseFolderId;
-    const c = await client();
+    const c = await client(identityKey);
     let parent = baseFolderId;
     for (const segment of segments) {
       const children = await c.folderList(workspaceId, parent ?? undefined);

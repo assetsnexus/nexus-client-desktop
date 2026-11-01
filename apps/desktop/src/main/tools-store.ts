@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { app } from 'electron';
 import {
   DEFAULT_LOCAL_COMMAND_SKILLS,
+  normalizeWorkspaceRoot,
   type LocalCommandSkill,
   type WorkspaceRoot,
 } from '@nexus/client-tools';
@@ -32,7 +33,11 @@ export function createToolsStore(filePath?: string): ToolsStore {
     try {
       const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<ToolsConfig>;
       return {
-        workspaces: Array.isArray(raw.workspaces) ? raw.workspaces : [],
+        // Migrate roots persisted before per-agent ACLs: a missing
+        // `agentContactIds` becomes `['*']` so nothing silently loses access.
+        workspaces: Array.isArray(raw.workspaces)
+          ? raw.workspaces.map((w) => normalizeWorkspaceRoot(w as WorkspaceRoot))
+          : [],
         localCommands: Array.isArray(raw.localCommands)
           ? raw.localCommands
           : DEFAULT_LOCAL_COMMAND_SKILLS,
@@ -50,7 +55,10 @@ export function createToolsStore(filePath?: string): ToolsStore {
   return {
     get: read,
     setWorkspaces(workspaces) {
-      const next = { ...read(), workspaces };
+      const next = {
+        ...read(),
+        workspaces: workspaces.map((w) => normalizeWorkspaceRoot(w)),
+      };
       write(next);
       return next;
     },

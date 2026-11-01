@@ -8,9 +8,20 @@
  */
 
 export {
+  previewLocalDirsAccess,
+  previewPathAccess,
+  type AccessGrant,
+  type PathAccessPreview,
+} from './access.js';
+
+export {
+  ANY_AGENT,
   createWorkspaceRegistry,
   isInside,
+  normalizeWorkspaceRoot,
   resolveWithinWorkspace,
+  rootGrantsAgent,
+  rootsForAgent,
   type SandboxDenyReason,
   type SandboxResult,
   type WorkspaceMode,

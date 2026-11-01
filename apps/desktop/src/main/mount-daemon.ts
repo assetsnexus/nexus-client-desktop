@@ -22,8 +22,10 @@ import { dirname, join } from 'node:path';
 import { app } from 'electron';
 import { spawn, type ChildProcess } from 'node:child_process';
 import {
+  computeExpiresAt,
   createStorageClient,
   normalizeMountSession,
+  normalizePersistedMountSession,
   resolveFolderIdByPath,
   sessionDriver,
   validateMountSessions,
@@ -40,7 +42,11 @@ import type {
 } from '../shared/ipc.js';
 
 export type MountDaemonOptions = {
-  getSender: () => Promise<{ send: StorageCommandSender }>;
+  /**
+   * Resolve the token-bearing region sender for an identity context, so a mount
+   * to an org workspace reads with that org's context (not the active identity).
+   */
+  getSender: (identityKey?: string | null) => Promise<{ send: StorageCommandSender }>;
   getRegionUrl: () => string;
   /**
    * Current session token for the native helper. Written to a 0600 file beside
@@ -48,6 +54,12 @@ export type MountDaemonOptions = {
    * without the Electron process proxying every read.
    */
   getToken?: () => Promise<string | null>;
+  /**
+   * Resolve a display name for a workspace id across *all* storage identities.
+   * The daemon's own sender is identity-scoped, so this is injected from main
+   * (which can fan out) to keep org workspace names correct in the list.
+   */
+  resolveWorkspaceNames?: () => Promise<Map<string, string>>;
   /** Overridable for tests. */
   filePath?: string;
   baseDir?: string;
@@ -71,6 +83,7 @@ export function createMountDaemon(options: MountDaemonOptions) {
 
   const children = new Map<string, ChildProcess>();
   const refreshers = new Map<string, NodeJS.Timeout>();
+  const expiryTimers = new Map<string, NodeJS.Timeout>();
   let capabilities: MountCapabilities = probeCapabilities();
 
   // ─── capability probe ─────────────────────────────────────────────────────
@@ -117,7 +130,10 @@ export function createMountDaemon(options: MountDaemonOptions) {
     if (!existsSync(filePath)) return [];
     try {
       const raw = JSON.parse(readFileSync(filePath, 'utf8'));
-      return Array.isArray(raw) ? (raw as MountSession[]) : [];
+      if (!Array.isArray(raw)) return [];
+      // Backfill the lifetime fields added after Phase 3 so an old sessions file
+      // loads cleanly (no expiry, no persist).
+      return (raw as MountSession[]).map(normalizePersistedMountSession);
     } catch {
       return [];
     }
@@ -142,8 +158,8 @@ export function createMountDaemon(options: MountDaemonOptions) {
 
   // ─── region + materialize ─────────────────────────────────────────────────
 
-  async function client() {
-    const sender = await options.getSender();
+  async function client(identityKey?: string | null) {
+    const sender = await options.getSender(identityKey);
     return createStorageClient((command, payload) => sender.send(command, payload));
   }
 
@@ -161,7 +177,7 @@ export function createMountDaemon(options: MountDaemonOptions) {
    * Returns the number of files written.
    */
   async function materialize(s: MountSession): Promise<number> {
-    const c = await client();
+    const c = await client(s.identityKey);
     const folders = await c.folderTree(s.workspaceId);
     const targetFolderId = await resolveFolderId(c, s);
 
@@ -224,10 +240,65 @@ export function createMountDaemon(options: MountDaemonOptions) {
           error: s.delivery === 'kernel' ? 'native helper unavailable; mirroring instead' : null,
         });
       }
+      armExpiry(s);
     } catch (err) {
       patchSession(id, { state: 'error', error: err instanceof Error ? err.message : String(err) });
     }
     return snapshot();
+  }
+
+  /**
+   * Arm the auto-expiry timer for a mounted session. The recorded `expiresAt` is
+   * derived from `expiresAfter` at mount time; when the timer fires the session
+   * is stopped (record kept so it can be re-mounted), and `expiresAt` is cleared.
+   * A session with no/disabled expiry, or one already past its deadline, is
+   * stopped immediately rather than scheduled.
+   */
+  function armExpiry(s: MountSession): void {
+    clearExpiry(s.id);
+    const expiresAt = computeExpiresAt(s.expiresAfter, now());
+    if (!expiresAt) {
+      // No lifetime: make sure a stale deadline from a prior run is cleared.
+      if (s.expiresAt) patchSession(s.id, { expiresAt: null });
+      return;
+    }
+    patchSession(s.id, { expiresAt });
+    const delay = new Date(expiresAt).getTime() - now().getTime();
+    const fire = () => {
+      expiryTimers.delete(s.id);
+      void stopSession(s.id).then(() => patchSession(s.id, { expiresAt: null }));
+    };
+    if (delay <= 0) {
+      fire();
+      return;
+    }
+    const timer = setTimeout(fire, delay);
+    timer.unref?.();
+    expiryTimers.set(s.id, timer);
+  }
+
+  function clearExpiry(id: string): void {
+    const timer = expiryTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      expiryTimers.delete(id);
+    }
+  }
+
+  /**
+   * Reconcile sessions at app start: a session a crash left as `mounted` is not
+   * actually mounted, so it is normalized to `stopped`; then only sessions that
+   * opted into `persistAcrossRestarts` are re-mounted.
+   */
+  async function resumePersisted(): Promise<void> {
+    for (const s of readSessions()) {
+      if (s.state === 'mounted' || s.state === 'starting' || s.state === 'degraded') {
+        patchSession(s.id, { state: 'stopped', expiresAt: null, error: null });
+      }
+    }
+    for (const s of readSessions()) {
+      if (s.persistAcrossRestarts) await startSession(s.id);
+    }
   }
 
   function startKernelHelper(s: MountSession): void {
@@ -292,6 +363,7 @@ export function createMountDaemon(options: MountDaemonOptions) {
   }
 
   async function stopSession(id: string): Promise<MountSnapshot> {
+    clearExpiry(id);
     const child = children.get(id);
     if (child) {
       try {
@@ -306,7 +378,7 @@ export function createMountDaemon(options: MountDaemonOptions) {
       clearInterval(timer);
       refreshers.delete(id);
     }
-    patchSession(id, { state: 'stopped', error: null });
+    patchSession(id, { state: 'stopped', error: null, expiresAt: null });
     return snapshot();
   }
 
@@ -349,6 +421,9 @@ export function createMountDaemon(options: MountDaemonOptions) {
 
   async function workspaceNames(): Promise<Map<string, string>> {
     try {
+      // Prefer the injected cross-identity resolver so an org workspace's name is
+      // correct even when a different identity is active.
+      if (options.resolveWorkspaceNames) return await options.resolveWorkspaceNames();
       const c = await client();
       const rows = await c.listWorkspaces();
       return new Map(rows.map((w) => [w.id, w.name]));
@@ -360,6 +435,8 @@ export function createMountDaemon(options: MountDaemonOptions) {
   function dispose(): void {
     for (const timer of refreshers.values()) clearInterval(timer);
     refreshers.clear();
+    for (const timer of expiryTimers.values()) clearTimeout(timer);
+    expiryTimers.clear();
     for (const child of children.values()) {
       try {
         child.kill();
@@ -374,6 +451,10 @@ export function createMountDaemon(options: MountDaemonOptions) {
     // and, because this runs from the app's `before-quit`/dispose path, that
     // rejection surfaced as "A JavaScript error occurred in the main process"
     // during shutdown. Never let cleanup failure escape here.
+    //
+    // Session *records* are intentionally left on disk (they are the source of
+    // truth for the next boot's `resumePersisted`); only session state that says
+    // "mounted" is normalized so a stale `mounted` cannot linger in the UI.
     for (const s of readSessions()) {
       if (s.state !== 'mounted') continue;
       try {
@@ -381,6 +462,7 @@ export function createMountDaemon(options: MountDaemonOptions) {
       } catch {
         /* best effort — the mount root is re-materialized on next start */
       }
+      patchSession(s.id, { state: 'stopped', expiresAt: null });
     }
   }
 
@@ -390,6 +472,7 @@ export function createMountDaemon(options: MountDaemonOptions) {
     removeSession,
     startSession,
     stopSession,
+    resumePersisted,
     dispose,
     capabilities: () => capabilities,
     _readSessions: readSessions,
@@ -416,6 +499,7 @@ function toRow(s: MountSession, workspaceName: string | null): MountSessionRow {
   return {
     id: s.id,
     workspaceId: s.workspaceId,
+    identityKey: s.identityKey ?? null,
     workspaceName,
     remoteFolderId: s.remoteFolderId,
     remoteFolderPath: s.remoteFolderPath,
@@ -426,6 +510,9 @@ function toRow(s: MountSession, workspaceName: string | null): MountSessionRow {
     cacheDir: s.cacheDir,
     journalPath: s.journalPath,
     volumeName: s.volumeName,
+    expiresAfter: s.expiresAfter ?? null,
+    expiresAt: s.expiresAt ?? null,
+    persistAcrossRestarts: s.persistAcrossRestarts === true,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
     error: s.error,

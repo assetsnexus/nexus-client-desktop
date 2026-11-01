@@ -42,6 +42,7 @@ import { readRegionEnvironment } from './region-environment.js';
 import { probeBackend, probeLocalModels } from './local-models.js';
 import { createLocalModelsStore } from './local-models-store.js';
 import { createToolsStore } from './tools-store.js';
+import { previewPathAccess } from '@nexus/client-tools';
 import { createLogger } from './logger.js';
 import { createAuditStore } from './audit-store.js';
 import { createChatCacheStore } from './chat-cache-store.js';
@@ -57,6 +58,12 @@ import { createAssetAgentDiscoveryManager } from './asset-agent-discovery.js';
 import { createAppLockManager } from './app-lock.js';
 import { createLogoutManager } from './logout-manager.js';
 import { createNexusAppsProvider } from './nexus-apps.js';
+import {
+  identityKeyForWorkspace,
+  resolveStorageIdentity,
+  type StorageIdentityContext,
+} from './storage-identities.js';
+import type { StorageWorkspace } from '@nexus/storage-browser';
 import { buildTrayMenu } from './tray-menu.js';
 import { createBonjourBackend } from './mdns-bonjour.js';
 import { createCompanionWindowManager, defaultCompanionPreloadPath } from './companion-window.js';
@@ -77,6 +84,7 @@ import {
   shouldOpenCompanionForContact,
   type CompanionToolLaunch,
   type SettingsSectionId,
+  type StorageHubSectionId,
 } from '../shared/ipc.js';
 import { createGlobalPointerSource } from './global-pointer.js';
 import { createCalendarManager } from './calendar-manager.js';
@@ -120,6 +128,7 @@ import {
   type NotificationListInput,
   type StorageUploadRequest,
   type StorageUploadOneRequest,
+  type StorageWorkspaceRow,
   type ToolInvocation,
   type TwoFactorRequest,
   type UiSettings,
@@ -368,7 +377,9 @@ function applyEnvConnectionOverrides(): void {
 const secureStore = new SafeStorageStore();
 const toolsStore = createToolsStore();
 const storageManager = createStorageManager({
-  getSender: () => getAuthManager().createSender(),
+  // Route by identity context so an org workspace is reached with its org
+  // identity even when a different identity is currently active.
+  getSender: (identityKey) => storageSenderFor(identityKey),
   getRegionUrl: () => settings.getConnectionConfig().regionUrl,
   fetchFn: regionFetch(),
 });
@@ -376,7 +387,7 @@ const storageManager = createStorageManager({
 // progress (streamed presign-PUT), cancel, save-to-disk and OS drag-out. The
 // renderer only sends paths; all file IO stays in the main process.
 const storageTransfer = createStorageTransferManager({
-  getSender: () => getAuthManager().createSender(),
+  getSender: (identityKey) => storageSenderFor(identityKey),
   getRegionUrl: () => settings.getConnectionConfig().regionUrl,
   getWebContents: () => mainWindow?.webContents ?? null,
   getTls: () => {
@@ -387,15 +398,17 @@ const storageTransfer = createStorageTransferManager({
 });
 // Phase 3: link bucket sub-dirs to local dirs, multiple syncs at once.
 const syncManager = createSyncManager({
-  getSender: () => getAuthManager().createSender(),
+  getSender: (identityKey) => storageSenderFor(identityKey),
   getRegionUrl: () => settings.getConnectionConfig().regionUrl,
+  resolveWorkspaceNames: () => storageWorkspaceNameMap(),
   fetchFn: regionFetch(),
 });
 // Phase 3: mount a bucket sub-dir as a local directory (kernel helper or mirror).
 const mountDaemon = createMountDaemon({
-  getSender: () => getAuthManager().createSender(),
+  getSender: (identityKey) => storageSenderFor(identityKey),
   getRegionUrl: () => settings.getConnectionConfig().regionUrl,
   getToken: () => getAuthManager().getToken(),
+  resolveWorkspaceNames: () => storageWorkspaceNameMap(),
   fetchFn: regionFetch(),
 });
 const runnerManager = createRunnerManager({
@@ -1097,6 +1110,189 @@ function humanDeviceName(): string {
   return host ? `Nexus Desktop (${os}) · ${host}` : `Nexus Desktop (${os})`;
 }
 
+/**
+ * Whether a region response is a lane-throttle refusal ("retry shortly").
+ *
+ * The region's rate-limit middleware answers a throttled command with a `429`
+ * body `{ error: 'lane_throttled', retryAfterSeconds, … }`; `sendCommand`
+ * normalises that into `responseCode` + `message`/`code`. Reads are safe to
+ * retry, so detection is deliberately narrow — a 429, or the throttle code by
+ * name — and never a generic error.
+ */
+function isLaneThrottled(res: { responseCode?: number; code?: string | null; message?: string | null }): boolean {
+  if (res.responseCode === 429) return true;
+  const code = (res.code ?? '').toLowerCase();
+  if (code === 'lane_throttled' || code.includes('throttl')) return true;
+  const message = (res.message ?? '').toLowerCase();
+  return message.includes('throttled under load');
+}
+
+/**
+ * Send one command as a specific stored storage identity context.
+ *
+ * Storage fan-out needs the *user-session* token (the account's private
+ * identity) together with the target context's `orgId`, because a business
+ * token goes stale once that membership is signed out while the user session
+ * stays valid and the region authorises the matching `orgId` on the envelope.
+ * Reuses `sendCommand` + the same session-loss classification the auth-manager
+ * sender applies, so a revoked device still tears the session down.
+ */
+function storageSenderFromContext(context: StorageIdentityContext): {
+  send: (command: string, payload?: Record<string, unknown>) => Promise<unknown>;
+} {
+  return {
+    async send(command, payload) {
+      const { sendCommand, classifySessionFailure, isIdempotentRegionCommand } = await import(
+        '@nexus/node-core'
+      );
+      const identity: Record<string, unknown> = {};
+      if (context.userId) identity.userId = context.userId;
+      if (context.orgId) identity.orgId = context.orgId;
+      if (context.deviceId) identity.deviceId = context.deviceId;
+
+      // The region throttles command *lanes* under host load and asks the client
+      // to retry shortly. Storage fan-out issues one read per identity back to
+      // back, so a transient throttle would otherwise blank a whole context (or
+      // the entire workspace list). Retry a throttled **read** a few times with a
+      // short backoff; never retry writes, and never mask a real error.
+      const retryableRead = isIdempotentRegionCommand(command);
+      const maxAttempts = retryableRead ? 5 : 1;
+      let res = await sendCommand(authClientOptions(), command, payload ?? {}, {
+        token: context.token,
+        identity,
+      });
+      for (let attempt = 1; attempt < maxAttempts && isLaneThrottled(res); attempt += 1) {
+        // Back off proportionally to the attempt; the region's lane window is
+        // short-lived, so a few hundred ms of increasing delay is enough.
+        await new Promise((r) => setTimeout(r, 400 * attempt));
+        res = await sendCommand(authClientOptions(), command, payload ?? {}, {
+          token: context.token,
+          identity,
+        });
+      }
+
+      const ok = res.responseCode >= 200 && res.responseCode < 300;
+      if (!ok) {
+        const loss = classifySessionFailure({
+          responseCode: res.responseCode,
+          message: res.message,
+          code: res.code,
+        });
+        if (loss.lost) {
+          await getAuthManager().forceSignOut(loss.reason).catch(() => undefined);
+          void handleSessionLost({
+            reason: loss.reason,
+            deviceRevoked: loss.deviceRevoked,
+            message: loss.message,
+          });
+        }
+      }
+      return res;
+    },
+  };
+}
+
+/** The storage identity contexts for the signed-in user (personal + each org). */
+async function storageIdentities(): Promise<StorageIdentityContext[]> {
+  try {
+    return await identityManager.storageIdentities();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve the sender for a storage identity key. An explicit `org:<id>` key
+ * sends with that org context; anything else (missing/unknown) uses the personal
+ * context via the ordinary active-identity sender, so everyday personal storage
+ * keeps working unchanged.
+ */
+async function storageSenderFor(identityKey?: string | null): Promise<{
+  send: (command: string, payload?: Record<string, unknown>) => Promise<unknown>;
+}> {
+  const contexts = await storageIdentities();
+  const context = resolveStorageIdentity(contexts, identityKey);
+  // No contexts means the identity store has no usable session (e.g. pre-hydrate);
+  // fall back to the active-identity sender so behaviour is unchanged.
+  if (!context) return getAuthManager().createSender();
+  return storageSenderFromContext(context);
+}
+
+/**
+ * Aggregate every workspace the user can reach across all storage identities
+ * (personal + each org membership), tagging each row with the identity context
+ * that owns it plus the org's display name/logo. A per-identity failure is
+ * tolerated so one stale context cannot blank the whole list.
+ */
+async function aggregateStorageWorkspaces(): Promise<StorageWorkspaceRow[]> {
+  const contexts = await storageIdentities();
+  if (contexts.length === 0) return [];
+
+  // Query contexts **sequentially**, not in parallel: each call is a read on the
+  // region's read lane, and firing one per identity at once trips the lane
+  // throttle under host load — which then blanks whichever contexts lost the
+  // race. Sequential calls (with the sender's own throttle retry) keep the burst
+  // under the lane budget so every org's storage actually appears.
+  const perContext: Array<{ context: StorageIdentityContext; rows: StorageWorkspace[] }> = [];
+  let okCount = 0;
+  for (const context of contexts) {
+    try {
+      const sender = storageSenderFromContext(context);
+      const { createStorageClient } = await import('@nexus/storage-browser');
+      const client = createStorageClient((command, payload) => sender.send(command, payload));
+      perContext.push({ context, rows: await client.listWorkspaces() });
+      okCount += 1;
+    } catch {
+      perContext.push({ context, rows: [] });
+    }
+  }
+
+  // Every context failed (e.g. the region read lane is throttled): surface a
+  // retryable error rather than a misleading "no workspaces" empty state.
+  if (okCount === 0) {
+    throw new Error('Could not reach the region to list storage. Please retry shortly.');
+  }
+
+  const byId = new Map<string, StorageWorkspaceRow>();
+  for (const { context, rows } of perContext) {
+    for (const w of rows) {
+      if (byId.has(w.id)) continue;
+      byId.set(w.id, {
+        id: w.id,
+        name: w.name,
+        ownerUserId: w.ownerUserId,
+        orgId: w.orgId,
+        memberUserIds: w.memberUserIds,
+        // A workspace's own orgId decides its routing context, not the context
+        // it was listed under (the region already scopes strictly).
+        identityKey: identityKeyForWorkspace(w.orgId),
+        isOrg: Boolean(w.orgId),
+        orgName: context.kind === 'org' ? context.orgName : null,
+        orgLogo: context.kind === 'org' ? context.orgLogo : null,
+      });
+    }
+  }
+
+  // Org workspaces first (most users want their shared storage up top), then by
+  // name. The personal "My Storage" stays reachable either way.
+  return Array.from(byId.values()).sort((a, b) => {
+    if (a.isOrg !== b.isOrg) return a.isOrg ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+/** Workspace id → name across every identity, for sync/mount row labels. */
+async function storageWorkspaceNameMap(): Promise<Map<string, string>> {
+  // Labels are decoration: a failing list must not break mount/sync startup, so
+  // a transient region error degrades to an empty map rather than throwing.
+  try {
+    const rows = await aggregateStorageWorkspaces();
+    return new Map(rows.map((w) => [w.id, w.name]));
+  } catch {
+    return new Map();
+  }
+}
+
 function getAuthManager(): ReturnType<typeof createAuthManager> {
   if (!authManager) {
     authManager = createAuthManager({
@@ -1620,6 +1816,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.toolsSetLocalCommands, (_e, commands) =>
     toolsStore.setLocalCommands(commands),
   );
+  // Pure preview: which roots cover a path and which agents each grants. Uses
+  // the same catalog (and migration) the sandbox does, so it cannot over-claim.
+  ipcMain.handle(IPC.toolsPreviewAccess, (_e, input: { path?: string }) =>
+    previewPathAccess(typeof input?.path === 'string' ? input.path : '', toolsStore.get().workspaces),
+  );
   ipcMain.handle(IPC.toolsRun, (_e, req: ToolInvocation) =>
     toolAuditor.invoke(req, { store: toolsStore }),
   );
@@ -1657,27 +1858,35 @@ function registerIpc(): void {
   });
 
   // Storage explorer (Phase 2).
-  ipcMain.handle(IPC.storageWorkspaces, () => storageManager.workspaces());
+  ipcMain.handle(IPC.storageWorkspaces, () => aggregateStorageWorkspaces());
   ipcMain.handle(IPC.storageFolderList, (_e, workspaceId: string, parentFolderId?: string | null) =>
     storageManager.folderList(workspaceId, parentFolderId),
   );
   ipcMain.handle(IPC.storageListFiles, (_e, input) => storageManager.listFiles(input ?? {}));
-  ipcMain.handle(IPC.storageCapabilities, (_e, kind?: string) => storageManager.capabilities(kind));
+  ipcMain.handle(IPC.storageCapabilities, (_e, kind?: string, identityKey?: string) =>
+    storageManager.capabilities(kind, identityKey),
+  );
   ipcMain.handle(IPC.storageUpload, (_e, req: StorageUploadRequest) => storageManager.upload(req));
-  ipcMain.handle(IPC.storageDownloadUrl, (_e, fileId: string) => storageManager.downloadUrl(fileId));
-  ipcMain.handle(IPC.storageListRevisions, (_e, fileId: string, limit?: number) =>
-    storageManager.listRevisions(fileId, limit),
+  ipcMain.handle(IPC.storageDownloadUrl, (_e, fileId: string, identityKey?: string) =>
+    storageManager.downloadUrl(fileId, identityKey),
   );
-  ipcMain.handle(IPC.storageRevertRevision, (_e, fileId: string, revisionNo: number) =>
-    storageManager.revertRevision(fileId, revisionNo),
+  ipcMain.handle(IPC.storageListRevisions, (_e, fileId: string, limit?: number, identityKey?: string) =>
+    storageManager.listRevisions(fileId, limit, identityKey),
   );
-  ipcMain.handle(IPC.storageTrashFile, (_e, fileId: string) => storageManager.trashFile(fileId));
-  ipcMain.handle(IPC.storageRestoreFile, (_e, fileId: string) => storageManager.restoreFile(fileId));
-  ipcMain.handle(IPC.storageRenameFile, (_e, fileId: string, newName: string) =>
-    storageManager.renameFile(fileId, newName),
+  ipcMain.handle(IPC.storageRevertRevision, (_e, fileId: string, revisionNo: number, identityKey?: string) =>
+    storageManager.revertRevision(fileId, revisionNo, identityKey),
   );
-  ipcMain.handle(IPC.storageMoveFile, (_e, fileId: string, targetFolderId: string | null) =>
-    storageManager.moveFile(fileId, targetFolderId),
+  ipcMain.handle(IPC.storageTrashFile, (_e, fileId: string, identityKey?: string) =>
+    storageManager.trashFile(fileId, identityKey),
+  );
+  ipcMain.handle(IPC.storageRestoreFile, (_e, fileId: string, identityKey?: string) =>
+    storageManager.restoreFile(fileId, identityKey),
+  );
+  ipcMain.handle(IPC.storageRenameFile, (_e, fileId: string, newName: string, identityKey?: string) =>
+    storageManager.renameFile(fileId, newName, identityKey),
+  );
+  ipcMain.handle(IPC.storageMoveFile, (_e, fileId: string, targetFolderId: string | null, identityKey?: string) =>
+    storageManager.moveFile(fileId, targetFolderId, identityKey),
   );
 
   // Drag-and-drop transfer (renderer UX ownership). Every handler moves bytes in
@@ -1688,29 +1897,31 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.storageUploadOne, (_e, req: StorageUploadOneRequest) => storageTransfer.uploadOne(req));
   ipcMain.handle(IPC.storageTransferCancel, (_e, transferId: string) => storageTransfer.cancel(transferId));
-  ipcMain.handle(IPC.storageDownloadLink, (_e, fileId: string) => storageTransfer.downloadLink(fileId));
-  ipcMain.handle(IPC.storageSaveFile, (_e, fileId: string, suggestedName: string) =>
+  ipcMain.handle(IPC.storageDownloadLink, (_e, fileId: string, identityKey?: string) =>
+    storageTransfer.downloadLink(fileId, identityKey),
+  );
+  ipcMain.handle(IPC.storageSaveFile, (_e, fileId: string, suggestedName: string, identityKey?: string) =>
     storageTransfer.saveFile(fileId, suggestedName, async (name) => {
       const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
       const result = win
         ? await dialog.showSaveDialog(win, { defaultPath: name })
         : await dialog.showSaveDialog({ defaultPath: name });
       return result.canceled || !result.filePath ? null : result.filePath;
-    }),
+    }, identityKey),
   );
-  ipcMain.handle(IPC.storageSaveFilesToDir, (_e, files: Array<{ fileId: string; name: string }>) =>
+  ipcMain.handle(IPC.storageSaveFilesToDir, (_e, files: Array<{ fileId: string; name: string }>, identityKey?: string) =>
     storageTransfer.saveFilesToDir(Array.isArray(files) ? files : [], async () => {
       const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
       const result = win
         ? await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] })
         : await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
       return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
-    }),
+    }, identityKey),
   );
-  ipcMain.handle(IPC.storagePrepareDrag, (_e, fileId: string, name: string) =>
-    storageTransfer.prepareDrag(fileId, name),
+  ipcMain.handle(IPC.storagePrepareDrag, (_e, fileId: string, name: string, identityKey?: string) =>
+    storageTransfer.prepareDrag(fileId, name, identityKey),
   );
-  ipcMain.handle(IPC.storageStartDrag, async (event, fileId: string, name: string) => {
+  ipcMain.handle(IPC.storageStartDrag, async (event, fileId: string, name: string, identityKey?: string) => {
     const wc = event.sender;
     if (!wc || wc.isDestroyed()) return false;
     // A 1x1 transparent icon satisfies macOS, which requires a non-empty drag
@@ -1723,21 +1934,21 @@ function registerIpc(): void {
     // start inside the drag gesture. If the warm-up has not finished (or never
     // ran), stage now and start once the bytes are on disk.
     if (storageTransfer.startDrag(fileId, driver)) return true;
-    const prepared = await storageTransfer.prepareDrag(fileId, typeof name === 'string' ? name : '');
+    const prepared = await storageTransfer.prepareDrag(fileId, typeof name === 'string' ? name : '', identityKey);
     if (!prepared.path) return false;
     return storageTransfer.startDrag(fileId, driver);
   });
   ipcMain.handle(IPC.storageReleaseDrag, (_e, fileId: string) => {
     storageTransfer.releaseDrag(fileId);
   });
-  ipcMain.handle(IPC.storagePreviewBytes, (_e, fileId: string) =>
-    storageTransfer.readBytesForPreview(fileId),
+  ipcMain.handle(IPC.storagePreviewBytes, (_e, fileId: string, identityKey?: string) =>
+    storageTransfer.readBytesForPreview(fileId, { identityKey }),
   );
 
   // Bucket-subdir <-> local-dir multi-sync (Phase 3).
   ipcMain.handle(IPC.syncGetState, () => syncManager.state());
-  ipcMain.handle(IPC.syncListRemoteFolders, (_e, workspaceId: string) =>
-    syncManager.listRemoteFolders(workspaceId),
+  ipcMain.handle(IPC.syncListRemoteFolders, (_e, workspaceId: string, identityKey?: string) =>
+    syncManager.listRemoteFolders(workspaceId, identityKey),
   );
   ipcMain.handle(IPC.syncAddBinding, (_e, input) => syncManager.addBinding(input));
   ipcMain.handle(IPC.syncUpdateBinding, (_e, id: string, patch) =>
@@ -1939,6 +2150,16 @@ function registerIpc(): void {
     mainWindow.webContents.send(IPC.openSettings, section ?? null);
     return true;
   });
+  // Same deep-link for the Storage hub (browse / mounts / sync / folders /
+  // access), so a companion or another window can land the user on one section.
+  ipcMain.handle(IPC.openStorage, (_e, section?: StorageHubSectionId | null) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send(IPC.openStorage, section ?? null);
+    return true;
+  });
   ipcMain.handle(IPC.companionSetAlwaysOnTop, (_e, contactId: string, onTop: boolean) =>
     companionWindows.setAlwaysOnTop(contactId, onTop === true),
   );
@@ -2072,6 +2293,9 @@ app.whenReady().then(async () => {
   createTray();
   localVoiceManager.start();
   syncManager.start();
+  // Re-mount sessions that opted into surviving a restart (stale `mounted`
+  // records are first normalized to `stopped` by the daemon).
+  void mountDaemon.resumePersisted();
   await createWindow();
 
   app.on('activate', () => {

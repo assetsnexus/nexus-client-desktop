@@ -211,3 +211,75 @@ describe('mount daemon — native helper contract', () => {
     expect(readFileSync(config.token_path, 'utf8')).toBe('tok-123');
   });
 });
+
+describe('mount daemon — lifetime + restart persistence', () => {
+  it('arms an expiry and clears the deadline when stopped by hand', async () => {
+    const sender = fakeSender([]);
+    const snapDir = tmpDir('nexus-mount-');
+    const mountpoint = join(tmpDir('nexus-mp-'), 'clients');
+    const d = daemon(sender, join(snapDir, 'sessions.json'), join(snapDir, 'mounts'));
+
+    await d.addSession({
+      workspaceId: 'w1',
+      mountpoint,
+      expiresAfter: { value: 2, unit: 'hours' },
+    });
+    const started = await d.startSession('m1');
+    expect(started.sessions[0].state).toBe('mounted');
+    // `now` is fixed at 2026-03-01T00:00:00Z, so +2h is deterministic.
+    expect(started.sessions[0].expiresAt).toBe('2026-03-01T02:00:00.000Z');
+
+    const stopped = await d.stopSession('m1');
+    expect(stopped.sessions[0].state).toBe('stopped');
+    expect(stopped.sessions[0].expiresAt).toBeNull();
+  });
+
+  it('does not persist a deadline for a session with no expiry', async () => {
+    const sender = fakeSender([]);
+    const snapDir = tmpDir('nexus-mount-');
+    const d = daemon(sender, join(snapDir, 'sessions.json'), join(snapDir, 'mounts'));
+    await d.addSession({ workspaceId: 'w1', mountpoint: join(tmpDir('nexus-mp-'), 'c') });
+    const started = await d.startSession('m1');
+    expect(started.sessions[0].expiresAt).toBeNull();
+    await d.stopSession('m1');
+  });
+
+  it('normalizes a stale "mounted" record and only resumes persistent sessions', async () => {
+    const sender = fakeSender([]);
+    const snapDir = tmpDir('nexus-mount-');
+    const filePath = join(snapDir, 'sessions.json');
+    // Simulate a crash: two sessions left `mounted`, only one opted into restart.
+    writeFileSync(
+      filePath,
+      JSON.stringify([
+        { id: 'm1', workspaceId: 'w1', mountpoint: join(tmpDir('nexus-mp-'), 'a'), remoteFolderPath: '/', mode: 'read-only', delivery: 'mirror', state: 'mounted', cacheDir: '/b/c', journalPath: '/b/c.j', volumeName: 'Nexus', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', error: null, persistAcrossRestarts: false },
+        { id: 'm2', workspaceId: 'w1', mountpoint: join(tmpDir('nexus-mp-'), 'b'), remoteFolderPath: '/', mode: 'read-only', delivery: 'mirror', state: 'mounted', cacheDir: '/b/d', journalPath: '/b/d.j', volumeName: 'Nexus', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', error: null, persistAcrossRestarts: true },
+      ]),
+      'utf8',
+    );
+    const d = daemon(sender, filePath, join(snapDir, 'mounts'));
+    await d.resumePersisted();
+    const snap = await d.snapshot();
+    // m1 was normalized to stopped and not re-mounted; m2 was re-mounted.
+    expect(snap.sessions.find((s) => s.id === 'm1')?.state).toBe('stopped');
+    expect(snap.sessions.find((s) => s.id === 'm2')?.state).toBe('mounted');
+  });
+
+  it('migrates a sessions file written before the lifetime fields existed', async () => {
+    const sender = fakeSender([]);
+    const snapDir = tmpDir('nexus-mount-');
+    const filePath = join(snapDir, 'sessions.json');
+    writeFileSync(
+      filePath,
+      JSON.stringify([
+        { id: 'm1', workspaceId: 'w1', mountpoint: '/mnt/old', remoteFolderPath: '/', mode: 'read-only', delivery: 'mirror', state: 'stopped', cacheDir: '/b/c', journalPath: '/b/c.j', volumeName: 'Nexus', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', error: null },
+      ]),
+      'utf8',
+    );
+    const d = daemon(sender, filePath, join(snapDir, 'mounts'));
+    const snap = await d.snapshot();
+    expect(snap.sessions[0].expiresAfter).toBeNull();
+    expect(snap.sessions[0].expiresAt).toBeNull();
+    expect(snap.sessions[0].persistAcrossRestarts).toBe(false);
+  });
+});

@@ -25,6 +25,8 @@ export type UploadTask = {
   absPath: string;
   /** Destination workspace. */
   workspaceId: string;
+  /** Identity context owning the workspace (`personal` / `org:<id>`). */
+  identityKey?: string;
   /** Target folder id, or null for the workspace root. */
   folderId: string | null;
   /** Folder prefix inside the target folder (`''` for the root). */

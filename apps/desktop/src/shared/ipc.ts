@@ -269,6 +269,14 @@ export type SettingsSectionId =
   | 'developer';
 
 /**
+ * Storage-hub section ids. Declared here for the same reason as
+ * `SettingsSectionId`: the `openStorage` deep-link crosses the main↔renderer
+ * boundary and the preload must type the forwarded section without importing
+ * renderer code. `renderer/components/storage-hub/sections.ts` re-uses this type.
+ */
+export type StorageHubSectionId = 'browse' | 'mounts' | 'sync' | 'folders' | 'access';
+
+/**
  * Non-secret desktop UI preferences. `locale` is validated by the renderer
  * against the locales it ships; an unknown value falls back to the OS locale.
  */
@@ -1246,6 +1254,12 @@ export type WorkspaceRoot = {
   label: string;
   path: string;
   mode: WorkspaceMode;
+  /**
+   * Desktop contact ids allowed to use this root; `['*']` (or missing, for
+   * installs persisted before the ACL) grants every agent. An empty array grants
+   * nobody.
+   */
+  agentContactIds?: string[];
 };
 
 export type LocalCommandVariant = {
@@ -1273,15 +1287,37 @@ export type ToolsConfig = {
   localCommands: LocalCommandSkill[];
 };
 
+/** One workspace root that covers a queried path, with the agents it grants. */
+export type AccessGrantRow = {
+  rootId: string;
+  label: string;
+  path: string;
+  mode: WorkspaceMode;
+  /** True when the root grants every agent (`*`). */
+  everyone: boolean;
+  /** Explicit contact ids; empty when `everyone` is set. */
+  agentContactIds: string[];
+};
+
+/** Result of `toolsPreviewAccess`: which roots cover a path and whom they grant. */
+export type AccessPreview = {
+  path: string;
+  granted: AccessGrantRow[];
+  /** False when the path is outside every allowed root (no agent can reach it). */
+  reachable: boolean;
+};
+
+export type AccessPreviewInput = { path: string };
+
 export type ToolInvocation = {
   name: string;
   [k: string]: unknown;
   /**
-   * Which agent requested the call, and the conversation it belongs to. Sent by
-   * the renderer tool bridge purely so the main process can correlate the audit
-   * entry with a conversation. **These are audit metadata only** — they grant no
-   * authority and are never used for policy. Both are optional; a call made
-   * outside a chat turn simply records `null`.
+   * Which agent requested the call, and the conversation it belongs to. The
+   * `agentId` (desktop contact id) is **authoritative for policy**: it selects
+   * which workspace roots the call may touch (per-agent ACL). `conversationId`
+   * is audit/correlation only. Both are optional; a call made outside a chat turn
+   * records `null` and is denied filesystem access (fail closed).
    */
   agentId?: string | null;
   conversationId?: string | null;
@@ -1344,6 +1380,25 @@ export type StorageWorkspaceRow = {
   ownerUserId: string | null;
   orgId: string | null;
   memberUserIds: string[];
+  /**
+   * Identity context this workspace was listed under (`personal` or `org:<id>`),
+   * used to route later file operations back to the same token/identity. Optional
+   * so a preload older than the main build still deserializes.
+   */
+  identityKey?: string;
+  /** True when the workspace belongs to an organisation (has an `orgId`). */
+  isOrg?: boolean;
+  /**
+   * Human organisation name, denormalised from the membership list so an org
+   * workspace can be badged without a second lookup. `null` for personal rows.
+   */
+  orgName?: string | null;
+  /**
+   * Raw org logo value (unresolved) from `anx.organization.membership.list`. The
+   * renderer absolutises it against the gateway/region base URL. `null` when the
+   * org has no logo.
+   */
+  orgLogo?: string | null;
 };
 
 export type StorageFileRow = {
@@ -1426,6 +1481,8 @@ export type StorageUploadRequest = {
   contentType: string;
   /** Base64 payload (the renderer reads the file via the File API). */
   base64Data: string;
+  /** Identity context that owns the workspace (routes the upload's token). */
+  identityKey?: string;
 };
 
 // ─── Phase: drag-and-drop transfer (upload queue + save/drag-out) ───────────
@@ -1446,6 +1503,8 @@ export type StorageUploadOneRequest = {
   /** Renderer-generated id; also the key for progress + cancel. */
   transferId: string;
   workspaceId: string;
+  /** Identity context that owns the workspace (routes the transfer's token). */
+  identityKey?: string;
   /** Folder id to upload into; `null`/omitted means the workspace root. */
   folderId?: string | null;
   /** Workspace-relative folder prefix to materialize (`''` = target folder). */
@@ -1539,6 +1598,8 @@ export type StorageSyncBindingRow = {
   id: string;
   name: string;
   workspaceId: string;
+  /** Identity context the workspace belongs to (`personal` / `org:<id>`). */
+  identityKey?: string | null;
   workspaceName: string | null;
   remoteFolderId: string | null;
   remoteFolderPath: string;
@@ -1563,6 +1624,8 @@ export type StorageSyncBindingInput = {
   enabled?: boolean;
   intervalSeconds?: number;
   exclude?: string[];
+  /** Identity context owning the workspace; routes the sync's token. */
+  identityKey?: string;
 };
 
 export type StorageSyncActionRow = {
@@ -1607,9 +1670,17 @@ export type StorageRemoteFolderRow = {
 export type MountDeliveryMode = 'kernel' | 'mirror';
 export type MountStateName = 'stopped' | 'starting' | 'mounted' | 'degraded' | 'error';
 
+/** Units "expires after" offers (minutes / hours / days / weeks). */
+export type MountLifetimeUnit = 'minutes' | 'hours' | 'days' | 'weeks';
+
+/** A relative mount lifetime; the daemon derives `expiresAt` from it. */
+export type MountExpiry = { value: number; unit: MountLifetimeUnit };
+
 export type MountSessionRow = {
   id: string;
   workspaceId: string;
+  /** Identity context the workspace belongs to (`personal` / `org:<id>`). */
+  identityKey?: string | null;
   workspaceName: string | null;
   remoteFolderId: string | null;
   remoteFolderPath: string;
@@ -1620,6 +1691,12 @@ export type MountSessionRow = {
   cacheDir: string;
   journalPath: string;
   volumeName: string;
+  /** Relative lifetime, or null for "until stopped". */
+  expiresAfter: MountExpiry | null;
+  /** Absolute instant derived from `expiresAfter` while mounted. */
+  expiresAt: string | null;
+  /** Re-mount this session on the next app start. */
+  persistAcrossRestarts: boolean;
   createdAt: string;
   updatedAt: string;
   error: string | null;
@@ -1633,6 +1710,10 @@ export type MountSessionInput = {
   mode?: 'read-only' | 'read-write';
   volumeName?: string;
   delivery?: MountDeliveryMode;
+  expiresAfter?: MountExpiry | null;
+  persistAcrossRestarts?: boolean;
+  /** Identity context owning the workspace; routes the mount's token. */
+  identityKey?: string;
 };
 
 export type MountCapabilitiesRow = {
@@ -1837,6 +1918,12 @@ export type NexusBridge = {
   getToolsConfig(): Promise<ToolsConfig>;
   setWorkspaces(workspaces: WorkspaceRoot[]): Promise<ToolsConfig>;
   setLocalCommands(commands: LocalCommandSkill[]): Promise<ToolsConfig>;
+  /**
+   * Preview which workspace roots cover `path` and which agents each grants
+   * ("which agents have access to this storage / path / workspace"). Pure read;
+   * the same catalog the sandbox uses, so the preview cannot over-claim.
+   */
+  toolsPreviewAccess(input: AccessPreviewInput): Promise<AccessPreview>;
   runTool(req: ToolInvocation): Promise<ToolInvocationResult>;
   /**
    * **Read-only** client-tool audit trail. The store is written exclusively by
@@ -1873,17 +1960,19 @@ export type NexusBridge = {
     search?: string;
     status?: string;
     limit?: number;
+    /** Identity context owning the workspace; routes the token/identity. */
+    identityKey?: string;
   }): Promise<StoragePage>;
-  storageCapabilities(kind?: string): Promise<StorageCapabilities>;
+  storageCapabilities(kind?: string, identityKey?: string): Promise<StorageCapabilities>;
   storageUpload(req: StorageUploadRequest): Promise<StorageFileRow>;
-  storageDownloadUrl(fileId: string): Promise<{ url: string; presigned: boolean }>;
+  storageDownloadUrl(fileId: string, identityKey?: string): Promise<{ url: string; presigned: boolean }>;
   // Bucket revision management (Phase 3).
-  storageListRevisions(fileId: string, limit?: number): Promise<StorageRevisionPage>;
-  storageRevertRevision(fileId: string, revisionNo: number): Promise<{ revertedTo: number; revisionNo: number }>;
-  storageTrashFile(fileId: string): Promise<void>;
-  storageRestoreFile(fileId: string): Promise<void>;
-  storageRenameFile(fileId: string, newName: string): Promise<void>;
-  storageMoveFile(fileId: string, targetFolderId: string | null): Promise<void>;
+  storageListRevisions(fileId: string, limit?: number, identityKey?: string): Promise<StorageRevisionPage>;
+  storageRevertRevision(fileId: string, revisionNo: number, identityKey?: string): Promise<{ revertedTo: number; revisionNo: number }>;
+  storageTrashFile(fileId: string, identityKey?: string): Promise<void>;
+  storageRestoreFile(fileId: string, identityKey?: string): Promise<void>;
+  storageRenameFile(fileId: string, newName: string, identityKey?: string): Promise<void>;
+  storageMoveFile(fileId: string, targetFolderId: string | null, identityKey?: string): Promise<void>;
   // Drag-and-drop transfer: folder expansion, per-file uploads with real
   // progress, cancel, and save/drag-out. All bytes are moved by the main
   // process; the renderer only sends paths.
@@ -1897,21 +1986,22 @@ export type NexusBridge = {
     listener: (progress: StorageTransferProgress) => void,
   ): () => void;
   /** Materialize a fetchable download URL (presigned GET or the proxy). */
-  storageDownloadLink(fileId: string): Promise<StorageDownloadLink>;
+  storageDownloadLink(fileId: string, identityKey?: string): Promise<StorageDownloadLink>;
   /** Save one file to a path chosen via the native dialog (streams to disk). */
-  storageSaveFile(fileId: string, suggestedName: string): Promise<StorageSaveResult>;
+  storageSaveFile(fileId: string, suggestedName: string, identityKey?: string): Promise<StorageSaveResult>;
   /** Pick a directory, then save many files into it (native dialog). */
   storageSaveFilesToDir(
     files: Array<{ fileId: string; name: string }>,
+    identityKey?: string,
   ): Promise<{ saved: number; cancelled: boolean; dir: string | null }>;
   /** Stage a file into app temp storage for an OS drag-out; returns its path. */
-  storagePrepareDrag(fileId: string, name: string): Promise<{ path: string | null; error?: string; name?: string }>;
+  storagePrepareDrag(fileId: string, name: string, identityKey?: string): Promise<{ path: string | null; error?: string; name?: string }>;
   /** Start an OS drag-out of a staged file (called on `dragstart`). */
-  storageStartDrag(fileId: string, name: string): Promise<void>;
+  storageStartDrag(fileId: string, name: string, identityKey?: string): Promise<void>;
   /** Clean up temp files staged for a drag-out (called on `dragend`). */
   storageReleaseDrag(fileId: string): Promise<void>;
   /** Fetch real bytes for an inline image/PDF preview (bounded; streams in main). */
-  storagePreviewBytes(fileId: string): Promise<StoragePreviewBytes>;
+  storagePreviewBytes(fileId: string, identityKey?: string): Promise<StoragePreviewBytes>;
   /**
    * Absolute OS path for a dropped `File`. Electron 32+ removed the `file.path`
    * property; `webUtils.getPathForFile` (preload-only) is the supported API and
@@ -1920,7 +2010,7 @@ export type NexusBridge = {
   getPathForFile(file: File): string;
   // Bucket-subdir <-> local-dir multi-sync (Phase 3).
   syncGetState(): Promise<StorageSyncState>;
-  syncListRemoteFolders(workspaceId: string): Promise<StorageRemoteFolderRow[]>;
+  syncListRemoteFolders(workspaceId: string, identityKey?: string): Promise<StorageRemoteFolderRow[]>;
   syncAddBinding(input: StorageSyncBindingInput): Promise<StorageSyncState>;
   syncUpdateBinding(id: string, patch: Partial<StorageSyncBindingInput>): Promise<StorageSyncState>;
   syncRemoveBinding(id: string): Promise<StorageSyncState>;
@@ -2120,6 +2210,13 @@ export type NexusBridge = {
   openSettings(section?: SettingsSectionId | null): Promise<boolean>;
   /** Subscribe to that request in the main shell window. Returns an unsubscribe fn. */
   onOpenSettings(listener: (section: SettingsSectionId | null) => void): () => void;
+  /**
+   * Ask the main shell window to open its Storage hub (a companion or another
+   * window can deep-link straight to one section). Resolves true when delivered.
+   */
+  openStorage(section?: StorageHubSectionId | null): Promise<boolean>;
+  /** Subscribe to that request in the main shell window. Returns an unsubscribe fn. */
+  onOpenStorage(listener: (section: StorageHubSectionId | null) => void): () => void;
   // Desktop calendar (Phase 7b).
   calendarListEvents(input?: CalendarListInput): Promise<CalendarEventRow[]>;
   calendarUpcoming(): Promise<CalendarEventRow[]>;
@@ -2234,6 +2331,7 @@ export const IPC = {
   toolsGet: 'nexus:tools:get',
   toolsSetWorkspaces: 'nexus:tools:set-workspaces',
   toolsSetLocalCommands: 'nexus:tools:set-local-commands',
+  toolsPreviewAccess: 'nexus:tools:preview-access',
   toolsRun: 'nexus:tools:run',
   auditSnapshot: 'nexus:audit:snapshot',
   auditSetRetention: 'nexus:audit:set-retention',
@@ -2383,6 +2481,7 @@ export const IPC = {
   localAvatarsSetDefault: 'nexus:local-avatars:set-default',
   /** Companion/child window → main shell: open the Settings surface. */
   openSettings: 'nexus:shell:open-settings',
+  openStorage: 'nexus:shell:open-storage',
   calendarListEvents: 'nexus:calendar:list-events',
   calendarUpcoming: 'nexus:calendar:upcoming',
   calendarCreateEvent: 'nexus:calendar:create-event',

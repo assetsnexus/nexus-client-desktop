@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import { IPC, type CertificatePromptInfo, type CompanionAction, type CompanionCursorCoords, type CompanionPresent, type CompanionSessionView, type CompanionSttOwner, type CompanionTitleReport, type CompanionToolPresence, type CompanionToolSnapshot, type CompanionToolSync, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress, type SettingsSectionId } from '../shared/ipc.js';
+import { IPC, type CertificatePromptInfo, type CompanionAction, type CompanionCursorCoords, type CompanionPresent, type CompanionSessionView, type CompanionSttOwner, type CompanionTitleReport, type CompanionToolPresence, type CompanionToolSnapshot, type CompanionToolSync, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress, type SettingsSectionId, type StorageHubSectionId } from '../shared/ipc.js';
 
 const bridge: NexusBridge = {
   getVersion: () => ipcRenderer.invoke(IPC.version),
@@ -100,6 +100,7 @@ const bridge: NexusBridge = {
   getToolsConfig: () => ipcRenderer.invoke(IPC.toolsGet),
   setWorkspaces: (workspaces) => ipcRenderer.invoke(IPC.toolsSetWorkspaces, workspaces),
   setLocalCommands: (commands) => ipcRenderer.invoke(IPC.toolsSetLocalCommands, commands),
+  toolsPreviewAccess: (input) => ipcRenderer.invoke(IPC.toolsPreviewAccess, input),
   runTool: (req) => ipcRenderer.invoke(IPC.toolsRun, req),
   // Read-only audit trail + the configurable retention setting. No mutation
   // channel exists (see `shared/ipc.ts`); the store is main-process only.
@@ -118,16 +119,16 @@ const bridge: NexusBridge = {
   storageFolderList: (workspaceId, parentFolderId) =>
     ipcRenderer.invoke(IPC.storageFolderList, workspaceId, parentFolderId),
   storageListFiles: (input) => ipcRenderer.invoke(IPC.storageListFiles, input),
-  storageCapabilities: (kind) => ipcRenderer.invoke(IPC.storageCapabilities, kind),
+  storageCapabilities: (kind, identityKey) => ipcRenderer.invoke(IPC.storageCapabilities, kind, identityKey),
   storageUpload: (req) => ipcRenderer.invoke(IPC.storageUpload, req),
-  storageDownloadUrl: (fileId) => ipcRenderer.invoke(IPC.storageDownloadUrl, fileId),
-  storageListRevisions: (fileId, limit) => ipcRenderer.invoke(IPC.storageListRevisions, fileId, limit),
-  storageRevertRevision: (fileId, revisionNo) => ipcRenderer.invoke(IPC.storageRevertRevision, fileId, revisionNo),
-  storageTrashFile: (fileId) => ipcRenderer.invoke(IPC.storageTrashFile, fileId),
-  storageRestoreFile: (fileId) => ipcRenderer.invoke(IPC.storageRestoreFile, fileId),
-  storageRenameFile: (fileId, newName) => ipcRenderer.invoke(IPC.storageRenameFile, fileId, newName),
-  storageMoveFile: (fileId, targetFolderId) =>
-    ipcRenderer.invoke(IPC.storageMoveFile, fileId, targetFolderId),
+  storageDownloadUrl: (fileId, identityKey) => ipcRenderer.invoke(IPC.storageDownloadUrl, fileId, identityKey),
+  storageListRevisions: (fileId, limit, identityKey) => ipcRenderer.invoke(IPC.storageListRevisions, fileId, limit, identityKey),
+  storageRevertRevision: (fileId, revisionNo, identityKey) => ipcRenderer.invoke(IPC.storageRevertRevision, fileId, revisionNo, identityKey),
+  storageTrashFile: (fileId, identityKey) => ipcRenderer.invoke(IPC.storageTrashFile, fileId, identityKey),
+  storageRestoreFile: (fileId, identityKey) => ipcRenderer.invoke(IPC.storageRestoreFile, fileId, identityKey),
+  storageRenameFile: (fileId, newName, identityKey) => ipcRenderer.invoke(IPC.storageRenameFile, fileId, newName, identityKey),
+  storageMoveFile: (fileId, targetFolderId, identityKey) =>
+    ipcRenderer.invoke(IPC.storageMoveFile, fileId, targetFolderId, identityKey),
   // Drag-and-drop transfer. `onStorageTransferProgress` pairs with main's
   // `IPC.storageTransferProgress` push so the renderer sees real byte counts.
   storageExpandDrop: (paths) => ipcRenderer.invoke(IPC.storageExpandDrop, paths),
@@ -138,20 +139,20 @@ const bridge: NexusBridge = {
     ipcRenderer.on(IPC.storageTransferProgress, handler);
     return () => ipcRenderer.removeListener(IPC.storageTransferProgress, handler);
   },
-  storageDownloadLink: (fileId) => ipcRenderer.invoke(IPC.storageDownloadLink, fileId),
-  storageSaveFile: (fileId, suggestedName) => ipcRenderer.invoke(IPC.storageSaveFile, fileId, suggestedName),
-  storageSaveFilesToDir: (files) => ipcRenderer.invoke(IPC.storageSaveFilesToDir, files),
-  storagePrepareDrag: (fileId, name) => ipcRenderer.invoke(IPC.storagePrepareDrag, fileId, name),
-  storageStartDrag: (fileId, name) => ipcRenderer.invoke(IPC.storageStartDrag, fileId, name),
+  storageDownloadLink: (fileId, identityKey) => ipcRenderer.invoke(IPC.storageDownloadLink, fileId, identityKey),
+  storageSaveFile: (fileId, suggestedName, identityKey) => ipcRenderer.invoke(IPC.storageSaveFile, fileId, suggestedName, identityKey),
+  storageSaveFilesToDir: (files, identityKey) => ipcRenderer.invoke(IPC.storageSaveFilesToDir, files, identityKey),
+  storagePrepareDrag: (fileId, name, identityKey) => ipcRenderer.invoke(IPC.storagePrepareDrag, fileId, name, identityKey),
+  storageStartDrag: (fileId, name, identityKey) => ipcRenderer.invoke(IPC.storageStartDrag, fileId, name, identityKey),
   storageReleaseDrag: (fileId) => ipcRenderer.invoke(IPC.storageReleaseDrag, fileId),
-  storagePreviewBytes: (fileId) => ipcRenderer.invoke(IPC.storagePreviewBytes, fileId),
+  storagePreviewBytes: (fileId, identityKey) => ipcRenderer.invoke(IPC.storagePreviewBytes, fileId, identityKey),
   // Electron 32+ removed the `File.path` augmentation; `webUtils.getPathForFile`
   // is the supported replacement and only exists in the (preload) renderer
   // process, so it is exposed here rather than read directly by the sandboxed
   // renderer. This is the pattern from Electron's own 32.x migration guide.
   getPathForFile: (file) => webUtils.getPathForFile(file),
   syncGetState: () => ipcRenderer.invoke(IPC.syncGetState),
-  syncListRemoteFolders: (workspaceId) => ipcRenderer.invoke(IPC.syncListRemoteFolders, workspaceId),
+  syncListRemoteFolders: (workspaceId, identityKey) => ipcRenderer.invoke(IPC.syncListRemoteFolders, workspaceId, identityKey),
   syncAddBinding: (input) => ipcRenderer.invoke(IPC.syncAddBinding, input),
   syncUpdateBinding: (id, patch) => ipcRenderer.invoke(IPC.syncUpdateBinding, id, patch),
   syncRemoveBinding: (id) => ipcRenderer.invoke(IPC.syncRemoveBinding, id),
@@ -260,6 +261,12 @@ const bridge: NexusBridge = {
     const handler = (_e: unknown, section?: SettingsSectionId | null) => listener(section ?? null);
     ipcRenderer.on(IPC.openSettings, handler);
     return () => ipcRenderer.removeListener(IPC.openSettings, handler);
+  },
+  openStorage: (section) => ipcRenderer.invoke(IPC.openStorage, section),
+  onOpenStorage: (listener) => {
+    const handler = (_e: unknown, section?: StorageHubSectionId | null) => listener(section ?? null);
+    ipcRenderer.on(IPC.openStorage, handler);
+    return () => ipcRenderer.removeListener(IPC.openStorage, handler);
   },
   calendarListEvents: (input) => ipcRenderer.invoke(IPC.calendarListEvents, input),
   calendarUpcoming: () => ipcRenderer.invoke(IPC.calendarUpcoming),
