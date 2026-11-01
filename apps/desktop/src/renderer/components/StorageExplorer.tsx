@@ -15,6 +15,7 @@ import { useStoragePreview, useStorageThumbnails } from '../storage/use-storage-
 import { canThumbnail, previewKindFor } from '../../shared/storage-preview.js';
 import { StoragePreview } from './StoragePreview.js';
 import { UploadProgressPanel } from '../storage/UploadProgressPanel.js';
+import { LISTING_CACHE_TTL_MS, StorageListingCache, listingCacheKey } from '../storage/listing-cache.js';
 
 const panelStyle: CSSProperties = {
   height: '100%',
@@ -74,6 +75,20 @@ function formatBytes(n: number): string {
 type ViewMode = 'active' | 'trash';
 
 /**
+ * Placeholder row widths for the loading skeleton. Fixed widths (rather than a
+ * spinner) keep the pane's height stable across a workspace switch, so the list
+ * does not jump when the real rows arrive.
+ */
+const SKELETON_ROWS: readonly { width: string }[] = [
+  { width: '92%' },
+  { width: '78%' },
+  { width: '86%' },
+  { width: '64%' },
+  { width: '81%' },
+  { width: '72%' },
+];
+
+/**
  * Storage bucket explorer (Phase 2).
  *
  * Browses **every** Nexus storage workspace the signed-in user can reach — the
@@ -99,6 +114,34 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
   const [error, setError] = useState<string | null>(null);
   const [workspacesError, setWorkspacesError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * True only when there is nothing valid to paint for the current view. The
+   * pane shows skeleton rows for this, not for a background revalidation of a
+   * listing we already have on screen.
+   */
+  const [listingPending, setListingPending] = useState(false);
+  /**
+   * In-memory listing cache keyed by identity + workspace + folder + view +
+   * search. A hit paints instantly and revalidates in the background; a bust
+   * (Refresh) forces the network round trip. See `storage/listing-cache.ts`.
+   */
+  const listingCache = useRef(new StorageListingCache());
+  /**
+   * Monotonic id of the newest listing request. A response whose id no longer
+   * matches is dropped, so a slow reply for the previous workspace can never
+   * paint its rows under the workspace now selected.
+   */
+  const listingRequestId = useRef(0);
+  /** Cache key of the listing whose rows are currently painted. */
+  const displayedKey = useRef<string | null>(null);
+  /**
+   * Open file-browser context menu (viewport coordinates) or null. Right-click
+   * on the list background or a row opens it; the Refresh item busts the cache
+   * for the current view and reloads from the region.
+   */
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: StorageFileRow | null } | null>(
+    null,
+  );
   const [selected, setSelected] = useState<StorageFileRow | null>(null);
   const [revisions, setRevisions] = useState<StorageRevisionPage | null>(null);
   const [revisionsUnsupported, setRevisionsUnsupported] = useState(false);
@@ -161,8 +204,49 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
     }
   }, []);
 
+  /**
+   * List one view of a workspace.
+   *
+   * A cached listing paints **immediately** (so switching back to a workspace
+   * never flashes an empty pane) and, when still within its TTL, skips the
+   * network round trip entirely; a stale hit revalidates in the background while
+   * the cached rows stay on screen. With no cached listing the pane is cleared
+   * to skeleton rows before the request goes out — stale rows from the previous
+   * workspace are never left visible as if they belonged to the new one.
+   *
+   * `bust` (the Refresh action) skips the cache read and drops the entry, so the
+   * user's explicit reload always hits the region.
+   */
   const loadFiles = useCallback(
-    async (workspaceId: string, view: ViewMode, query: string, identityKey?: string) => {
+    async (
+      workspaceId: string,
+      view: ViewMode,
+      query: string,
+      identityKey?: string,
+      options?: { bust?: boolean },
+    ) => {
+      const key = listingCacheKey({ identityKey, workspaceId, view, search: query });
+      if (options?.bust) listingCache.current.delete(key);
+
+      const cached = options?.bust ? null : listingCache.current.peek(key);
+      if (cached) {
+        displayedKey.current = key;
+        setPage(cached.page);
+        setListingPending(false);
+        // A fresh cache hit is authoritative for its TTL: no request, no flicker.
+        if (Date.now() - cached.fetchedAt < LISTING_CACHE_TTL_MS) return;
+      } else if (displayedKey.current !== key) {
+        // A *different* view is on screen: clear it before the fetch so its rows
+        // are never shown as if they belonged to the workspace just selected.
+        displayedKey.current = key;
+        setPage(null);
+      }
+      // `listingPending` only decides whether the pane shows skeleton rows when
+      // there is nothing to paint; an in-place refresh of the view already on
+      // screen keeps its rows visible throughout.
+      setListingPending(true);
+
+      const requestId = (listingRequestId.current += 1);
       setBusy(true);
       setError(null);
       try {
@@ -173,11 +257,20 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
           limit: 50,
           identityKey,
         });
+        // Drop a reply that arrived after the user moved on (different
+        // workspace, folder, mode or search) — painting it would show the
+        // wrong workspace's files under the current selection.
+        if (requestId !== listingRequestId.current) return;
+        listingCache.current.write(key, next);
         setPage(next);
       } catch (err) {
+        if (requestId !== listingRequestId.current) return;
         setError(err instanceof Error ? err.message : 'failed to list files');
       } finally {
-        setBusy(false);
+        if (requestId === listingRequestId.current) {
+          setBusy(false);
+          setListingPending(false);
+        }
       }
     },
     [],
@@ -192,11 +285,16 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
   }, [activeIdentityKey]);
 
   useEffect(() => {
-    if (activeWorkspaceId) void loadFiles(activeWorkspaceId, mode, search, activeIdentityKey);
+    if (!activeWorkspaceId) {
+      setPage(null);
+      return;
+    }
+    void loadFiles(activeWorkspaceId, mode, search, activeIdentityKey);
   }, [activeWorkspaceId, mode, search, loadFiles, activeIdentityKey]);
 
+  /** Explicit reload: bust the current view's cache entry and refetch. */
   const refresh = useCallback(() => {
-    if (activeWorkspaceId) void loadFiles(activeWorkspaceId, mode, search, activeIdentityKey);
+    if (activeWorkspaceId) void loadFiles(activeWorkspaceId, mode, search, activeIdentityKey, { bust: true });
   }, [activeWorkspaceId, mode, search, loadFiles, activeIdentityKey]);
 
   // A dropped path list (files and/or folders) starts a queued batch upload.
@@ -421,6 +519,9 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
                 onClick={() => {
                   setActiveWorkspaceId(w.id);
                   setSelected(null);
+                  // A menu opened against the previous workspace must not linger
+                  // over the newly selected one.
+                  setContextMenu(null);
                 }}
                 style={{
                   ...btnStyle,
@@ -563,7 +664,19 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
                 </button>
               </>
             ) : null}
-            <button type="button" style={btnStyle} onClick={refresh} disabled={busy}>
+            {/*
+              Refresh busts this view's cache entry before refetching, so the
+              button is only disabled while the *first* load is in flight — a
+              background revalidation must not block the user's explicit reload.
+            */}
+            <button
+              type="button"
+              style={btnStyle}
+              data-testid="storage-refresh"
+              onClick={refresh}
+              disabled={!activeWorkspaceId || listingPending}
+              title="Reload this folder from the region (bypasses the local cache)"
+            >
               Refresh
             </button>
             {mode === 'active' && checkedFiles.length > 0 ? (
@@ -586,10 +699,45 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
 
           {error ? <p style={{ padding: '0 12px', color: '#f2a1a1', fontSize: 12 }}>{error}</p> : null}
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-            {items.length === 0 ? (
-              <p style={{ color: '#6b7784', padding: 12 }}>
-                {busy ? 'Loading…' : mode === 'trash' ? 'Trash is empty.' : 'No files yet.'}
+          <div
+            style={{ flex: 1, overflowY: 'auto', padding: 8 }}
+            data-testid="storage-file-list"
+            onContextMenu={(e) => {
+              // Right-click on empty pane space (not a row) opens the folder
+              // menu, whose Refresh item busts the cache for this view.
+              e.preventDefault();
+              setContextMenu({ x: e.clientX, y: e.clientY, file: null });
+            }}
+          >
+            {/*
+              Loading is a *pane* state, not a footnote: while the first listing
+              for the current workspace/view is in flight the rows are replaced
+              by skeleton placeholders, so no row from the previous workspace is
+              ever left on screen looking like part of the new one. A background
+              revalidation of a cached listing keeps the real rows visible.
+            */}
+            {items.length === 0 && listingPending ? (
+              <div data-testid="storage-listing-skeleton" aria-busy="true" style={{ padding: 4 }}>
+                <span style={{ color: '#6b7784', fontSize: 12, display: 'block', padding: '0 8px 8px' }}>
+                  Loading files…
+                </span>
+                {SKELETON_ROWS.map((row) => (
+                  <div
+                    key={row.width}
+                    style={{
+                      height: 34,
+                      marginBottom: 4,
+                      borderRadius: 8,
+                      background: 'linear-gradient(90deg, #161d25 0%, #1d2732 50%, #161d25 100%)',
+                      width: row.width,
+                    }}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {items.length === 0 && !listingPending ? (
+              <p data-testid="storage-listing-empty" style={{ color: '#6b7784', padding: 12 }}>
+                {mode === 'trash' ? 'Trash is empty.' : 'No files yet.'}
               </p>
             ) : null}
             {items.map((f) => (
@@ -599,6 +747,12 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
                 onMouseEnter={() => downloads.warmDrag({ id: f.id, name: f.name }, activeIdentityKey)}
                 onDragStart={(e) => downloads.onDragStart(e, { id: f.id, name: f.name }, activeIdentityKey)}
                 onDragEnd={() => downloads.onDragEnd({ id: f.id, name: f.name })}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  // Stop the pane-level handler replacing this row's menu.
+                  e.stopPropagation();
+                  setContextMenu({ x: e.clientX, y: e.clientY, file: f });
+                }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -843,6 +997,79 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
           </aside>
         )}
       </div>
+
+      {/*
+        File-browser context menu. Rendered at the root so it escapes the
+        scroll container's clipping; a transparent full-screen backdrop closes
+        it on any click/scroll/Escape, which is the standard desktop behaviour
+        and keeps the menu from leaking across sections.
+      */}
+      {contextMenu ? (
+        <>
+          <div
+            data-testid="storage-context-backdrop"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenu(null);
+            }}
+            style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+          />
+          <div
+            role="menu"
+            data-testid="storage-context-menu"
+            style={{
+              position: 'fixed',
+              top: contextMenu.y,
+              left: contextMenu.x,
+              zIndex: 41,
+              minWidth: 190,
+              padding: 4,
+              borderRadius: 8,
+              border: '1px solid #3a4654',
+              background: '#161d25',
+              boxShadow: '0 12px 28px rgba(0,0,0,0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            {contextMenu.file ? (
+              <div style={{ padding: '6px 10px', color: '#8a97a5', fontSize: 11 }}>
+                {contextMenu.file.name}
+              </div>
+            ) : (
+              <div style={{ padding: '6px 10px', color: '#8a97a5', fontSize: 11 }}>
+                {activeWorkspace?.name ?? 'This folder'}
+              </div>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="storage-context-refresh"
+              style={{ ...btnStyle, border: 'none', textAlign: 'left', background: 'transparent' }}
+              onClick={() => {
+                setContextMenu(null);
+                refresh();
+              }}
+            >
+              Refresh
+            </button>
+            {contextMenu.file ? (
+              <button
+                type="button"
+                role="menuitem"
+                style={{ ...btnStyle, border: 'none', textAlign: 'left', background: 'transparent' }}
+                onClick={() => {
+                  setContextMenu(null);
+                  setSelected(contextMenu.file);
+                }}
+              >
+                Details
+              </button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
 
       <UploadProgressPanel
         snapshot={uploads.snapshot}

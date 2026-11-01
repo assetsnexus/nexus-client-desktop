@@ -229,3 +229,168 @@ describe('storage explorer workspace rail', () => {
     expect(workspaceButton('w-acme')).toBeTruthy();
   });
 });
+
+function fileRow(id: string, name: string) {
+  return {
+    id,
+    name,
+    mimeType: 'text/plain',
+    sizeBytes: 12,
+    status: 'active',
+    workspaceId: null,
+    folderId: null,
+    encryptionTier: 'none',
+    createdAt: null,
+    revisionNo: 1,
+  };
+}
+
+function pageOf(items: ReturnType<typeof fileRow>[]) {
+  return { items, total: items.length, nextCursor: null, encryptionSummary: {} };
+}
+
+function listRowNames(): string[] {
+  const list = container!.querySelector('[data-testid="storage-file-list"]');
+  if (!list) return [];
+  return Array.from(list.querySelectorAll('span'))
+    .map((el) => (el.textContent ?? '').trim())
+    .filter((text) => text.endsWith('.txt'));
+}
+
+describe('storage explorer workspace switch: reload, loading and cache', () => {
+  it('reloads the bucket when a different workspace is selected', async () => {
+    await mount();
+    const callsBefore = h.listFiles.mock.calls.length;
+    expect(callsBefore).toBeGreaterThan(0);
+
+    await act(async () => {
+      workspaceButton('w-personal').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    expect(h.listFiles.mock.calls.length).toBe(callsBefore + 1);
+    expect(h.listFiles.mock.calls.at(-1)?.[0]).toMatchObject({ workspaceId: 'w-personal' });
+  });
+
+  it('clears the previous workspace rows and shows a loading skeleton while the switch loads', async () => {
+    // First workspace resolves immediately with a row; the second stays pending
+    // so we can observe the in-flight pane.
+    h.listFiles.mockResolvedValueOnce(pageOf([fileRow('f-acme', 'acme-notes.txt')]));
+    await mount();
+    expect(listRowNames()).toContain('acme-notes.txt');
+
+    let release: ((value: unknown) => void) | null = null;
+    h.listFiles.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    await act(async () => {
+      workspaceButton('w-personal').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    // Stale org rows are gone and the pane advertises its loading state.
+    expect(listRowNames()).not.toContain('acme-notes.txt');
+    expect(container!.querySelector('[data-testid="storage-listing-skeleton"]')).toBeTruthy();
+    // It is a loading state, not the empty state.
+    expect(container!.querySelector('[data-testid="storage-listing-empty"]')).toBeNull();
+
+    await act(async () => {
+      release?.(pageOf([fileRow('f-personal', 'personal-notes.txt')]));
+    });
+    await settle();
+
+    expect(container!.querySelector('[data-testid="storage-listing-skeleton"]')).toBeNull();
+    expect(listRowNames()).toContain('personal-notes.txt');
+  });
+
+  it('renders a cached listing instantly and skips the refetch within the TTL', async () => {
+    await mount();
+    const afterMount = h.listFiles.mock.calls.length;
+
+    // Switch away and straight back: the org listing was cached on first load.
+    await act(async () => {
+      workspaceButton('w-personal').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+    await act(async () => {
+      workspaceButton('w-acme').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    // Only the switch to the uncached personal workspace hit the region; the
+    // return to the cached org workspace was served from memory.
+    expect(h.listFiles.mock.calls.length).toBe(afterMount + 1);
+    expect(h.listFiles.mock.calls.at(-1)?.[0]).toMatchObject({ workspaceId: 'w-personal' });
+  });
+
+  it('busts the current view cache and reloads when Refresh is used', async () => {
+    await mount();
+    const beforeRefresh = h.listFiles.mock.calls.length;
+    const refresh = container!.querySelector('[data-testid="storage-refresh"]') as HTMLButtonElement | null;
+    expect(refresh, 'toolbar refresh button').toBeTruthy();
+
+    await act(async () => {
+      refresh!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    // An explicit refresh always goes back to the region, cache or not.
+    expect(h.listFiles.mock.calls.length).toBe(beforeRefresh + 1);
+    expect(h.listFiles.mock.calls.at(-1)?.[0]).toMatchObject({ workspaceId: 'w-acme' });
+  });
+
+  it('keys the cache by view mode as well as workspace, so Trash never reuses Files', async () => {
+    await mount();
+    const afterMount = h.listFiles.mock.calls.length;
+
+    const trash = Array.from(container!.querySelectorAll('button')).find(
+      (b) => (b.textContent ?? '').trim() === 'Trash',
+    );
+    expect(trash, 'trash toggle').toBeTruthy();
+    await act(async () => {
+      trash!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    // A different view of the same workspace is a different cache entry.
+    expect(h.listFiles.mock.calls.length).toBe(afterMount + 1);
+    expect(h.listFiles.mock.calls.at(-1)?.[0]).toMatchObject({ workspaceId: 'w-acme', status: 'deleted' });
+
+    const files = Array.from(container!.querySelectorAll('button')).find(
+      (b) => (b.textContent ?? '').trim() === 'Files',
+    );
+    await act(async () => {
+      files!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    // Returning to Files within the TTL is served from the cache: no refetch.
+    expect(h.listFiles.mock.calls.length).toBe(afterMount + 1);
+  });
+
+  it('exposes Refresh in the file-browser context menu too', async () => {
+    await mount();
+    const list = container!.querySelector('[data-testid="storage-file-list"]') as HTMLElement | null;
+    expect(list).toBeTruthy();
+
+    await act(async () => {
+      list!.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
+      );
+    });
+    await settle();
+
+    const item = container!.querySelector('[data-testid="storage-context-refresh"]') as HTMLButtonElement | null;
+    expect(item, 'context-menu refresh item').toBeTruthy();
+    const beforeRefresh = h.listFiles.mock.calls.length;
+
+    await act(async () => {
+      item!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    expect(h.listFiles.mock.calls.length).toBe(beforeRefresh + 1);
+  });
+});
