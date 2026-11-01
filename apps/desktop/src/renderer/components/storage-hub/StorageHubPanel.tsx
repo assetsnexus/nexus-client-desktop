@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useI18n } from '../../i18n/index.js';
 import { ErrorBoundary } from '../ErrorBoundary.js';
 import { AccessSection } from './AccessSection.js';
+import { AuditSection } from './AuditSection.js';
 import { CloudWorkspacesSection } from './CloudWorkspacesSection.js';
 import { DataRoomsSection } from './DataRoomsSection.js';
 import { FoldersSection } from './FoldersSection.js';
@@ -253,6 +254,7 @@ export function StorageHubPanel({
                   />
                 ) : null}
                 {active === 'access' ? <AccessSection /> : null}
+                {active === 'audit' ? <AuditSection /> : null}
               </StorageNavContext.Provider>
             </ErrorBoundary>
           </div>

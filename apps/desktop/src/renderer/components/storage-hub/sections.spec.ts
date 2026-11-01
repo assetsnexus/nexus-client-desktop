@@ -31,8 +31,17 @@ describe('STORAGE_NAV', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('keeps the pre-existing sections in their original order', () => {
-    expect(ids).toEqual(['browse', 'datarooms', 'workspaces', 'mounts', 'sync', 'folders', 'access']);
+  it('keeps the pre-existing sections in their original order and appends audit last', () => {
+    expect(ids).toEqual([
+      'browse',
+      'datarooms',
+      'workspaces',
+      'mounts',
+      'sync',
+      'folders',
+      'access',
+      'audit',
+    ]);
   });
 
   it('includes the two portal-managed collection sections', () => {
@@ -57,7 +66,9 @@ describe('STORAGE_NAV', () => {
   });
 
   it('translates both new section labels in every locale', () => {
-    for (const entry of STORAGE_NAV.filter((e) => e.id === 'datarooms' || e.id === 'workspaces')) {
+    for (const entry of STORAGE_NAV.filter(
+      (e) => e.id === 'datarooms' || e.id === 'workspaces' || e.id === 'audit',
+    )) {
       for (const [locale, dictionary] of Object.entries(DICTIONARIES)) {
         expect(
           dictionary[entry.labelKey],

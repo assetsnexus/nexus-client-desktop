@@ -48,6 +48,9 @@ export const STORAGE_NAV: readonly StorageNavEntry[] = [
   { id: 'sync', labelKey: 'storage.nav.sync', icon: '🔄', helpKey: 'storage.sync.help' },
   { id: 'folders', labelKey: 'storage.nav.folders', icon: '📁', helpKey: 'storage.folders.help' },
   { id: 'access', labelKey: 'storage.nav.access', icon: '🔑', helpKey: 'storage.access.help' },
+  // The audit rail sits last: it is a security-review surface rather than an
+  // everyday file view, so it reads as the end of the "advanced" half.
+  { id: 'audit', labelKey: 'storage.nav.audit', icon: '🛡️', helpKey: 'storage.audit.help' },
 ];
 
 export const DEFAULT_STORAGE_SECTION: StorageHubSectionId = 'browse';

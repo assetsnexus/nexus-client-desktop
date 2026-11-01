@@ -281,7 +281,8 @@ export type StorageHubSectionId =
   | 'mounts'
   | 'sync'
   | 'folders'
-  | 'access';
+  | 'access'
+  | 'audit';
 
 /**
  * Non-secret desktop UI preferences. `locale` is validated by the renderer
