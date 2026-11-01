@@ -263,6 +263,8 @@ const en = {
   'storage.nav.folders': 'Agent folders',
   'storage.nav.access': 'Access',
   'storage.browse.help': 'Browse and manage files in your Nexus storage buckets.',
+  'storage.browse.loadFailed': "Couldn't load this folder.",
+  'storage.browse.retry': 'Retry',
   'storage.mounts.help':
     'Make a bucket sub-directory appear as a local folder — with an optional lifetime and restart behaviour.',
   'storage.sync.help': 'Keep a bucket sub-directory and a local directory in step, automatically.',

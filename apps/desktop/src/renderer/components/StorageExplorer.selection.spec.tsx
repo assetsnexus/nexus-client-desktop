@@ -56,10 +56,13 @@ vi.mock('../bridge.js', () => ({
     getPathForFile: () => '/tmp/f.txt',
     getConnectionConfig: () => h.getConnectionConfig(),
     openExternal: (url: string) => h.openExternal(url),
+    getUiSettings: async () => ({ locale: 'en' }),
+    setUiSettings: async () => undefined,
   },
 }));
 
 import { StorageExplorer } from './StorageExplorer.js';
+import { I18nProvider } from '../i18n/index.js';
 import { StorageNavContext } from './storage-hub/sections.js';
 
 const PERSONAL = {
@@ -150,9 +153,13 @@ async function mount(): Promise<void> {
   await act(async () => {
     root!.render(
       createElement(
-        StorageNavContext.Provider,
-        { value: h.navigate },
-        createElement(StorageExplorer),
+        I18nProvider,
+        null,
+        createElement(
+          StorageNavContext.Provider,
+          { value: h.navigate },
+          createElement(StorageExplorer),
+        ),
       ),
     );
   });

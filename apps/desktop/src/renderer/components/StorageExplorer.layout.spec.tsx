@@ -53,10 +53,13 @@ vi.mock('../bridge.js', () => ({
     storageTransferCancel: async () => undefined,
     onStorageTransferProgress: () => () => undefined,
     getPathForFile: () => '/tmp/f.txt',
+    getUiSettings: async () => ({ locale: 'en' }),
+    setUiSettings: async () => undefined,
   },
 }));
 
 import { StorageExplorer } from './StorageExplorer.js';
+import { I18nProvider } from '../i18n/index.js';
 
 // jsdom has no object-URL implementation; a faithful in-memory stub lets the
 // hook build and revoke real `blob:` strings so we can assert what the `<img>`
@@ -131,7 +134,7 @@ afterEach(() => {
 /** Mount, let the workspaces + file list settle, then click a row by name. */
 async function mountAndSelect(name: string): Promise<void> {
   await act(async () => {
-    root!.render(createElement(StorageExplorer));
+    root!.render(createElement(I18nProvider, null, createElement(StorageExplorer)));
   });
   await act(async () => {
     await Promise.resolve();
@@ -225,7 +228,7 @@ describe('storage explorer two-pane layout', () => {
 
   it('keeps a coherent empty detail pane when nothing is selected', async () => {
     await act(async () => {
-      root!.render(createElement(StorageExplorer));
+      root!.render(createElement(I18nProvider, null, createElement(StorageExplorer)));
     });
     await act(async () => {
       await Promise.resolve();

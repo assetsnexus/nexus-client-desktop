@@ -30,6 +30,8 @@ const EN: Record<string, string> = {
   'storage.nav.folders': 'Agent folders',
   'storage.nav.access': 'Access',
   'storage.browse.help': 'Browse and manage files in your Nexus storage buckets.',
+  'storage.browse.loadFailed': "Couldn't load this folder.",
+  'storage.browse.retry': 'Retry',
   'storage.mounts.help':
     'Make a bucket sub-directory appear as a local folder — with an optional lifetime and restart behaviour.',
   'storage.sync.help': 'Keep a bucket sub-directory and a local directory in step, automatically.',
@@ -185,6 +187,8 @@ const OVERRIDES: Partial<Record<Locale, Record<string, string>>> = {
     'storage.nav.folders': 'Agenten-Ordner',
     'storage.nav.access': 'Zugriff',
     'storage.browse.help': 'Dateien in Ihren Nexus-Speicher-Buckets durchsuchen und verwalten.',
+    'storage.browse.loadFailed': 'Dieser Ordner konnte nicht geladen werden.',
+    'storage.browse.retry': 'Erneut versuchen',
     'storage.mounts.new': 'Neues Laufwerk',
     'storage.mounts.workspace': 'Bucket / Arbeitsbereich',
     'storage.mounts.folder': 'Bucket-Unterordner',

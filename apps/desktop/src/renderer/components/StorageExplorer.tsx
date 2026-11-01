@@ -30,6 +30,7 @@ import {
 } from '../storage/file-actions.js';
 import { absoluteStorageExplorerUrl, formatStorageReference } from '../../shared/storage-reference.js';
 import { useStorageNav } from './storage-hub/sections.js';
+import { useI18n } from '../i18n/index.js';
 import { callBridge } from '../bridge-compat.js';
 
 const panelStyle: CSSProperties = {
@@ -120,6 +121,7 @@ const SKELETON_ROWS: readonly { width: string }[] = [
  * @param baseUrl Region/gateway origin used to absolutise a relative org logo.
  */
 export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null }) {
+  const { t } = useI18n();
   /**
    * Section navigation provided by the storage hub. "Mount to system dir" jumps
    * to the existing Mounts section with the workspace/folder prefilled instead of
@@ -142,6 +144,13 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
    * listing we already have on screen.
    */
   const [listingPending, setListingPending] = useState(false);
+  /**
+   * Message of the last FAILED listing load, or null. Kept distinct from `error`
+   * (the generic explorer banner) so the file pane can tell a load that failed
+   * from a folder that is genuinely empty: a failure shows a retryable message,
+   * never the "No files yet." copy.
+   */
+  const [listingError, setListingError] = useState<string | null>(null);
   /**
    * In-memory listing cache keyed by identity + workspace + folder + view +
    * search. A hit paints instantly and revalidates in the background; a bust
@@ -272,6 +281,8 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
         displayedKey.current = key;
         setPage(cached.page);
         setListingPending(false);
+        // A cache hit is a valid listing, so it clears any previous failure.
+        setListingError(null);
         // A fresh cache hit is authoritative for its TTL: no request, no flicker.
         if (Date.now() - cached.fetchedAt < LISTING_CACHE_TTL_MS) return;
       } else if (displayedKey.current !== key) {
@@ -284,6 +295,9 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
       // there is nothing to paint; an in-place refresh of the view already on
       // screen keeps its rows visible throughout.
       setListingPending(true);
+      // A load is in flight for this view: drop the previous view's failure so a
+      // stale failure is never shown while the retry is running.
+      setListingError(null);
 
       const requestId = (listingRequestId.current += 1);
       setBusy(true);
@@ -303,9 +317,14 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
         if (requestId !== listingRequestId.current) return;
         listingCache.current.write(key, next);
         setPage(next);
+        setListingError(null);
       } catch (err) {
         if (requestId !== listingRequestId.current) return;
-        setError(err instanceof Error ? err.message : 'failed to list files');
+        const message = err instanceof Error ? err.message : 'failed to list files';
+        setError(message);
+        // Mark this view as FAILED, not empty: the pane must offer a retry
+        // rather than claim the folder has no files.
+        setListingError(message);
       } finally {
         if (requestId === listingRequestId.current) {
           setBusy(false);
@@ -327,6 +346,8 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
   useEffect(() => {
     if (!activeWorkspaceId) {
       setPage(null);
+      // No workspace open means there is no failed load either.
+      setListingError(null);
       return;
     }
     void loadFiles(activeWorkspaceId, mode, search, activeIdentityKey, { folderId });
@@ -1069,7 +1090,17 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
                   </div>
                 ))
               : null}
-            {items.length === 0 && !listingPending && !(mode === 'active' && folders.length) ? (
+            {items.length === 0 && !listingPending && listingError ? (
+              <div data-testid="storage-listing-error" style={{ padding: 12 }}>
+                <p style={{ color: '#f2a1a1', fontSize: 12, margin: '0 0 8px' }}>
+                  {t('storage.browse.loadFailed')}
+                </p>
+                <button type="button" style={btnStyle} data-testid="storage-listing-retry" onClick={refresh}>
+                  {t('storage.browse.retry')}
+                </button>
+              </div>
+            ) : null}
+            {items.length === 0 && !listingPending && !listingError && !(mode === 'active' && folders.length) ? (
               <p data-testid="storage-listing-empty" style={{ color: '#6b7784', padding: 12 }}>
                 {mode === 'trash' ? 'Trash is empty.' : 'No files yet.'}
               </p>

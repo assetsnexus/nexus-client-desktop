@@ -43,10 +43,13 @@ vi.mock('../bridge.js', () => ({
     storageTransferCancel: async () => undefined,
     onStorageTransferProgress: () => () => undefined,
     getPathForFile: () => '/tmp/f.txt',
+    getUiSettings: async () => ({ locale: 'en' }),
+    setUiSettings: async () => undefined,
   },
 }));
 
 import { StorageExplorer } from './StorageExplorer.js';
+import { I18nProvider } from '../i18n/index.js';
 
 const PERSONAL = {
   id: 'w-personal',
@@ -122,9 +125,13 @@ async function settle(): Promise<void> {
 async function mount(baseUrl?: string | null): Promise<void> {
   await act(async () => {
     root!.render(
-      baseUrl === undefined
-        ? createElement(StorageExplorer)
-        : createElement(StorageExplorer, { baseUrl }),
+      createElement(
+        I18nProvider,
+        null,
+        baseUrl === undefined
+          ? createElement(StorageExplorer)
+          : createElement(StorageExplorer, { baseUrl }),
+      ),
     );
   });
   await settle();
@@ -392,5 +399,83 @@ describe('storage explorer workspace switch: reload, loading and cache', () => {
     await settle();
 
     expect(h.listFiles.mock.calls.length).toBe(beforeRefresh + 1);
+  });
+});
+
+describe('storage explorer failed-vs-empty listing', () => {
+  it('shows a retryable failure state, never the empty copy, when the listing fails', async () => {
+    h.listFiles.mockRejectedValueOnce(new Error('Could not reach the region to list storage.'));
+    await mount();
+
+    const failure = container!.querySelector('[data-testid="storage-listing-error"]');
+    expect(failure, 'failure state').toBeTruthy();
+    expect((failure!.textContent ?? '')).toContain("Couldn't load this folder.");
+    // A failed load must never masquerade as an empty folder.
+    expect(container!.querySelector('[data-testid="storage-listing-empty"]')).toBeNull();
+    expect(container!.querySelector('[data-testid="storage-listing-retry"]')).toBeTruthy();
+  });
+
+  it('re-issues the listing and paints rows when Retry is clicked after a failure', async () => {
+    h.listFiles.mockRejectedValueOnce(new Error('Could not reach the region to list storage.'));
+    await mount();
+    const failedCalls = h.listFiles.mock.calls.length;
+
+    h.listFiles.mockResolvedValue(pageOf([fileRow('f-retry', 'retried-notes.txt')]));
+    const retry = container!.querySelector('[data-testid="storage-listing-retry"]') as HTMLButtonElement | null;
+    expect(retry, 'retry button').toBeTruthy();
+    await act(async () => {
+      retry!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    // Retry is a real reload (it busts the cache), not a no-op.
+    expect(h.listFiles.mock.calls.length).toBe(failedCalls + 1);
+    expect(listRowNames()).toContain('retried-notes.txt');
+    expect(container!.querySelector('[data-testid="storage-listing-error"]')).toBeNull();
+  });
+
+  it('still shows "No files yet." for a genuinely empty successful listing', async () => {
+    h.listFiles.mockResolvedValue(pageOf([]));
+    await mount();
+
+    const empty = container!.querySelector('[data-testid="storage-listing-empty"]');
+    expect(empty, 'empty state').toBeTruthy();
+    expect((empty!.textContent ?? '')).toContain('No files yet.');
+    expect(container!.querySelector('[data-testid="storage-listing-error"]')).toBeNull();
+  });
+
+  it('still shows "Trash is empty." for an empty trash folder', async () => {
+    h.listFiles.mockResolvedValue(pageOf([]));
+    await mount();
+
+    const trash = Array.from(container!.querySelectorAll('button')).find(
+      (b) => (b.textContent ?? '').trim() === 'Trash',
+    );
+    expect(trash, 'trash toggle').toBeTruthy();
+    await act(async () => {
+      trash!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    const empty = container!.querySelector('[data-testid="storage-listing-empty"]');
+    expect(empty, 'trash empty state').toBeTruthy();
+    expect((empty!.textContent ?? '')).toContain('Trash is empty.');
+    expect(container!.querySelector('[data-testid="storage-listing-error"]')).toBeNull();
+  });
+
+  it('clears a previous failure once a later load succeeds', async () => {
+    h.listFiles.mockRejectedValueOnce(new Error('Could not reach the region to list storage.'));
+    await mount();
+    expect(container!.querySelector('[data-testid="storage-listing-error"]')).toBeTruthy();
+
+    h.listFiles.mockResolvedValue(pageOf([fileRow('f-ok', 'recovered.txt')]));
+    const refresh = container!.querySelector('[data-testid="storage-refresh"]') as HTMLButtonElement | null;
+    await act(async () => {
+      refresh!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    expect(container!.querySelector('[data-testid="storage-listing-error"]')).toBeNull();
+    expect(listRowNames()).toContain('recovered.txt');
   });
 });
