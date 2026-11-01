@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { app } from 'electron';
 import { resolveConnectionConfig, type DesktopConnectionConfig } from '@nexus/node-core';
-import { DEFAULT_NOTIFICATION_SETTINGS, normalizeCompanionDebugSettings, normalizeCompanionAvatarSettings, DEFAULT_COMPANION_AVATAR_SETTINGS, normalizeCompanionPlacementSettings, DEFAULT_COMPANION_PLACEMENT_SETTINGS, normalizeContactOverrides, type NotificationSettings, type CompanionDebugSettings, type CompanionAvatarSettings, type CompanionPlacementSettings, type ContactOverrides } from '../shared/ipc.js';
+import { DEFAULT_NOTIFICATION_SETTINGS, normalizeCompanionDebugSettings, normalizeCompanionAvatarSettings, DEFAULT_COMPANION_AVATAR_SETTINGS, normalizeCompanionPlacementSettings, DEFAULT_COMPANION_PLACEMENT_SETTINGS, normalizeContactOverrides, normalizeVoiceModeSettings, DEFAULT_VOICE_MODE_SETTINGS, type NotificationSettings, type CompanionDebugSettings, type CompanionAvatarSettings, type CompanionPlacementSettings, type ContactOverrides, type VoiceModeSettings } from '../shared/ipc.js';
 import {
   DEFAULT_APP_DEFAULT_TTS,
   normalizeAppDefaultTts,
@@ -56,6 +56,8 @@ export type UiSettings = {
    * own; re-validated on every read.
    */
   appDefaultTts: AppDefaultTtsSettings;
+  /** Companion voice mode + interruption behaviour; re-validated on every read. */
+  voiceModes: VoiceModeSettings;
   /** Audio device preferences; re-validated on every read. */
   audio: AudioSettings;
 };
@@ -111,6 +113,7 @@ export function createSettingsStore(filePath?: string): SettingsStore {
       ),
       contactOverrides: normalizeContactOverrides(ui.contactOverrides),
       appDefaultTts: normalizeAppDefaultTts(ui.appDefaultTts ?? DEFAULT_APP_DEFAULT_TTS),
+      voiceModes: normalizeVoiceModeSettings(ui.voiceModes ?? DEFAULT_VOICE_MODE_SETTINGS),
       audio: normalizeAudioSettings(ui.audio ?? DEFAULT_AUDIO_SETTINGS),
     };
   };

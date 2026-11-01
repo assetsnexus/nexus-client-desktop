@@ -35,6 +35,11 @@ import type {
 } from './wake.js';
 import type { AppLockSettings, AppLockState } from './app-lock.js';
 import type { CompanionPlacementSettings } from './companion-placement.js';
+import {
+  DEFAULT_COMPANION_CAMERA,
+  normalizeCompanionCamera,
+  type CompanionCamera,
+} from './companion-camera.js';
 import type { ContactOverrides } from './contact-overrides.js';
 import type {
   NotificationListInput,
@@ -198,6 +203,25 @@ export type {
   PlacementRect,
 } from './companion-placement.js';
 export {
+  COMPANION_CAMERA_MAX_FOV_DEG,
+  COMPANION_CAMERA_MAX_M,
+  COMPANION_CAMERA_MAX_PITCH_DEG,
+  COMPANION_CAMERA_MIN_FOV_DEG,
+  COMPANION_CAMERA_MIN_M,
+  COMPANION_CAMERA_MIN_PITCH_DEG,
+  COMPANION_CAMERA_PRESET_IDS,
+  COMPANION_CAMERA_PRESETS,
+  DEFAULT_COMPANION_CAMERA,
+  companionCameraPose,
+  normalizeCompanionCamera,
+  resolveCompanionCamera,
+} from './companion-camera.js';
+export type {
+  CompanionCamera,
+  CompanionCameraPose,
+  CompanionCameraPreset,
+} from './companion-camera.js';
+export {
   NOTIFICATION_PRIORITIES,
   canUnmarkNotification,
   countUnread,
@@ -223,6 +247,26 @@ export type {
 } from './notifications.js';
 
 export type ConnectionConfigPatch = Partial<DesktopConnectionConfig>;
+
+/**
+ * Settings left-nav section ids. Declared here (not in the renderer) because the
+ * `openSettings` deep-link crosses the main↔renderer boundary and the preload
+ * must be able to type the forwarded section without importing renderer code.
+ * `renderer/components/settings/sections.ts` re-uses this type.
+ */
+export type SettingsSectionId =
+  | 'general'
+  | 'notifications'
+  | 'companion'
+  | 'agents'
+  | 'wake'
+  | 'voice'
+  | 'privacy'
+  | 'localAi'
+  | 'integrations'
+  | 'security'
+  | 'connection'
+  | 'developer';
 
 /**
  * Non-secret desktop UI preferences. `locale` is validated by the renderer
@@ -268,6 +312,8 @@ export type UiSettings = {
    * provider.
    */
   appDefaultTts: AppDefaultTtsSettings;
+  /** Companion conversation voice mode + how a new input interrupts speech. */
+  voiceModes: VoiceModeSettings;
   /** Audio device preferences: primary/allowed speakers + primary/wake microphones. */
   audio: AudioSettings;
 };
@@ -289,6 +335,12 @@ export type CompanionAvatarSettings = {
   gazeYawMaxDeg: number;
   /** Head/neck pitch cone toward the cursor, in degrees (default 22). */
   gazePitchMaxDeg: number;
+  /**
+   * Camera framing (face / bust / full-body / custom). Applied to the live 3D
+   * host on the flat stage and in the walkable scene, so a close-up or full-body
+   * shot is one setting rather than manual orbiting.
+   */
+  camera: CompanionCamera;
 };
 
 export const DEFAULT_COMPANION_AVATAR_SETTINGS: CompanionAvatarSettings = {
@@ -296,6 +348,7 @@ export const DEFAULT_COMPANION_AVATAR_SETTINGS: CompanionAvatarSettings = {
   clickNodGesture: 'nod',
   gazeYawMaxDeg: 30,
   gazePitchMaxDeg: 22,
+  camera: { ...DEFAULT_COMPANION_CAMERA },
 };
 
 /** Clamp helper for the finite-degree settings below. */
@@ -325,6 +378,7 @@ export function normalizeCompanionAvatarSettings(raw: unknown): CompanionAvatarS
       8,
       40,
     ),
+    camera: normalizeCompanionCamera(rec.camera),
   };
 };
 
@@ -487,6 +541,48 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   // Off by default: speaking every incoming message aloud is intrusive.
   speakMessages: false,
 };
+
+/**
+ * Companion conversation voice mode.
+ *
+ * `turns` is the batch turn-based rail (dictate → reply → text-to-speech), the
+ * default because it works with any speech model and needs no persistent
+ * connection. `realtime` is the duplex WebRTC call (continuous listening).
+ */
+export type VoiceMode = 'turns' | 'realtime';
+
+/**
+ * What a new user input does to in-flight speech.
+ *
+ * `skip_current` cancels only the utterance playing right now (the queued ones
+ * still play); `clear_queue` cancels everything, playing and pending; `off`
+ * lets speech finish even as the user types/sends.
+ */
+export type VoiceInterruptOnSend = 'skip_current' | 'clear_queue' | 'off';
+
+export type VoiceModeSettings = {
+  mode: VoiceMode;
+  /** What sending a message does to the speech queue. */
+  interruptOnSend: VoiceInterruptOnSend;
+};
+
+export const DEFAULT_VOICE_MODE_SETTINGS: VoiceModeSettings = {
+  // Turn-based by default: no persistent call, and it degrades to plain text.
+  mode: 'turns',
+  // The least surprising default: stop what is playing, keep the rest queued.
+  interruptOnSend: 'skip_current',
+};
+
+export function normalizeVoiceModeSettings(raw: unknown): VoiceModeSettings {
+  const r = (raw ?? {}) as Partial<Record<keyof VoiceModeSettings, unknown>>;
+  return {
+    mode: r.mode === 'realtime' ? 'realtime' : 'turns',
+    interruptOnSend:
+      r.interruptOnSend === 'clear_queue' || r.interruptOnSend === 'off'
+        ? r.interruptOnSend
+        : 'skip_current',
+  };
+}
 
 /** What the renderer reports to main about an inbound message. */
 export type DesktopNotificationPayload = {
@@ -2017,10 +2113,13 @@ export type NexusBridge = {
    * Ask the main shell window to open its Settings surface (the gallery links
    * here to configure client-remembered agent ↔ avatar mappings). Resolves true
    * when the request was delivered.
+   *
+   * `section` deep-links straight to one nav section (e.g. a companion warning
+   * sending the user to the voice/TTS config) instead of the default section.
    */
-  openSettings(): Promise<boolean>;
+  openSettings(section?: SettingsSectionId | null): Promise<boolean>;
   /** Subscribe to that request in the main shell window. Returns an unsubscribe fn. */
-  onOpenSettings(listener: () => void): () => void;
+  onOpenSettings(listener: (section: SettingsSectionId | null) => void): () => void;
   // Desktop calendar (Phase 7b).
   calendarListEvents(input?: CalendarListInput): Promise<CalendarEventRow[]>;
   calendarUpcoming(): Promise<CalendarEventRow[]>;

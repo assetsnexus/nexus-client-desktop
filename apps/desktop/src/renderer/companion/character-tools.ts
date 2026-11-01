@@ -68,6 +68,17 @@ export type CompanionStageHost = CharacterToolHostLike & {
   /** Click nod (configurable gesture) enable / pick. */
   setClickAck?: (opts: { enabled?: boolean; gesture?: string }) => unknown;
   /**
+   * Camera framing preset (face / bust / full-body / custom). Numbers are
+   * derived from `shared/companion-camera.ts` and passed through, so neither the
+   * library nor this pack carries a preset table.
+   */
+  setCameraPreset?: (pose?: {
+    distanceM?: number;
+    heightM?: number;
+    pitchRad?: number;
+    fovDeg?: number;
+  } | null) => unknown;
+  /**
    * Hard-reset the avatar to its idle rest pose: halts any clip still holding
    * weight and snaps the skeleton back to a relaxed stance. Wired to the scene
    * context menu's "Reset pose" escape hatch and safe to call at any time.

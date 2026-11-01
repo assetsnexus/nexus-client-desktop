@@ -76,6 +76,7 @@ import {
   placementModeForContact,
   shouldOpenCompanionForContact,
   type CompanionToolLaunch,
+  type SettingsSectionId,
 } from '../shared/ipc.js';
 import { createGlobalPointerSource } from './global-pointer.js';
 import { createCalendarManager } from './calendar-manager.js';
@@ -900,13 +901,28 @@ async function refreshTrayMenu(): Promise<void> {
   if (!tray) return;
   const signedIn = identityManager.hasActiveSession();
   const appItems = signedIn ? await resolveTrayAppItems() : [];
+  const ui = settings.getUiSettings();
   const template = buildTrayMenu({
     signedIn,
     portalUrl: settings.getConnectionConfig().portalUrl ?? null,
     appItems,
+    notificationsEnabled: ui.notifications.enabled,
+    openCompanionOnMessage: ui.notifications.openCompanionOnMessage,
     onShow: () => showMainWindow(),
     onQuit: () => app.quit(),
     onOpenUrl: (url) => void openExternalUrl(url),
+    onToggleNotifications: () => {
+      const current = settings.getUiSettings().notifications;
+      settings.setUiSettings({ notifications: { ...current, enabled: !current.enabled } });
+      void refreshTrayMenu();
+    },
+    onToggleOpenCompanion: () => {
+      const current = settings.getUiSettings().notifications;
+      settings.setUiSettings({
+        notifications: { ...current, openCompanionOnMessage: !current.openCompanionOnMessage },
+      });
+      void refreshTrayMenu();
+    },
   });
   if (!tray) return;
   try {
@@ -1360,6 +1376,11 @@ function registerIpc(): void {
     // A visibility/custom-entry change must be reflected in the tray at once.
     if (patch && 'trayApps' in patch) {
       invalidateInstalledApps();
+      void refreshTrayMenu();
+    }
+    // The tray mirrors the notification master switch + companion auto-open, so a
+    // Settings change must re-tick the checkboxes without restarting the app.
+    if (patch && 'notifications' in patch) {
       void refreshTrayMenu();
     }
     return next;
@@ -1910,12 +1931,12 @@ function registerIpc(): void {
   // Companion (or child) window → main shell: open its Settings surface. The
   // gallery links here for the client-remembered agent ↔ avatar mapping. Focus
   // the main window too, so the settings page the user asked for is visible.
-  ipcMain.handle(IPC.openSettings, () => {
+  ipcMain.handle(IPC.openSettings, (_e, section?: SettingsSectionId | null) => {
     if (!mainWindow || mainWindow.isDestroyed()) return false;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
-    mainWindow.webContents.send(IPC.openSettings);
+    mainWindow.webContents.send(IPC.openSettings, section ?? null);
     return true;
   });
   ipcMain.handle(IPC.companionSetAlwaysOnTop, (_e, contactId: string, onTop: boolean) =>

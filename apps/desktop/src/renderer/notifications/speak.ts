@@ -151,6 +151,26 @@ export function createMessageSpeaker(deps: {
       }
     },
 
+    /**
+     * Interrupt for a new user input. `skip_current` stops the utterance that is
+     * playing but leaves what is queued; `clear_queue` drops everything. Both
+     * leave the speaker able to accept the next turn (unlike `cancel`, which is
+     * a "stop for now" that the next `speak` re-arms).
+     */
+    interrupt(mode: 'skip_current' | 'clear_queue'): void {
+      if (mode === 'clear_queue') {
+        this.cancel();
+        return;
+      }
+      for (const controller of controllers.values()) {
+        try {
+          void controller.cancel();
+        } catch {
+          /* best-effort */
+        }
+      }
+    },
+
     /** Drop cached controllers (identity switch) so a stale voice is not reused. */
     reset(): void {
       this.cancel();

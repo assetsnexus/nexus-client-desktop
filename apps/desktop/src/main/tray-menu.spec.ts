@@ -39,9 +39,13 @@ function base(over: Partial<Parameters<typeof buildTrayMenu>[0]> = {}) {
     signedIn: false,
     portalUrl: null as string | null,
     appItems: [] as TrayAppItem[],
+    notificationsEnabled: true,
+    openCompanionOnMessage: false,
     onShow: vi.fn(),
     onQuit: vi.fn(),
     onOpenUrl: vi.fn(),
+    onToggleNotifications: vi.fn(),
+    onToggleOpenCompanion: vi.fn(),
     ...over,
   };
 }
@@ -49,7 +53,7 @@ function base(over: Partial<Parameters<typeof buildTrayMenu>[0]> = {}) {
 describe('buildTrayMenu', () => {
   it('always keeps Show Nexus and Quit, even signed out with no portal', () => {
     const menu = buildTrayMenu(base());
-    expect(ids(menu)).toEqual(['show', 'quit']);
+    expect(ids(menu)).toEqual(['show', 'toggle-notifications', 'toggle-open-companion', 'quit']);
     expect(menu[0]!.click).toBeTypeOf('function');
     expect(menu[menu.length - 1]!.click).toBeTypeOf('function');
   });
@@ -65,17 +69,36 @@ describe('buildTrayMenu', () => {
 
   it('drops an unsafe portal url but keeps the essential items', () => {
     const menu = buildTrayMenu(base({ portalUrl: 'javascript:alert(1)' }));
-    expect(ids(menu)).toEqual(['show', 'quit']);
+    expect(ids(menu)).toEqual(['show', 'toggle-notifications', 'toggle-open-companion', 'quit']);
+  });
+
+  it('renders the notification + companion toggles as checkboxes reflecting state', () => {
+    const menu = buildTrayMenu(base({ notificationsEnabled: false, openCompanionOnMessage: true }));
+    const notify = menu.find((m) => m.id === 'toggle-notifications')!;
+    const companion = menu.find((m) => m.id === 'toggle-open-companion')!;
+    expect(notify.type).toBe('checkbox');
+    expect(notify.checked).toBe(false);
+    expect(companion.type).toBe('checkbox');
+    expect(companion.checked).toBe(true);
+  });
+
+  it('fires the toggle handlers on click (state is owned by the caller)', () => {
+    const input = base();
+    const menu = buildTrayMenu(input);
+    menu.find((m) => m.id === 'toggle-notifications')!.click!();
+    menu.find((m) => m.id === 'toggle-open-companion')!.click!();
+    expect(input.onToggleNotifications).toHaveBeenCalledTimes(1);
+    expect(input.onToggleOpenCompanion).toHaveBeenCalledTimes(1);
   });
 
   it('shows no app section when signed out', () => {
     const menu = buildTrayMenu(base({ appItems: [item({ key: 'xcamp', url: 'https://x.example.com' })] }));
-    expect(ids(menu)).toEqual(['show', 'quit']);
+    expect(ids(menu)).toEqual(['show', 'toggle-notifications', 'toggle-open-companion', 'quit']);
   });
 
   it('shows no app section when signed in but the list is empty', () => {
     const menu = buildTrayMenu(base({ signedIn: true }));
-    expect(ids(menu)).toEqual(['show', 'quit']);
+    expect(ids(menu)).toEqual(['show', 'toggle-notifications', 'toggle-open-companion', 'quit']);
   });
 
   it('lists apps flat when they all share one (personal) group', () => {
@@ -87,8 +110,16 @@ describe('buildTrayMenu', () => {
       ],
     });
     const menu = buildTrayMenu(input);
-    expect(ids(menu)).toEqual(['show', 'apps', 'app:xcamp', 'custom:docs', 'quit']);
-    // The app section is visually separated from "Show Nexus" and "Quit".
+    expect(ids(menu)).toEqual([
+      'show',
+      'apps',
+      'app:xcamp',
+      'custom:docs',
+      'toggle-notifications',
+      'toggle-open-companion',
+      'quit',
+    ]);
+    // The app section is visually separated from "Show Nexus" and the toggles.
     expect(separatorBefore(menu, 'apps')).toBe(true);
     expect(separatorBefore(menu, 'quit')).toBe(true);
     const xcamp = menu.find((m) => m.id === 'app:xcamp')!;
@@ -117,6 +148,6 @@ describe('buildTrayMenu', () => {
         appItems: [item({ key: 'evil', url: 'javascript:alert(1)' })],
       }),
     );
-    expect(ids(menu)).toEqual(['show', 'quit']);
+    expect(ids(menu)).toEqual(['show', 'toggle-notifications', 'toggle-open-companion', 'quit']);
   });
 });

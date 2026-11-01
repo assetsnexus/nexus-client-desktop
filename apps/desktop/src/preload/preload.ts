@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import { IPC, type CertificatePromptInfo, type CompanionAction, type CompanionCursorCoords, type CompanionPresent, type CompanionSessionView, type CompanionSttOwner, type CompanionTitleReport, type CompanionToolPresence, type CompanionToolSnapshot, type CompanionToolSync, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress } from '../shared/ipc.js';
+import { IPC, type CertificatePromptInfo, type CompanionAction, type CompanionCursorCoords, type CompanionPresent, type CompanionSessionView, type CompanionSttOwner, type CompanionTitleReport, type CompanionToolPresence, type CompanionToolSnapshot, type CompanionToolSync, type DesktopNotificationPayload, type NexusBridge, type StorageTransferProgress, type SettingsSectionId } from '../shared/ipc.js';
 
 const bridge: NexusBridge = {
   getVersion: () => ipcRenderer.invoke(IPC.version),
@@ -255,9 +255,9 @@ const bridge: NexusBridge = {
     ipcRenderer.invoke(IPC.localAvatarsSetMapping, contactId, avatarId),
   localAvatarsSetDefault: (avatarId) =>
     ipcRenderer.invoke(IPC.localAvatarsSetDefault, avatarId),
-  openSettings: () => ipcRenderer.invoke(IPC.openSettings),
+  openSettings: (section) => ipcRenderer.invoke(IPC.openSettings, section),
   onOpenSettings: (listener) => {
-    const handler = () => listener();
+    const handler = (_e: unknown, section?: SettingsSectionId | null) => listener(section ?? null);
     ipcRenderer.on(IPC.openSettings, handler);
     return () => ipcRenderer.removeListener(IPC.openSettings, handler);
   },

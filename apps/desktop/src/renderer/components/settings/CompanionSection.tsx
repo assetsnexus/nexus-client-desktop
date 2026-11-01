@@ -35,8 +35,18 @@ import {
   COMPANION_SIZE_PRESET_IDS,
   COMPANION_SIZE_MIN,
   COMPANION_SIZE_MAX,
+  COMPANION_CAMERA_PRESET_IDS,
+  COMPANION_CAMERA_MIN_M,
+  COMPANION_CAMERA_MAX_M,
+  COMPANION_CAMERA_MIN_PITCH_DEG,
+  COMPANION_CAMERA_MAX_PITCH_DEG,
+  COMPANION_CAMERA_MIN_FOV_DEG,
+  COMPANION_CAMERA_MAX_FOV_DEG,
+  normalizeCompanionCamera,
+  normalizeCompanionAvatarSettings,
   type AppDefaultTtsSettings,
   type CompanionAvatarSettings,
+  type CompanionCameraPreset,
   type CompanionDebugSettings,
   type CompanionPlacementMode,
   type CompanionPlacementSettings,
@@ -94,7 +104,9 @@ export function CompanionSection() {
 
   useEffect(() => {
     void bridge.getUiSettings().then((ui) => {
-      setAvatar(ui.companionAvatar);
+      // Tolerate an older main-process bundle: normalize so a missing
+      // `camera` (added later) cannot crash the section on `camera.preset`.
+      setAvatar(normalizeCompanionAvatarSettings(ui?.companionAvatar));
       setDebug(ui.companionDebug);
       setPlacement(ui.companionPlacement);
       setTts(ui.appDefaultTts);
@@ -131,7 +143,9 @@ export function CompanionSection() {
       if (!avatar) return;
       setAvatarBusy(true);
       try {
-        setAvatar((await bridge.setUiSettings({ companionAvatar: { ...avatar, ...next } })).companionAvatar);
+        const saved = (await bridge.setUiSettings({ companionAvatar: { ...avatar, ...next } }))
+          .companionAvatar;
+        setAvatar(normalizeCompanionAvatarSettings(saved ?? { ...avatar, ...next }));
       } finally {
         setAvatarBusy(false);
       }
@@ -261,6 +275,118 @@ export function CompanionSection() {
                 onChange={(e) => void patchAvatar({ gazePitchMaxDeg: Number(e.target.value) })}
               />
             </Field>
+
+            {/* Camera framing: a named shot (face / bust / full-body) or a
+                custom dial-in. Applied live to the 3D stage. */}
+            <Field label={t('settings.companion.camera')} hint={t('settings.companion.camera.help')}>
+              <select
+                style={settingsInput}
+                value={avatar.camera.preset}
+                disabled={avatarBusy}
+                onChange={(e) => {
+                  const preset = COMPANION_CAMERA_PRESET_IDS.includes(
+                    e.target.value as CompanionCameraPreset,
+                  )
+                    ? (e.target.value as CompanionCameraPreset)
+                    : 'bust';
+                  void patchAvatar({ camera: normalizeCompanionCamera({ ...avatar.camera, preset }) });
+                }}
+              >
+                <option value="face">{t('settings.companion.camera.face')}</option>
+                <option value="bust">{t('settings.companion.camera.bust')}</option>
+                <option value="full-body">{t('settings.companion.camera.fullBody')}</option>
+                <option value="custom">{t('settings.companion.camera.custom')}</option>
+              </select>
+            </Field>
+
+            {avatar.camera.preset === 'custom' ? (
+              <>
+                <Field
+                  label={t('settings.companion.camera.distance', { m: avatar.camera.distanceM })}
+                  hint={t('settings.companion.camera.distance.help')}
+                >
+                  <input
+                    type="range"
+                    min={COMPANION_CAMERA_MIN_M}
+                    max={COMPANION_CAMERA_MAX_M}
+                    step={0.1}
+                    value={avatar.camera.distanceM}
+                    disabled={avatarBusy}
+                    onChange={(e) =>
+                      void patchAvatar({
+                        camera: normalizeCompanionCamera({
+                          ...avatar.camera,
+                          distanceM: Number(e.target.value),
+                        }),
+                      })
+                    }
+                  />
+                </Field>
+                <Field
+                  label={t('settings.companion.camera.height', { m: avatar.camera.heightM })}
+                  hint={t('settings.companion.camera.height.help')}
+                >
+                  <input
+                    type="range"
+                    min={COMPANION_CAMERA_MIN_M}
+                    max={COMPANION_CAMERA_MAX_M}
+                    step={0.05}
+                    value={avatar.camera.heightM}
+                    disabled={avatarBusy}
+                    onChange={(e) =>
+                      void patchAvatar({
+                        camera: normalizeCompanionCamera({
+                          ...avatar.camera,
+                          heightM: Number(e.target.value),
+                        }),
+                      })
+                    }
+                  />
+                </Field>
+                <Field
+                  label={t('settings.companion.camera.pitch', { deg: avatar.camera.pitchDeg })}
+                  hint={t('settings.companion.camera.pitch.help')}
+                >
+                  <input
+                    type="range"
+                    min={COMPANION_CAMERA_MIN_PITCH_DEG}
+                    max={COMPANION_CAMERA_MAX_PITCH_DEG}
+                    step={1}
+                    value={avatar.camera.pitchDeg}
+                    disabled={avatarBusy}
+                    onChange={(e) =>
+                      void patchAvatar({
+                        camera: normalizeCompanionCamera({
+                          ...avatar.camera,
+                          pitchDeg: Number(e.target.value),
+                        }),
+                      })
+                    }
+                  />
+                </Field>
+                <Field
+                  label={t('settings.companion.camera.fov', { deg: avatar.camera.fovDeg })}
+                  hint={t('settings.companion.camera.fov.help')}
+                >
+                  <input
+                    type="range"
+                    min={COMPANION_CAMERA_MIN_FOV_DEG}
+                    max={COMPANION_CAMERA_MAX_FOV_DEG}
+                    step={1}
+                    value={avatar.camera.fovDeg}
+                    disabled={avatarBusy}
+                    onChange={(e) =>
+                      void patchAvatar({
+                        camera: normalizeCompanionCamera({
+                          ...avatar.camera,
+                          fovDeg: Number(e.target.value),
+                        }),
+                      })
+                    }
+                  />
+                </Field>
+              </>
+            ) : null}
           </>
         ) : (
           <p style={settingsHint}>{t('settings.loading')}</p>

@@ -15,6 +15,8 @@ import {
   createPresenceStore,
   createRegionCommandClient,
   findChatContact,
+  readAutoVoice,
+  writeAutoVoice,
   readPresenceFromProfile,
   type ChatContact,
   type ChatTurn,
@@ -53,6 +55,7 @@ import {
   callBridge,
   hasBridgeMethod,
   onBridge,
+  type AppDefaultTtsSettings,
   type AuthState,
   type CompanionAvatarSettings,
   type CompanionDebugSettings,
@@ -60,8 +63,13 @@ import {
   type CompanionPresent,
   type CompanionSttOwner,
   type DesktopConnectionConfig,
+  type VoiceModeSettings,
+  DEFAULT_VOICE_MODE_SETTINGS,
+  normalizeVoiceModeSettings,
 } from '../bridge.js';
 import { CompanionComposer } from './CompanionComposer.js';
+import { resolveAppDefaultTts } from '../../shared/tts.js';
+import { companionCameraPose } from '../../shared/companion-camera.js';
 import { bindCompanionThread } from '../companion/thread-binding.js';
 import { showsDictationStrip } from '../../shared/companion-strip.js';
 import { CompanionRoomStage } from './CompanionRoomStage.js';
@@ -360,6 +368,18 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   const [debug, setDebug] = useState<CompanionDebugSettings | null>(null);
   // User-facing avatar behaviour (click nod). Defaults ON when settings are absent.
   const [avatarSettings, setAvatarSettings] = useState<CompanionAvatarSettings | null>(null);
+  // App-default TTS, used as the speak-turn fallback when the agent has none.
+  const [appDefaultTts, setAppDefaultTts] = useState<AppDefaultTtsSettings | null>(null);
+  // Voice-mode settings: interruption-on-send + the shared auto-voice toggle.
+  const [voiceModes, setVoiceModes] = useState<VoiceModeSettings>(DEFAULT_VOICE_MODE_SETTINGS);
+  const [autoVoice, setAutoVoice] = useState(() => readAutoVoice(false));
+  const toggleAutoVoice = useCallback(() => {
+    setAutoVoice((prev) => {
+      const next = !prev;
+      writeAutoVoice(next);
+      return next;
+    });
+  }, []);
   const forcedDebug = useMemo(() => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('companionDebug') === '1', []);
   /**
    * Detached tool windows (Deliverable 3). Each context-menu tool ("Motion feed",
@@ -378,11 +398,36 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
   useEffect(() => {
     void bridge.getConnectionConfig().then(setConnection);
     void bridge.getAuthState().then(setAuth);
-    void bridge.getUiSettings().then((ui) => {
-      setDebug(ui.companionDebug);
-      setAvatarSettings(ui.companionAvatar);
-    });
+    const readSettings = () => {
+      void bridge.getUiSettings().then((ui) => {
+        setDebug(ui.companionDebug);
+        setAvatarSettings(ui.companionAvatar);
+        setAppDefaultTts(ui.appDefaultTts ?? null);
+        // Tolerate an older main-process bundle that predates `voiceModes`.
+        setVoiceModes(normalizeVoiceModeSettings(ui?.voiceModes));
+      });
+    };
+    readSettings();
+    // A change made in Settings (a separate surface) applies without a reopen.
+    window.addEventListener('focus', readSettings);
+    return () => window.removeEventListener('focus', readSettings);
   }, []);
+
+  /**
+   * App-default TTS model/voice, passed to `VoiceLayout` so a speak turn (and
+   * its voice-mode pre-flight) can resolve a model even when the agent has no
+   * contact override — the exact case that produced the "Agent not found" 404.
+   */
+  const speakFallback = useMemo(() => {
+    const resolved = resolveAppDefaultTts(appDefaultTts);
+    if (!resolved?.modelId) return null;
+    return {
+      modelId: resolved.modelId,
+      voiceId: resolved.voiceId ?? null,
+      voiceSampleRef: resolved.voiceSampleRef ?? null,
+      voiceSampleTranscript: resolved.voiceSampleTranscript ?? null,
+    };
+  }, [appDefaultTts]);
 
   // Debug surfaces effectively on when the Settings toggle says so, or a
   // developer forced them with `?companionDebug=1` in the companion URL hash.
@@ -469,6 +514,21 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
       gesture: avatarSettings?.clickNodGesture,
     });
   }, [stageHost, avatarSettings?.clickNod, avatarSettings?.clickNodGesture]);
+
+  // Camera framing preset (face / bust / full-body / custom). Room mode is a
+  // no-op: a shared room's camera is not steered per companion. Re-applied when
+  // the scene/flat host swaps and when the avatar host reports ready, because
+  // the controller's own `frameOrbitOnHead()` runs after VRM load and would
+  // otherwise clobber the height — the preset pins the framing so it survives.
+  useEffect(() => {
+    const host = stageHost;
+    if (!host?.setCameraPreset) return;
+    if (launch.roomId) return;
+    const camera = avatarSettings?.camera;
+    if (!camera) return;
+    host.setCameraPreset(companionCameraPose(camera));
+    // `avatarHost` in the deps re-runs this once the flat stage is ready.
+  }, [stageHost, launch.roomId, avatarSettings?.camera, avatarHost]);
 
   // Dev-only live handle (gated on `?companionDebug=1`): expose the *live* stage
   // host to the page so an Electron CDP client can measure head/eye aim
@@ -1337,6 +1397,9 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
               turns={turns}
               streaming={streaming}
               presence={selectionPresence}
+              autoVoice={autoVoice}
+              onToggleAutoVoice={toggleAutoVoice}
+              voiceInterruptPolicy={voiceModes.interruptOnSend}
               // A group/meeting room renders the shared multi-agent scene as the
               // stage; otherwise a gallery image selection overrides the 3D
               // canvas with the profile image and a VRM selection lets
@@ -1384,6 +1447,8 @@ export function CompanionView({ launch }: { launch: CompanionLaunch }) {
               // may capture the microphone.
               hideWakeIndicator
               captureEnabled={sttPrimary}
+              speakFallback={speakFallback}
+              onOpenVoiceSettings={() => void callBridge<boolean>(bridge, 'openSettings', false, 'voice')}
               onAvatarHost={(host: CompanionStageHost | null) => setAvatarHost(host)}
               onVoiceState={(state: { active: boolean; muted: boolean; status: string; errorMessage: string | null }) =>
                 setVoiceStatus({ active: state.active, status: state.status })

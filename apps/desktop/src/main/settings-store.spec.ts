@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSettingsStore, DEFAULT_NOTIFICATION_SETTINGS } from './settings-store.js';
+import { DEFAULT_COMPANION_CAMERA } from '../shared/companion-camera.js';
 
 function tempFile(): string {
   return join(mkdtempSync(join(tmpdir(), 'nexus-settings-')), 'settings.json');
@@ -91,6 +92,7 @@ describe('createSettingsStore — ui settings', () => {
       clickNodGesture: 'nod',
       gazeYawMaxDeg: 30,
       gazePitchMaxDeg: 22,
+      camera: { ...DEFAULT_COMPANION_CAMERA },
     });
   });
 
@@ -103,6 +105,7 @@ describe('createSettingsStore — ui settings', () => {
         clickNodGesture: 'agree',
         gazeYawMaxDeg: 45,
         gazePitchMaxDeg: 22,
+        camera: { preset: 'face', distanceM: 1.15, heightM: 1.68, pitchDeg: 6, fovDeg: 24 },
       },
     });
     expect(next.companionAvatar).toEqual({
@@ -110,12 +113,14 @@ describe('createSettingsStore — ui settings', () => {
       clickNodGesture: 'agree',
       gazeYawMaxDeg: 45,
       gazePitchMaxDeg: 22,
+      camera: { preset: 'face', distanceM: 1.15, heightM: 1.68, pitchDeg: 6, fovDeg: 24 },
     });
     expect(createSettingsStore(path).getUiSettings().companionAvatar).toEqual({
       clickNod: false,
       clickNodGesture: 'agree',
       gazeYawMaxDeg: 45,
       gazePitchMaxDeg: 22,
+      camera: { preset: 'face', distanceM: 1.15, heightM: 1.68, pitchDeg: 6, fovDeg: 24 },
     });
   });
 
@@ -133,6 +138,7 @@ describe('createSettingsStore — ui settings', () => {
       clickNodGesture: 'nod',
       gazeYawMaxDeg: 30,
       gazePitchMaxDeg: 22,
+      camera: { ...DEFAULT_COMPANION_CAMERA },
     });
   });
 
@@ -145,6 +151,7 @@ describe('createSettingsStore — ui settings', () => {
         clickNodGesture: 'nod',
         gazeYawMaxDeg: 999,
         gazePitchMaxDeg: -5,
+        camera: { ...DEFAULT_COMPANION_CAMERA },
       },
     });
     expect(next.companionAvatar.gazeYawMaxDeg).toBe(60);

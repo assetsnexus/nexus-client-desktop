@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { bridge, type AuthState, type DesktopConnectionConfig, type SessionHydrationState } from './bridge.js';
+import { bridge, type AuthState, type DesktopConnectionConfig, type SessionHydrationState, type SettingsSectionId } from './bridge.js';
 import { LoginForm } from './components/LoginForm.js';
 import { ChatHost } from './components/ChatHost.js';
 import { NotificationsPanel } from './components/NotificationsPanel.js';
@@ -86,6 +86,11 @@ export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: 'signed_out' });
   const [connection, setConnection] = useState<DesktopConnectionConfig | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  /**
+   * Section a deep-link (`onOpenSettings`) asked for. `null` means "open where
+   * the user last was" — a plain gear click must not be hijacked to a section.
+   */
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId | null>(null);
   const [view, setView] = useState<(typeof views)[number]>('chat');
   const [showIdentities, setShowIdentities] = useState(false);
   const [version, setVersion] = useState('');
@@ -138,9 +143,10 @@ export function App() {
     });
     // Deliverable 2: the companion's avatar gallery links here to map agents to
     // library models, so a request from any window opens the Settings surface.
-    const offSettings = bridge.onOpenSettings(() => {
+    const offSettings = bridge.onOpenSettings((section) => {
       setShowIdentities(false);
       setOpenRoomId(null);
+      setSettingsSection(section ?? null);
       setShowSettings(true);
     });
     return () => {
@@ -357,7 +363,16 @@ export function App() {
             {t('shell.identities')}
           </button>
         ) : null}
-        <button type="button" style={btnStyle} onClick={() => setShowSettings((v) => !v)}>
+        <button
+          type="button"
+          style={btnStyle}
+          onClick={() => {
+            // A manual open must not replay an old deep-link — clear it so the
+            // panel keeps its own last-used section.
+            setSettingsSection(null);
+            setShowSettings((v) => !v);
+          }}
+        >
           {showSettings ? t('shell.settingsClose') : t('shell.settings')}
         </button>
         {signedIn ? (
@@ -410,6 +425,8 @@ export function App() {
               <SettingsPanel
                 connection={connection}
                 onConnectionChange={setConnection}
+                initialSection={settingsSection}
+                onSectionChange={setSettingsSection}
                 onClose={() => setShowSettings(false)}
               />
             ) : signedIn ? (

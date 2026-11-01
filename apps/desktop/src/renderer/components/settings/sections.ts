@@ -9,18 +9,9 @@
 
 import { createContext, useContext } from 'react';
 import type { MessageKey } from '../../i18n/index.js';
+import type { SettingsSectionId } from '../../../shared/ipc.js';
 
-export type SettingsSectionId =
-  | 'general'
-  | 'notifications'
-  | 'companion'
-  | 'agents'
-  | 'wake'
-  | 'localAi'
-  | 'integrations'
-  | 'security'
-  | 'connection'
-  | 'developer';
+export type { SettingsSectionId };
 
 export type SettingsNavEntry = {
   id: SettingsSectionId;
@@ -49,9 +40,21 @@ export const SETTINGS_NAV: readonly SettingsNavEntry[] = [
     icon: '🧍',
     helpKey: 'settings.companion.help',
   },
+  {
+    id: 'voice',
+    labelKey: 'settings.nav.voice',
+    icon: '🗣️',
+    helpKey: 'settings.voice.help',
+  },
   { id: 'agents', labelKey: 'settings.nav.agents', icon: '🤖', helpKey: 'settings.agents.help' },
   { id: 'wake', labelKey: 'settings.nav.wake', icon: '🎙️', helpKey: 'settings.wake.help' },
   { id: 'localAi', labelKey: 'settings.nav.localAi', icon: '🧠', helpKey: 'settings.localAi.help' },
+  {
+    id: 'privacy',
+    labelKey: 'settings.nav.privacy',
+    icon: '🛡️',
+    helpKey: 'settings.privacy.help',
+  },
   {
     id: 'integrations',
     labelKey: 'settings.nav.integrations',

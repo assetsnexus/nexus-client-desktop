@@ -14,7 +14,7 @@
  * picks up the new region URL without a restart).
  */
 
-import { useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import type { DesktopConnectionConfig } from '@nexus/node-core';
 import { useI18n } from '../i18n/index.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
@@ -26,7 +26,9 @@ import { GeneralSection } from './settings/GeneralSection.js';
 import { IntegrationsSection } from './settings/IntegrationsSection.js';
 import { LocalAiSection } from './settings/LocalAiSection.js';
 import { NotificationsSection } from './settings/NotificationsSection.js';
+import { PrivacySection } from './settings/PrivacySection.js';
 import { SecuritySection } from './settings/SecuritySection.js';
+import { VoiceSection } from './settings/VoiceSection.js';
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_NAV,
@@ -115,14 +117,40 @@ const doneButton: CSSProperties = {
 export function SettingsPanel({
   connection,
   onConnectionChange,
+  initialSection = null,
+  onSectionChange,
   onClose,
 }: {
   connection: DesktopConnectionConfig;
   onConnectionChange: (next: DesktopConnectionConfig) => void;
+  /**
+   * Section a deep-link asked for. While it is non-null the panel follows it
+   * (a companion "Set up voice" warning lands on the voice section); once the
+   * user picks a section themselves the panel owns its own state again.
+   */
+  initialSection?: SettingsSectionId | null;
+  /** Notify the host so a later deep-link to the same section re-applies. */
+  onSectionChange?: (section: SettingsSectionId) => void;
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const [active, setActive] = useState<SettingsSectionId>(DEFAULT_SETTINGS_SECTION);
+  const [active, setActive] = useState<SettingsSectionId>(
+    initialSection ?? DEFAULT_SETTINGS_SECTION,
+  );
+
+  // Follow a deep-link that arrives while the panel is already open (opening
+  // Settings again from a companion warning must actually move to that section).
+  useEffect(() => {
+    if (initialSection) setActive(initialSection);
+  }, [initialSection]);
+
+  const selectSection = useCallback(
+    (section: SettingsSectionId) => {
+      setActive(section);
+      onSectionChange?.(section);
+    },
+    [onSectionChange],
+  );
 
   const activeEntry = SETTINGS_NAV.find((entry) => entry.id === active) ?? SETTINGS_NAV[0];
 
@@ -157,7 +185,7 @@ export function SettingsPanel({
           fontSize: 13,
         }}
         value={active}
-        onChange={(e) => setActive(e.target.value as SettingsSectionId)}
+        onChange={(e) => selectSection(e.target.value as SettingsSectionId)}
       >
         {SETTINGS_NAV.map((entry) => (
           <option key={entry.id} value={entry.id}>
@@ -173,7 +201,7 @@ export function SettingsPanel({
               key={entry.id}
               type="button"
               style={navButton(entry.id === active)}
-              onClick={() => setActive(entry.id)}
+              onClick={() => selectSection(entry.id)}
               title={entry.helpKey ? t(entry.helpKey) : undefined}
             >
               <span aria-hidden>{entry.icon}</span>
@@ -188,9 +216,11 @@ export function SettingsPanel({
               {active === 'general' ? <GeneralSection /> : null}
               {active === 'notifications' ? <NotificationsSection /> : null}
               {active === 'companion' ? <CompanionSection /> : null}
+              {active === 'voice' ? <VoiceSection /> : null}
               {active === 'agents' ? <AgentsSection /> : null}
               {active === 'wake' ? <WakeSettingsPanel /> : null}
               {active === 'localAi' ? <LocalAiSection /> : null}
+              {active === 'privacy' ? <PrivacySection /> : null}
               {active === 'integrations' ? <IntegrationsSection /> : null}
               {active === 'security' ? <SecuritySection /> : null}
               {active === 'connection' ? (

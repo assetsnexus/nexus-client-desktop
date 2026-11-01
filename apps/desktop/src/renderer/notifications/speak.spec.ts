@@ -226,3 +226,64 @@ describe('createMessageSpeaker', () => {
     );
   });
 });
+
+describe('createMessageSpeaker.interrupt (barge-in on send)', () => {
+  it('skip_current stops the playing controller but leaves queued work', async () => {
+    const gate: { resolve?: () => void } = {};
+    const first = controllerOf({
+      speak: vi.fn(
+        () =>
+          new Promise<void>((res) => {
+            gate.resolve = res;
+          }),
+      ),
+    });
+    const second = controllerOf();
+    const byAgent = new Map<string, SpeakController>([
+      ['a', first],
+      ['b', second],
+    ]);
+    const speaker = createMessageSpeaker({
+      createSpeakTurn: ((input: { agentId: string | null }) =>
+        byAgent.get(input.agentId ?? '') as SpeakController) as unknown as SpeakTurnFactory,
+    });
+    speaker.speak('one', 'a');
+    speaker.speak('two', 'b');
+    await flush();
+    speaker.interrupt('skip_current');
+    expect(first.cancel).toHaveBeenCalledTimes(1);
+    // Resolve the first turn so the drain loop proceeds to the queued reply.
+    gate.resolve?.();
+    await flush();
+    expect(second.speak).toHaveBeenCalledWith('two');
+  });
+
+  it('clear_queue stops everything and drops the queue', async () => {
+    const gate: { resolve?: () => void } = {};
+    const first = controllerOf({
+      speak: vi.fn(
+        () =>
+          new Promise<void>((res) => {
+            gate.resolve = res;
+          }),
+      ),
+    });
+    const second = controllerOf();
+    const byAgent = new Map<string, SpeakController>([
+      ['a', first],
+      ['b', second],
+    ]);
+    const speaker = createMessageSpeaker({
+      createSpeakTurn: ((input: { agentId: string | null }) =>
+        byAgent.get(input.agentId ?? '') as SpeakController) as unknown as SpeakTurnFactory,
+    });
+    speaker.speak('one', 'a');
+    speaker.speak('two', 'b');
+    await flush();
+    speaker.interrupt('clear_queue');
+    gate.resolve?.();
+    await flush();
+    expect(first.cancel).toHaveBeenCalledTimes(1);
+    expect(second.speak).not.toHaveBeenCalled();
+  });
+});

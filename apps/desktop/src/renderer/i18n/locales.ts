@@ -152,6 +152,10 @@ const en = {
     'Interface language for this desktop client. Your choice is remembered on this machine.',
   'settings.done': 'Done',
 
+  // Voice modes + privacy dashboard (section titles).
+  'settings.voice': 'Voice',
+  'settings.privacy': 'Privacy',
+
   // Notifications
   'settings.notifications': 'Notifications',
   'settings.notifications.help':
@@ -253,9 +257,11 @@ const en = {
   'settings.nav.general': 'General',
   'settings.nav.notifications': 'Notifications',
   'settings.nav.companion': 'Companion',
+  'settings.nav.voice': 'Voice',
   'settings.nav.agents': 'Agents',
   'settings.nav.wake': 'Wake words',
   'settings.nav.localAi': 'Local AI',
+  'settings.nav.privacy': 'Privacy',
   'settings.nav.integrations': 'Integrations',
   'settings.nav.security': 'Security',
   'settings.nav.connection': 'Connection',
@@ -263,6 +269,10 @@ const en = {
   'settings.loading': 'Loading…',
   'settings.general.help': 'Choose the interface language for this app.',
   'settings.companion.help': 'How the 3D agent companion looks and where it appears on screen.',
+  'settings.voice.help':
+    'How you talk with agents: turn-based speech or a live voice call, and what a new message does to speech that is playing.',
+  'settings.privacy.help':
+    'Where the models you use actually run — public cloud, a private node, or on this device — and which pipeline stages stay local.',
   'settings.agents.help':
     'Override avatar, voice, wake nickname and companion behaviour for a single agent.',
   'settings.wake.help': 'Wake an agent with a spoken word and choose what a wake does.',
@@ -467,6 +477,68 @@ const en = {
   'settings.tts.sample.uploading': 'Uploading sample…',
   'settings.tts.sample.failed': 'Could not upload the sample.',
   'settings.agents.avatar.fallback': 'Unset uses the default avatar model.',
+
+  // Companion camera framing presets (Phase 3).
+  'settings.companion.camera': 'Camera framing',
+  'settings.companion.camera.help':
+    'How the companion is framed on screen: a close face shot, head and shoulders, the whole body, or your own camera numbers.',
+  'settings.companion.camera.face': 'Face close-up',
+  'settings.companion.camera.bust': 'Head and shoulders',
+  'settings.companion.camera.fullBody': 'Full body',
+  'settings.companion.camera.custom': 'Custom',
+  'settings.companion.camera.distance': 'Distance ({m} m)',
+  'settings.companion.camera.distance.help': 'How far the camera sits from the avatar.',
+  'settings.companion.camera.height': 'Height ({m} m)',
+  'settings.companion.camera.height.help': 'How high the camera sits above the ground.',
+  'settings.companion.camera.pitch': 'Tilt down ({deg}°)',
+  'settings.companion.camera.pitch.help': 'How far the camera looks down toward the avatar.',
+  'settings.companion.camera.fov': 'Field of view ({deg}°)',
+  'settings.companion.camera.fov.help':
+    'Vertical lens angle — wider fits more of the room.',
+
+  // Voice modes (Phase 2): turn-based speech vs live call + interruption.
+  'settings.voice.mode': 'Voice mode',
+  'settings.voice.mode.help':
+    'Turn-based speech transcribes what you say, replies with text, and can read the reply aloud. A live voice call keeps a continuous audio connection so you can talk and interrupt naturally.',
+  'settings.voice.mode.turns': 'Turn-based speech (speech-to-text + text-to-speech)',
+  'settings.voice.mode.realtime': 'Live voice call (WebRTC)',
+  'settings.voice.interrupt': 'When I send a message',
+  'settings.voice.interrupt.help':
+    'What happens to speech that is still playing or queued when you send a new message.',
+  'settings.voice.interrupt.skip_current': 'Stop the current reply, keep the rest queued',
+  'settings.voice.interrupt.clear_queue': 'Stop everything (clear the queue)',
+  'settings.voice.interrupt.off': 'Let speech finish',
+  'settings.voice.autoSpeak': 'Speak agent replies aloud',
+  'settings.voice.autoSpeak.help':
+    'Shares the chat composer’s “Auto voice” toggle: while on, replies are spoken as they arrive and the agent is told to keep them short and spoken-friendly.',
+
+  // Privacy dashboard (Phase 4).
+  'settings.privacy.pipeline': 'Your voice and chat pipeline',
+  'settings.privacy.pipeline.help':
+    'Where each configured stage runs. “On-device” means the work never leaves this computer; “Region” is your ANX node; “Public cloud” is a third-party provider.',
+  'settings.privacy.stage.llm': 'Chat model (LLM)',
+  'settings.privacy.stage.stt': 'Speech-to-text (STT)',
+  'settings.privacy.stage.tts': 'Text-to-speech (TTS)',
+  'settings.privacy.stage.wake': 'Wake word',
+  'settings.privacy.stage.unset': 'Not configured',
+  'settings.privacy.where.onDevice': 'On-device',
+  'settings.privacy.where.region': 'Region (private)',
+  'settings.privacy.where.publicCloud': 'Public cloud',
+  'settings.privacy.where.unknown': 'Unknown',
+  'settings.privacy.catalog': 'Models available in chats',
+  'settings.privacy.catalog.help':
+    'How the models your subscription entitles you to are hosted. Private and edge routes may point at the same hardware; you see “private” for your own node and “edge” for someone else’s.',
+  'settings.privacy.catalog.empty': 'No models available yet.',
+  'settings.privacy.badge.public_cloud': 'Public cloud',
+  'settings.privacy.badge.managed_cloud': 'Managed cloud',
+  'settings.privacy.badge.private_cloud': 'Private / self-hosted',
+  'settings.privacy.badge.edge_processing': 'Edge / on-device',
+  'settings.privacy.badge.no_logging': 'No logging',
+  'settings.privacy.badge.no_training': 'No training',
+  'settings.privacy.badge.no_moderation': 'No moderation',
+  'settings.privacy.badge.uncensored': 'Uncensored',
+  'settings.privacy.badge.self_hosted': 'Self-hosted',
+  'settings.privacy.badge.cloud': 'Cloud',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -575,6 +647,8 @@ const de: Dictionary = {
   'shell.offline.retry': "Erneut versuchen",
   'shell.offline.signIn': "Als anderer Benutzer anmelden",
   'shell.signOut': 'Abmelden',
+  'settings.voice': 'Sprache',
+  'settings.privacy': 'Datenschutz',
 };
 
 const es: Dictionary = {
@@ -679,6 +753,8 @@ const es: Dictionary = {
   'shell.offline.retry': "Reintentar",
   'shell.offline.signIn': "Iniciar sesión como otro usuario",
   'shell.signOut': 'Cerrar sesión',
+  'settings.voice': 'Voz',
+  'settings.privacy': 'Privacidad',
 };
 
 const fr: Dictionary = {
@@ -783,6 +859,8 @@ const fr: Dictionary = {
   'shell.offline.retry': "Réessayer",
   'shell.offline.signIn': "Se connecter en tant qu’un autre utilisateur",
   'shell.signOut': 'Se déconnecter',
+  'settings.voice': 'Voix',
+  'settings.privacy': 'Confidentialité',
 };
 
 const ru: Dictionary = {
@@ -886,6 +964,8 @@ const ru: Dictionary = {
   'shell.offline.retry': "Повторить",
   'shell.offline.signIn': "Войти как другой пользователь",
   'shell.signOut': 'Выйти',
+  'settings.voice': 'Голос',
+  'settings.privacy': 'Конфиденциальность',
 };
 
 const uk: Dictionary = {
@@ -990,6 +1070,8 @@ const uk: Dictionary = {
   'shell.offline.retry': "Повторити",
   'shell.offline.signIn': "Увійти як інший користувач",
   'shell.signOut': 'Вийти',
+  'settings.voice': 'Голос',
+  'settings.privacy': 'Конфіденційність',
 };
 
 const et: Dictionary = {
@@ -1094,6 +1176,8 @@ const et: Dictionary = {
   'shell.offline.retry': "Proovi uuesti",
   'shell.offline.signIn': "Logi sisse teise kasutajana",
   'shell.signOut': 'Logi välja',
+  'settings.voice': 'Hääl',
+  'settings.privacy': 'Privaatsus',
 };
 
 const it: Dictionary = {
@@ -1198,6 +1282,8 @@ const it: Dictionary = {
   'shell.offline.retry': "Riprova",
   'shell.offline.signIn': "Accedi come un altro utente",
   'shell.signOut': 'Esci',
+  'settings.voice': 'Voce',
+  'settings.privacy': 'Privacy',
 };
 
 const pt: Dictionary = {
@@ -1302,6 +1388,8 @@ const pt: Dictionary = {
   'shell.offline.retry': "Tentar novamente",
   'shell.offline.signIn': "Iniciar sessão como outro utilizador",
   'shell.signOut': 'Terminar sessão',
+  'settings.voice': 'Voz',
+  'settings.privacy': 'Privacidade',
 };
 
 const nl: Dictionary = {
@@ -1406,6 +1494,8 @@ const nl: Dictionary = {
   'shell.offline.retry': "Opnieuw",
   'shell.offline.signIn': "Aanmelden als een andere gebruiker",
   'shell.signOut': 'Afmelden',
+  'settings.voice': 'Stem',
+  'settings.privacy': 'Privacy',
 };
 
 const pl: Dictionary = {
@@ -1510,6 +1600,8 @@ const pl: Dictionary = {
   'shell.offline.retry': "Ponów",
   'shell.offline.signIn': "Zaloguj się jako inny użytkownik",
   'shell.signOut': 'Wyloguj się',
+  'settings.voice': 'Głos',
+  'settings.privacy': 'Prywatność',
 };
 
 const tr: Dictionary = {
@@ -1614,6 +1706,8 @@ const tr: Dictionary = {
   'shell.offline.retry': "Yeniden dene",
   'shell.offline.signIn': "Başka bir kullanıcı olarak oturum aç",
   'shell.signOut': 'Çıkış yap',
+  'settings.voice': 'Ses',
+  'settings.privacy': 'Gizlilik',
 };
 
 const ar: Dictionary = {
@@ -1718,6 +1812,8 @@ const ar: Dictionary = {
   'shell.offline.retry': "إعادة المحاولة",
   'shell.offline.signIn': "تسجيل الدخول كمستخدم آخر",
   'shell.signOut': 'تسجيل الخروج',
+  'settings.voice': 'الصوت',
+  'settings.privacy': 'الخصوصية',
 };
 
 const hi: Dictionary = {
@@ -1822,6 +1918,8 @@ const hi: Dictionary = {
   'shell.offline.retry': "पुनः प्रयास करें",
   'shell.offline.signIn': "किसी अन्य उपयोगकर्ता के रूप में साइन इन करें",
   'shell.signOut': 'साइन आउट',
+  'settings.voice': 'आवाज़',
+  'settings.privacy': 'गोपनीयता',
 };
 
 const zh: Dictionary = {
@@ -1923,6 +2021,8 @@ const zh: Dictionary = {
   'shell.offline.retry': "重试",
   'shell.offline.signIn': "以其他用户身份登录",
   'shell.signOut': '退出登录',
+  'settings.voice': '语音',
+  'settings.privacy': '隐私',
 };
 
 const ja: Dictionary = {
@@ -2027,6 +2127,8 @@ const ja: Dictionary = {
   'shell.offline.retry': "再試行",
   'shell.offline.signIn': "別のユーザーでサインイン",
   'shell.signOut': 'サインアウト',
+  'settings.voice': '音声',
+  'settings.privacy': 'プライバシー',
 };
 
 const ko: Dictionary = {
@@ -2131,6 +2233,8 @@ const ko: Dictionary = {
   'shell.offline.retry': "다시 시도",
   'shell.offline.signIn': "다른 사용자로 로그인",
   'shell.signOut': '로그아웃',
+  'settings.voice': '음성',
+  'settings.privacy': '개인정보 보호',
 };
 
 export const DICTIONARIES: Record<Locale, Dictionary> = {

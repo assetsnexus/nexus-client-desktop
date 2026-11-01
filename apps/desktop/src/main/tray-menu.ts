@@ -23,8 +23,10 @@ export type TrayMenuItem = {
   /** Stable id for tests / debugging; Electron ignores unknown keys. */
   id?: string;
   label?: string;
-  type?: 'separator' | 'normal';
+  type?: 'separator' | 'normal' | 'checkbox';
   enabled?: boolean;
+  /** Present on `checkbox` items; Electron renders the tick. */
+  checked?: boolean;
   /** Present on leaf items; absent on parents/separators. */
   click?: () => void;
   submenu?: TrayMenuItem[];
@@ -34,9 +36,15 @@ export type TrayMenuInput = {
   signedIn: boolean;
   portalUrl: string | null;
   appItems: TrayAppItem[];
+  /** Master OS-notification switch (mirrors `NotificationSettings.enabled`). */
+  notificationsEnabled: boolean;
+  /** Whether an inbound message pops the companion (mirrors `contactOverrides`). */
+  openCompanionOnMessage: boolean;
   onShow: () => void;
   onQuit: () => void;
   onOpenUrl: (url: string) => void;
+  onToggleNotifications: () => void;
+  onToggleOpenCompanion: () => void;
 };
 
 /**
@@ -91,6 +99,24 @@ export function buildTrayMenu(input: TrayMenuInput): TrayMenuItem[] {
     }
   }
 
+  items.push({ type: 'separator' });
+  // Quick toggles mirror the Settings switches so the user can silence OS
+  // notifications or stop the companion popping over an app without a trip
+  // through Settings. Checkbox items report their *next* state via `onToggle*`.
+  items.push({
+    id: 'toggle-notifications',
+    type: 'checkbox',
+    label: 'OS notifications',
+    checked: input.notificationsEnabled,
+    click: input.onToggleNotifications,
+  });
+  items.push({
+    id: 'toggle-open-companion',
+    type: 'checkbox',
+    label: 'Open companion on message',
+    checked: input.openCompanionOnMessage,
+    click: input.onToggleOpenCompanion,
+  });
   items.push({ type: 'separator' });
   items.push({ id: 'quit', label: 'Quit', click: input.onQuit });
   return items;

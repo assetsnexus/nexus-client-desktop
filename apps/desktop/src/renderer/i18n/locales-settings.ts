@@ -27,9 +27,11 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.nav.general': 'General',
     'settings.nav.notifications': 'Notifications',
     'settings.nav.companion': 'Companion',
+    'settings.nav.voice': 'Voice',
     'settings.nav.agents': 'Agents',
     'settings.nav.wake': 'Wake words',
     'settings.nav.localAi': 'Local AI',
+    'settings.nav.privacy': 'Privacy',
     'settings.nav.integrations': 'Integrations',
     'settings.nav.security': 'Security',
     'settings.nav.connection': 'Connection',
@@ -37,10 +39,14 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.loading': 'Loading…',
     'settings.general.help': 'Choose the interface language for this app.',
     'settings.companion.help': 'How the 3D agent companion looks and where it appears on screen.',
+    'settings.voice.help':
+      'How you talk with agents: turn-based speech or a live voice call, and what a new message does to speech that is playing.',
     'settings.agents.help':
       'Override avatar, voice, wake nickname and companion behaviour for a single agent.',
     'settings.wake.help': 'Wake an agent with a spoken word and choose what a wake does.',
     'settings.localAi.help': 'On-device models, speech, and audio device routing.',
+    'settings.privacy.help':
+      'Where the models you use actually run — public cloud, a private node, or on this device — and which pipeline stages stay local.',
     'settings.integrations.help':
       'Nexus apps, trusted certificates, and your LAN asset agents.',
     'settings.security.help': 'Lock the interface behind a PIN after a period of inactivity.',
@@ -212,6 +218,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'On a new message',
     'settings.companion.wake.onMessage.help': 'Whether a companion pops up when its agent messages you while the chat is in the background.',
     'settings.companion.wake.openNotifications': 'Configure notifications',
+    'settings.companion.camera':
+      "Camera framing",
+    'settings.companion.camera.help':
+      "How the companion is framed on screen: a close face shot, head and shoulders, the whole body, or your own camera numbers.",
+    'settings.companion.camera.face':
+      "Face close-up",
+    'settings.companion.camera.bust':
+      "Head and shoulders",
+    'settings.companion.camera.fullBody':
+      "Full body",
+    'settings.companion.camera.custom':
+      "Custom",
+    'settings.companion.camera.distance':
+      "Distance ({m} m)",
+    'settings.companion.camera.distance.help':
+      "How far the camera sits from the avatar.",
+    'settings.companion.camera.height':
+      "Height ({m} m)",
+    'settings.companion.camera.height.help':
+      "How high the camera sits above the ground.",
+    'settings.companion.camera.pitch':
+      "Tilt down ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "How far the camera looks down toward the avatar.",
+    'settings.companion.camera.fov':
+      "Field of view ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Vertical lens angle — wider fits more of the room.",
     'settings.companion.defaultVrm': 'Default avatar model',
     'settings.companion.defaultVrm.help': 'The VRM model every agent without one of its own renders with.',
     'settings.companion.defaultVrm.none': 'None (use the agent’s own)',
@@ -261,6 +295,50 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Uploading sample…',
     'settings.tts.sample.failed': 'Could not upload the sample.',
     'settings.agents.avatar.fallback': 'Unset uses the default avatar model.',
+
+    // Voice modes (Phase 2): turn-based speech vs live call + interruption.
+    'settings.voice.mode': 'Voice mode',
+    'settings.voice.mode.help':
+      'Turn-based speech transcribes what you say, replies with text, and can read the reply aloud. A live voice call keeps a continuous audio connection so you can talk and interrupt naturally.',
+    'settings.voice.mode.turns': 'Turn-based speech (speech-to-text + text-to-speech)',
+    'settings.voice.mode.realtime': 'Live voice call (WebRTC)',
+    'settings.voice.interrupt': 'When I send a message',
+    'settings.voice.interrupt.help':
+      'What happens to speech that is still playing or queued when you send a new message.',
+    'settings.voice.interrupt.skip_current': 'Stop the current reply, keep the rest queued',
+    'settings.voice.interrupt.clear_queue': 'Stop everything (clear the queue)',
+    'settings.voice.interrupt.off': 'Let speech finish',
+    'settings.voice.autoSpeak': 'Speak agent replies aloud',
+    'settings.voice.autoSpeak.help':
+      'Shares the chat composer’s “Auto voice” toggle: while on, replies are spoken as they arrive and the agent is told to keep them short and spoken-friendly.',
+
+    // Privacy dashboard (Phase 4).
+    'settings.privacy.pipeline': 'Your voice and chat pipeline',
+    'settings.privacy.pipeline.help':
+      'Where each configured stage runs. “On-device” means the work never leaves this computer; “Region” is your ANX node; “Public cloud” is a third-party provider.',
+    'settings.privacy.stage.llm': 'Chat model (LLM)',
+    'settings.privacy.stage.stt': 'Speech-to-text (STT)',
+    'settings.privacy.stage.tts': 'Text-to-speech (TTS)',
+    'settings.privacy.stage.wake': 'Wake word',
+    'settings.privacy.stage.unset': 'Not configured',
+    'settings.privacy.where.onDevice': 'On-device',
+    'settings.privacy.where.region': 'Region (private)',
+    'settings.privacy.where.publicCloud': 'Public cloud',
+    'settings.privacy.where.unknown': 'Unknown',
+    'settings.privacy.catalog': 'Models available in chats',
+    'settings.privacy.catalog.help':
+      'How the models your subscription entitles you to are hosted. Private and edge routes may point at the same hardware; you see “private” for your own node and “edge” for someone else’s.',
+    'settings.privacy.catalog.empty': 'No models available yet.',
+    'settings.privacy.badge.public_cloud': 'Public cloud',
+    'settings.privacy.badge.managed_cloud': 'Managed cloud',
+    'settings.privacy.badge.private_cloud': 'Private / self-hosted',
+    'settings.privacy.badge.edge_processing': 'Edge / on-device',
+    'settings.privacy.badge.no_logging': 'No logging',
+    'settings.privacy.badge.no_training': 'No training',
+    'settings.privacy.badge.no_moderation': 'No moderation',
+    'settings.privacy.badge.uncensored': 'Uncensored',
+    'settings.privacy.badge.self_hosted': 'Self-hosted',
+    'settings.privacy.badge.cloud': 'Cloud',
   },
 
   de: {
@@ -457,6 +535,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'Bei einer neuen Nachricht',
     'settings.companion.wake.onMessage.help': 'Ob ein Begleiter erscheint, wenn sein Agent Ihnen schreibt, während der Chat im Hintergrund ist.',
     'settings.companion.wake.openNotifications': 'Benachrichtigungen konfigurieren',
+    'settings.companion.camera':
+      "Kamerarahmen",
+    'settings.companion.camera.help':
+      "Wie der Companion im Bild sitzt: eine nahe Gesichtsaufnahme, Kopf und Schultern, der ganze Körper oder eigene Kamerawerte.",
+    'settings.companion.camera.face':
+      "Gesicht nah",
+    'settings.companion.camera.bust':
+      "Kopf und Schultern",
+    'settings.companion.camera.fullBody':
+      "Ganzer Körper",
+    'settings.companion.camera.custom':
+      "Eigene Werte",
+    'settings.companion.camera.distance':
+      "Abstand ({m} m)",
+    'settings.companion.camera.distance.help':
+      "Wie weit die Kamera vom Avatar entfernt ist.",
+    'settings.companion.camera.height':
+      "Höhe ({m} m)",
+    'settings.companion.camera.height.help':
+      "Wie hoch die Kamera über dem Boden steht.",
+    'settings.companion.camera.pitch':
+      "Neigung nach unten ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "Wie weit die Kamera zum Avatar hinunterblickt.",
+    'settings.companion.camera.fov':
+      "Sichtfeld ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Vertikaler Objektivwinkel — weiter zeigt mehr vom Raum.",
     'settings.companion.defaultVrm': 'Standard-Avatar-Modell',
     'settings.companion.defaultVrm.help': 'Das VRM-Modell, mit dem jeder Agent ohne eigenes Modell dargestellt wird.',
     'settings.companion.defaultVrm.none': 'Keines (eigenes des Agenten verwenden)',
@@ -506,6 +612,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Probe wird hochgeladen…',
     'settings.tts.sample.failed': 'Probe konnte nicht hochgeladen werden.',
     'settings.agents.avatar.fallback': 'Ohne Auswahl wird das Standard-Avatar-Modell verwendet.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'Sprache',
+    'settings.nav.privacy': 'Datenschutz',
+    'settings.voice.help': 'Wie du mit Agenten sprichst: turnusmäßige Sprache oder ein Live-Anruf, und was eine neue Nachricht mit laufender Sprachausgabe macht.',
+    'settings.voice.mode': 'Sprachmodus',
+    'settings.voice.mode.help': 'Turnusmäßige Sprache wandelt dein Gesagtes in Text um, antwortet mit Text und kann die Antwort vorlesen. Ein Live-Anruf hält eine durchgehende Audioverbindung, sodass du natürlich sprechen und unterbrechen kannst.',
+    'settings.voice.mode.turns': 'Turnusmäßige Sprache (Speech-to-Text + Text-to-Speech)',
+    'settings.voice.mode.realtime': 'Live-Sprachanruf (WebRTC)',
+    'settings.voice.interrupt': 'Wenn ich eine Nachricht sende',
+    'settings.voice.interrupt.help': 'Was mit Sprache passiert, die noch läuft oder in der Warteschlange steht, wenn du eine neue Nachricht sendest.',
+    'settings.voice.interrupt.skip_current': 'Aktuelle Antwort stoppen, Rest in der Warteschlange lassen',
+    'settings.voice.interrupt.clear_queue': 'Alles stoppen (Warteschlange leeren)',
+    'settings.voice.interrupt.off': 'Sprache zu Ende laufen lassen',
+    'settings.voice.autoSpeak': 'Agentenantworten laut vorlesen',
+    'settings.voice.autoSpeak.help': 'Teilt den „Auto-Stimme“-Schalter des Chat-Eingabefelds: solange an, werden Antworten beim Eintreffen vorgelesen und der Agent wird gebeten, sie kurz und sprechfreundlich zu halten.',
+    'settings.privacy.pipeline': 'Deine Sprach- und Chat-Pipeline',
+    'settings.privacy.pipeline.help': 'Wo jede konfigurierte Stufe läuft. „Auf dem Gerät“ heißt, die Arbeit verlässt diesen Computer nie; „Region“ ist dein ANX-Knoten; „Öffentliche Cloud“ ist ein Drittanbieter.',
+    'settings.privacy.stage.llm': 'Chat-Modell (LLM)',
+    'settings.privacy.stage.stt': 'Sprache-zu-Text (STT)',
+    'settings.privacy.stage.tts': 'Text-zu-Sprache (TTS)',
+    'settings.privacy.stage.wake': 'Aufweckwort',
+    'settings.privacy.stage.unset': 'Nicht konfiguriert',
+    'settings.privacy.where.onDevice': 'Auf dem Gerät',
+    'settings.privacy.where.region': 'Region (privat)',
+    'settings.privacy.where.publicCloud': 'Öffentliche Cloud',
+    'settings.privacy.where.unknown': 'Unbekannt',
+    'settings.privacy.catalog': 'In Chats verfügbare Modelle',
+    'settings.privacy.catalog.help': 'Wie die Modelle, auf die dein Abo Anspruch gibt, gehostet werden. Private und Edge-Routen können auf dieselbe Hardware zeigen; du siehst „privat“ für deinen eigenen Knoten und „edge“ für einen fremden.',
+    'settings.privacy.catalog.empty': 'Noch keine Modelle verfügbar.',
+    'settings.privacy.badge.public_cloud': 'Öffentliche Cloud',
+    'settings.privacy.badge.managed_cloud': 'Verwaltete Cloud',
+    'settings.privacy.badge.private_cloud': 'Privat / selbst gehostet',
+    'settings.privacy.badge.edge_processing': 'Edge / auf dem Gerät',
+    'settings.privacy.badge.no_logging': 'Keine Protokollierung',
+    'settings.privacy.badge.no_training': 'Kein Training',
+    'settings.privacy.badge.no_moderation': 'Keine Moderation',
+    'settings.privacy.badge.uncensored': 'Unzensiert',
+    'settings.privacy.badge.self_hosted': 'Selbst gehostet',
+    'settings.privacy.badge.cloud': 'Cloud',
+    'settings.privacy.help': 'Wo die von dir genutzten Modelle tatsächlich laufen – öffentliche Cloud, ein privater Knoten oder auf diesem Gerät – und welche Pipeline-Stufen lokal bleiben.',
   },
 
   es: {
@@ -702,6 +849,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'Al recibir un mensaje nuevo',
     'settings.companion.wake.onMessage.help': 'Si un acompañante aparece cuando su agente te escribe mientras el chat está en segundo plano.',
     'settings.companion.wake.openNotifications': 'Configurar notificaciones',
+    'settings.companion.camera':
+      "Encuadre de cámara",
+    'settings.companion.camera.help':
+      "Cómo se encuadra al compañero: un primer plano de la cara, cabeza y hombros, el cuerpo entero o tus propios valores de cámara.",
+    'settings.companion.camera.face':
+      "Primer plano de la cara",
+    'settings.companion.camera.bust':
+      "Cabeza y hombros",
+    'settings.companion.camera.fullBody':
+      "Cuerpo entero",
+    'settings.companion.camera.custom':
+      "Personalizado",
+    'settings.companion.camera.distance':
+      "Distancia ({m} m)",
+    'settings.companion.camera.distance.help':
+      "A qué distancia está la cámara del avatar.",
+    'settings.companion.camera.height':
+      "Altura ({m} m)",
+    'settings.companion.camera.height.help':
+      "A qué altura está la cámara sobre el suelo.",
+    'settings.companion.camera.pitch':
+      "Inclinación hacia abajo ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "Cuánto mira la cámara hacia el avatar.",
+    'settings.companion.camera.fov':
+      "Campo de visión ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Ángulo vertical del objetivo: más amplio abarca más de la sala.",
     'settings.companion.defaultVrm': 'Modelo de avatar predeterminado',
     'settings.companion.defaultVrm.help': 'El modelo VRM con el que se muestra todo agente que no tenga uno propio.',
     'settings.companion.defaultVrm.none': 'Ninguno (usar el del agente)',
@@ -751,6 +926,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Subiendo muestra…',
     'settings.tts.sample.failed': 'No se pudo subir la muestra.',
     'settings.agents.avatar.fallback': 'Sin selección se usa el modelo de avatar predeterminado.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'Voz',
+    'settings.nav.privacy': 'Privacidad',
+    'settings.voice.help': 'Cómo hablas con los agentes: voz por turnos o una llamada en vivo, y qué hace un mensaje nuevo con el audio en curso.',
+    'settings.voice.mode': 'Modo de voz',
+    'settings.voice.mode.help': 'La voz por turnos transcribe lo que dices, responde con texto y puede leer la respuesta en voz alta. Una llamada en vivo mantiene una conexión de audio continua para hablar e interrumpir con naturalidad.',
+    'settings.voice.mode.turns': 'Voz por turnos (voz a texto + texto a voz)',
+    'settings.voice.mode.realtime': 'Llamada de voz en vivo (WebRTC)',
+    'settings.voice.interrupt': 'Cuando envío un mensaje',
+    'settings.voice.interrupt.help': 'Qué ocurre con la voz que aún suena o está en cola cuando envías un mensaje nuevo.',
+    'settings.voice.interrupt.skip_current': 'Detener la respuesta actual y mantener el resto en cola',
+    'settings.voice.interrupt.clear_queue': 'Detener todo (vaciar la cola)',
+    'settings.voice.interrupt.off': 'Dejar que la voz termine',
+    'settings.voice.autoSpeak': 'Leer en voz alta las respuestas del agente',
+    'settings.voice.autoSpeak.help': 'Comparte el interruptor «Voz automática» del compositor del chat: mientras está activado, las respuestas se leen al llegar y se pide al agente que las mantenga breves y fáciles de pronunciar.',
+    'settings.privacy.pipeline': 'Tu canal de voz y chat',
+    'settings.privacy.pipeline.help': 'Dónde se ejecuta cada etapa configurada. «En el dispositivo» significa que el trabajo nunca sale de este equipo; «Región» es tu nodo ANX; «nube pública» es un proveedor externo.',
+    'settings.privacy.stage.llm': 'Modelo de chat (LLM)',
+    'settings.privacy.stage.stt': 'Voz a texto (STT)',
+    'settings.privacy.stage.tts': 'Texto a voz (TTS)',
+    'settings.privacy.stage.wake': 'Palabra de activación',
+    'settings.privacy.stage.unset': 'Sin configurar',
+    'settings.privacy.where.onDevice': 'En el dispositivo',
+    'settings.privacy.where.region': 'Región (privada)',
+    'settings.privacy.where.publicCloud': 'Nube pública',
+    'settings.privacy.where.unknown': 'Desconocido',
+    'settings.privacy.catalog': 'Modelos disponibles en los chats',
+    'settings.privacy.catalog.help': 'Cómo se alojan los modelos a los que tu suscripción da acceso. Las rutas privadas y de borde pueden apuntar al mismo hardware; verás «privada» para tu propio nodo y «borde» para el de otro.',
+    'settings.privacy.catalog.empty': 'Aún no hay modelos disponibles.',
+    'settings.privacy.badge.public_cloud': 'Nube pública',
+    'settings.privacy.badge.managed_cloud': 'Nube gestionada',
+    'settings.privacy.badge.private_cloud': 'Privada / autoalojada',
+    'settings.privacy.badge.edge_processing': 'Borde / en el dispositivo',
+    'settings.privacy.badge.no_logging': 'Sin registro',
+    'settings.privacy.badge.no_training': 'Sin entrenamiento',
+    'settings.privacy.badge.no_moderation': 'Sin moderación',
+    'settings.privacy.badge.uncensored': 'Sin censura',
+    'settings.privacy.badge.self_hosted': 'Autoalojado',
+    'settings.privacy.badge.cloud': 'Nube',
+    'settings.privacy.help': 'Dónde se ejecutan realmente los modelos que usas: nube pública, un nodo privado o este dispositivo, y qué etapas del proceso permanecen locales.',
   },
 
   fr: {
@@ -949,6 +1165,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'À la réception d’un message',
     'settings.companion.wake.onMessage.help': 'Si un compagnon apparaît quand son agent vous écrit pendant que le chat est en arrière-plan.',
     'settings.companion.wake.openNotifications': 'Configurer les notifications',
+    'settings.companion.camera':
+      "Cadrage de la caméra",
+    'settings.companion.camera.help':
+      "Comment le compagnon est cadré : gros plan sur le visage, tête et épaules, corps entier, ou vos propres valeurs de caméra.",
+    'settings.companion.camera.face':
+      "Gros plan visage",
+    'settings.companion.camera.bust':
+      "Tête et épaules",
+    'settings.companion.camera.fullBody':
+      "Corps entier",
+    'settings.companion.camera.custom':
+      "Personnalisé",
+    'settings.companion.camera.distance':
+      "Distance ({m} m)",
+    'settings.companion.camera.distance.help':
+      "À quelle distance la caméra se trouve de l'avatar.",
+    'settings.companion.camera.height':
+      "Hauteur ({m} m)",
+    'settings.companion.camera.height.help':
+      "À quelle hauteur la caméra se trouve au-dessus du sol.",
+    'settings.companion.camera.pitch':
+      "Inclinaison vers le bas ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "De combien la caméra regarde vers l'avatar.",
+    'settings.companion.camera.fov':
+      "Champ de vision ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Angle vertical de l'objectif — plus large montre davantage de la pièce.",
     'settings.companion.defaultVrm': 'Modèle d’avatar par défaut',
     'settings.companion.defaultVrm.help': 'Le modèle VRM utilisé pour tout agent qui n’en a pas.',
     'settings.companion.defaultVrm.none': 'Aucun (utiliser celui de l’agent)',
@@ -998,6 +1242,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Envoi de l’échantillon…',
     'settings.tts.sample.failed': 'Impossible d’envoyer l’échantillon.',
     'settings.agents.avatar.fallback': 'Sans choix, le modèle d’avatar par défaut est utilisé.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'Voix',
+    'settings.nav.privacy': 'Confidentialité',
+    'settings.voice.help': 'Comment vous parlez aux agents : voix par tours ou appel en direct, et ce qu\'un nouveau message fait à la lecture en cours.',
+    'settings.voice.mode': 'Mode vocal',
+    'settings.voice.mode.help': 'La voix par tours transcrit ce que vous dites, répond par texte et peut lire la réponse à voix haute. Un appel en direct garde une connexion audio continue pour parler et interrompre naturellement.',
+    'settings.voice.mode.turns': 'Voix par tours (parole vers texte + texte vers parole)',
+    'settings.voice.mode.realtime': 'Appel vocal en direct (WebRTC)',
+    'settings.voice.interrupt': 'Quand j\'envoie un message',
+    'settings.voice.interrupt.help': 'Ce qui arrive à la voix en cours ou en file d\'attente lorsque vous envoyez un nouveau message.',
+    'settings.voice.interrupt.skip_current': 'Arrêter la réponse en cours, garder le reste en file',
+    'settings.voice.interrupt.clear_queue': 'Tout arrêter (vider la file)',
+    'settings.voice.interrupt.off': 'Laisser la voix se terminer',
+    'settings.voice.autoSpeak': 'Lire à voix haute les réponses de l\'agent',
+    'settings.voice.autoSpeak.help': 'Partage le commutateur « Voix auto » du composeur de chat : tant qu\'il est activé, les réponses sont lues à leur arrivée et l\'agent est invité à les garder courtes et faciles à prononcer.',
+    'settings.privacy.pipeline': 'Votre pipeline voix et chat',
+    'settings.privacy.pipeline.help': 'Où s\'exécute chaque étape configurée. « Sur l\'appareil » signifie que le traitement ne quitte jamais cet ordinateur ; « Région » est votre nœud ANX ; « cloud public » est un fournisseur tiers.',
+    'settings.privacy.stage.llm': 'Modèle de chat (LLM)',
+    'settings.privacy.stage.stt': 'Parole vers texte (STT)',
+    'settings.privacy.stage.tts': 'Texte vers parole (TTS)',
+    'settings.privacy.stage.wake': 'Mot d\'activation',
+    'settings.privacy.stage.unset': 'Non configuré',
+    'settings.privacy.where.onDevice': 'Sur l\'appareil',
+    'settings.privacy.where.region': 'Région (privé)',
+    'settings.privacy.where.publicCloud': 'Cloud public',
+    'settings.privacy.where.unknown': 'Inconnu',
+    'settings.privacy.catalog': 'Modèles disponibles dans les chats',
+    'settings.privacy.catalog.help': 'Comment sont hébergés les modèles auxquels votre abonnement donne droit. Les routes privées et edge peuvent pointer vers le même matériel ; vous voyez « privé » pour votre nœud et « edge » pour celui d\'un autre.',
+    'settings.privacy.catalog.empty': 'Aucun modèle disponible pour l\'instant.',
+    'settings.privacy.badge.public_cloud': 'Cloud public',
+    'settings.privacy.badge.managed_cloud': 'Cloud géré',
+    'settings.privacy.badge.private_cloud': 'Privé / auto-hébergé',
+    'settings.privacy.badge.edge_processing': 'Edge / sur l\'appareil',
+    'settings.privacy.badge.no_logging': 'Sans journalisation',
+    'settings.privacy.badge.no_training': 'Sans entraînement',
+    'settings.privacy.badge.no_moderation': 'Sans modération',
+    'settings.privacy.badge.uncensored': 'Non censuré',
+    'settings.privacy.badge.self_hosted': 'Auto-hébergé',
+    'settings.privacy.badge.cloud': 'Cloud',
+    'settings.privacy.help': 'Où s\'exécutent réellement les modèles que vous utilisez : cloud public, nœud privé ou cet appareil, et quelles étapes du pipeline restent locales.',
   },
 
   ru: {
@@ -1195,6 +1480,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'При новом сообщении',
     'settings.companion.wake.onMessage.help': 'Появляется ли компаньон, когда его агент пишет вам, а чат находится в фоне.',
     'settings.companion.wake.openNotifications': 'Настроить уведомления',
+    'settings.companion.camera':
+      "Кадрирование камеры",
+    'settings.companion.camera.help':
+      "Как показан компаньон: крупный план лица, голова и плечи, всё тело или свои параметры камеры.",
+    'settings.companion.camera.face':
+      "Крупный план лица",
+    'settings.companion.camera.bust':
+      "Голова и плечи",
+    'settings.companion.camera.fullBody':
+      "В полный рост",
+    'settings.companion.camera.custom':
+      "Свои параметры",
+    'settings.companion.camera.distance':
+      "Расстояние ({m} м)",
+    'settings.companion.camera.distance.help':
+      "На каком расстоянии камера от аватара.",
+    'settings.companion.camera.height':
+      "Высота ({m} м)",
+    'settings.companion.camera.height.help':
+      "На какой высоте камера над полом.",
+    'settings.companion.camera.pitch':
+      "Наклон вниз ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "Насколько камера смотрит вниз на аватара.",
+    'settings.companion.camera.fov':
+      "Угол обзора ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Вертикальный угол объектива — шире показывает больше комнаты.",
     'settings.companion.defaultVrm': 'Модель аватара по умолчанию',
     'settings.companion.defaultVrm.help': 'VRM-модель, с которой отображается любой агент без собственной.',
     'settings.companion.defaultVrm.none': 'Нет (использовать собственную агента)',
@@ -1244,6 +1557,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Загрузка образца…',
     'settings.tts.sample.failed': 'Не удалось загрузить образец.',
     'settings.agents.avatar.fallback': 'Без выбора используется модель аватара по умолчанию.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'Голос',
+    'settings.nav.privacy': 'Конфиденциальность',
+    'settings.voice.help': 'Как вы общаетесь с агентами: поочерёдная речь или живой звонок, и что новая реплика делает с текущим воспроизведением.',
+    'settings.voice.mode': 'Режим голоса',
+    'settings.voice.mode.help': 'Поочерёдная речь распознаёт сказанное, отвечает текстом и может озвучить ответ. Живой звонок держит постоянное аудиосоединение, чтобы вы могли говорить и перебивать естественно.',
+    'settings.voice.mode.turns': 'Поочерёдная речь (речь в текст + текст в речь)',
+    'settings.voice.mode.realtime': 'Живой голосовой звонок (WebRTC)',
+    'settings.voice.interrupt': 'Когда я отправляю сообщение',
+    'settings.voice.interrupt.help': 'Что происходит с речью, которая ещё звучит или стоит в очереди, когда вы отправляете новое сообщение.',
+    'settings.voice.interrupt.skip_current': 'Остановить текущий ответ, остальные оставить в очереди',
+    'settings.voice.interrupt.clear_queue': 'Остановить всё (очистить очередь)',
+    'settings.voice.interrupt.off': 'Дать речи доиграть',
+    'settings.voice.autoSpeak': 'Озвучивать ответы агента',
+    'settings.voice.autoSpeak.help': 'Общий переключатель «Автоголос» с полем ввода чата: пока включён, ответы озвучиваются по мере поступления, а агент просит держать их краткими и удобными для произнесения.',
+    'settings.privacy.pipeline': 'Ваш голосовой и чатовый конвейер',
+    'settings.privacy.pipeline.help': 'Где выполняется каждый настроенный этап. «На устройстве» — работа не покидает этот компьютер; «Регион» — ваш узел ANX; «публичное облако» — сторонний провайдер.',
+    'settings.privacy.stage.llm': 'Модель чата (LLM)',
+    'settings.privacy.stage.stt': 'Речь в текст (STT)',
+    'settings.privacy.stage.tts': 'Текст в речь (TTS)',
+    'settings.privacy.stage.wake': 'Слово активации',
+    'settings.privacy.stage.unset': 'Не настроено',
+    'settings.privacy.where.onDevice': 'На устройстве',
+    'settings.privacy.where.region': 'Регион (приватно)',
+    'settings.privacy.where.publicCloud': 'Публичное облако',
+    'settings.privacy.where.unknown': 'Неизвестно',
+    'settings.privacy.catalog': 'Модели, доступные в чатах',
+    'settings.privacy.catalog.help': 'Как размещены модели, доступные по вашей подписке. Приватные и граничные маршруты могут указывать на одно железо; вы видите «приватный» для своего узла и «граничный» для чужого.',
+    'settings.privacy.catalog.empty': 'Пока нет доступных моделей.',
+    'settings.privacy.badge.public_cloud': 'Публичное облако',
+    'settings.privacy.badge.managed_cloud': 'Управляемое облако',
+    'settings.privacy.badge.private_cloud': 'Приватно / самохостинг',
+    'settings.privacy.badge.edge_processing': 'Граница / на устройстве',
+    'settings.privacy.badge.no_logging': 'Без логирования',
+    'settings.privacy.badge.no_training': 'Без обучения',
+    'settings.privacy.badge.no_moderation': 'Без модерации',
+    'settings.privacy.badge.uncensored': 'Без цензуры',
+    'settings.privacy.badge.self_hosted': 'Самохостинг',
+    'settings.privacy.badge.cloud': 'Облако',
+    'settings.privacy.help': 'Где на самом деле работают используемые вами модели: публичное облако, приватный узел или это устройство, и какие этапы конвейера остаются локальными.',
   },
 
   uk: {
@@ -1442,6 +1796,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'При новому повідомленні',
     'settings.companion.wake.onMessage.help': 'Чи з’являється компаньйон, коли його агент пише вам, а чат у фоні.',
     'settings.companion.wake.openNotifications': 'Налаштувати сповіщення',
+    'settings.companion.camera':
+      "Кадрування камери",
+    'settings.companion.camera.help':
+      "Як показано компаньйона: великий план обличчя, голова й плечі, усе тіло або власні параметри камери.",
+    'settings.companion.camera.face':
+      "Великий план обличчя",
+    'settings.companion.camera.bust':
+      "Голова й плечі",
+    'settings.companion.camera.fullBody':
+      "На весь зріст",
+    'settings.companion.camera.custom':
+      "Власні параметри",
+    'settings.companion.camera.distance':
+      "Відстань ({m} м)",
+    'settings.companion.camera.distance.help':
+      "На якій відстані камера від аватара.",
+    'settings.companion.camera.height':
+      "Висота ({m} м)",
+    'settings.companion.camera.height.help':
+      "На якій висоті камера над підлогою.",
+    'settings.companion.camera.pitch':
+      "Нахил униз ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "Наскільки камера дивиться вниз на аватара.",
+    'settings.companion.camera.fov':
+      "Кут огляду ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Вертикальний кут об’єктива — ширше показує більше кімнати.",
     'settings.companion.defaultVrm': 'Модель аватара за замовчуванням',
     'settings.companion.defaultVrm.help': 'VRM-модель, з якою показується будь-який агент без власної.',
     'settings.companion.defaultVrm.none': 'Немає (використовувати власну агента)',
@@ -1491,6 +1873,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Завантаження зразка…',
     'settings.tts.sample.failed': 'Не вдалося завантажити зразок.',
     'settings.agents.avatar.fallback': 'Без вибору використовується модель аватара за замовчуванням.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'Голос',
+    'settings.nav.privacy': 'Конфіденційність',
+    'settings.voice.help': 'Як ви спілкуєтесь з агентами: почергова мова або живий дзвінок, і що нове повідомлення робить із поточним відтворенням.',
+    'settings.voice.mode': 'Режим голосу',
+    'settings.voice.mode.help': 'Почергова мова розпізнає сказане, відповідає текстом і може озвучити відповідь. Живий дзвінок тримає постійне аудіоз\'єднання, щоб ви могли говорити й перебивати природно.',
+    'settings.voice.mode.turns': 'Почергова мова (мовлення в текст + текст у мовлення)',
+    'settings.voice.mode.realtime': 'Живий голосовий дзвінок (WebRTC)',
+    'settings.voice.interrupt': 'Коли я надсилаю повідомлення',
+    'settings.voice.interrupt.help': 'Що відбувається з мовленням, яке ще звучить або в черзі, коли ви надсилаєте нове повідомлення.',
+    'settings.voice.interrupt.skip_current': 'Зупинити поточну відповідь, решту залишити в черзі',
+    'settings.voice.interrupt.clear_queue': 'Зупинити все (очистити чергу)',
+    'settings.voice.interrupt.off': 'Дати мовленню дозвучати',
+    'settings.voice.autoSpeak': 'Озвучувати відповіді агента',
+    'settings.voice.autoSpeak.help': 'Спільний перемикач «Автоголос» з полем введення чату: поки увімкнено, відповіді озвучуються в міру надходження, а агента просять робити їх короткими й зручними для вимови.',
+    'settings.privacy.pipeline': 'Ваш голосовий і чатовий конвеєр',
+    'settings.privacy.pipeline.help': 'Де виконується кожен налаштований етап. «На пристрої» — робота не залишає цей комп\'ютер; «Регіон» — ваш вузол ANX; «публічна хмара» — сторонній провайдер.',
+    'settings.privacy.stage.llm': 'Модель чату (LLM)',
+    'settings.privacy.stage.stt': 'Мовлення в текст (STT)',
+    'settings.privacy.stage.tts': 'Текст у мовлення (TTS)',
+    'settings.privacy.stage.wake': 'Слово активації',
+    'settings.privacy.stage.unset': 'Не налаштовано',
+    'settings.privacy.where.onDevice': 'На пристрої',
+    'settings.privacy.where.region': 'Регіон (приватно)',
+    'settings.privacy.where.publicCloud': 'Публічна хмара',
+    'settings.privacy.where.unknown': 'Невідомо',
+    'settings.privacy.catalog': 'Моделі, доступні в чатах',
+    'settings.privacy.catalog.help': 'Як розміщені моделі, доступні за вашою підпискою. Приватні та граничні маршрути можуть вказувати на те саме обладнання; ви бачите «приватний» для свого вузла і «граничний» для чужого.',
+    'settings.privacy.catalog.empty': 'Поки немає доступних моделей.',
+    'settings.privacy.badge.public_cloud': 'Публічна хмара',
+    'settings.privacy.badge.managed_cloud': 'Керована хмара',
+    'settings.privacy.badge.private_cloud': 'Приватно / самостійний хостинг',
+    'settings.privacy.badge.edge_processing': 'Границя / на пристрої',
+    'settings.privacy.badge.no_logging': 'Без логування',
+    'settings.privacy.badge.no_training': 'Без навчання',
+    'settings.privacy.badge.no_moderation': 'Без модерації',
+    'settings.privacy.badge.uncensored': 'Без цензури',
+    'settings.privacy.badge.self_hosted': 'Самостійний хостинг',
+    'settings.privacy.badge.cloud': 'Хмара',
+    'settings.privacy.help': 'Де насправді працюють моделі, які ви використовуєте: публічна хмара, приватний вузол чи цей пристрій, і які етапи конвеєра залишаються локальними.',
   },
 
   et: {
@@ -1688,6 +2111,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'Uue sõnumi korral',
     'settings.companion.wake.onMessage.help': 'Kas kaaslane avaneb, kui tema agent kirjutab teile, kui vestlus on taustal.',
     'settings.companion.wake.openNotifications': 'Seadista teavitusi',
+    'settings.companion.camera':
+      "Kaamera raamimine",
+    'settings.companion.camera.help':
+      "Kuidas kaaslast ekraanil raamitakse: lähivõte näost, pea ja õlad, terve keha või sinu enda kaameraväärtused.",
+    'settings.companion.camera.face':
+      "Lähivõte näost",
+    'settings.companion.camera.bust':
+      "Pea ja õlad",
+    'settings.companion.camera.fullBody':
+      "Terve keha",
+    'settings.companion.camera.custom':
+      "Kohandatud",
+    'settings.companion.camera.distance':
+      "Kaugus ({m} m)",
+    'settings.companion.camera.distance.help':
+      "Kui kaugel on kaamera avatarist.",
+    'settings.companion.camera.height':
+      "Kõrgus ({m} m)",
+    'settings.companion.camera.height.help':
+      "Kui kõrgel on kaamera maapinnast.",
+    'settings.companion.camera.pitch':
+      "Allapoole kalle ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "Kui palju vaatab kaamera avatari poole alla.",
+    'settings.companion.camera.fov':
+      "Vaateväli ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Objektiivi vertikaalnurk — laiem mahutab rohkem ruumi.",
     'settings.companion.defaultVrm': 'Vaikimisi avatari mudel',
     'settings.companion.defaultVrm.help': 'VRM-mudel, millega kuvatakse iga agent, kellel oma mudelit pole.',
     'settings.companion.defaultVrm.none': 'Puudub (kasuta agendi oma)',
@@ -1737,6 +2188,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Näidise üleslaadimine…',
     'settings.tts.sample.failed': 'Näidist ei saanud üles laadida.',
     'settings.agents.avatar.fallback': 'Valimata kasutatakse vaikimisi avatari mudelit.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'Hääl',
+    'settings.nav.privacy': 'Privaatsus',
+    'settings.voice.help': 'Kuidas te agentidega räägite: kordamööda kõne või otsekõne, ja mida uus sõnum teeb käimasoleva kõnega.',
+    'settings.voice.mode': 'Hääle režiim',
+    'settings.voice.mode.help': 'Kordamööda kõne transkribeerib sinu jutu, vastab tekstiga ja võib vastuse ette lugeda. Otsekõne hoiab pidevat heliühendust, et saaksid loomulikult rääkida ja vahele segada.',
+    'settings.voice.mode.turns': 'Kordamööda kõne (kõne tekstiks + tekst kõneks)',
+    'settings.voice.mode.realtime': 'Otsekõne (WebRTC)',
+    'settings.voice.interrupt': 'Kui saadan sõnumi',
+    'settings.voice.interrupt.help': 'Mis juhtub kõnega, mis veel mängib või on järjekorras, kui saadad uue sõnumi.',
+    'settings.voice.interrupt.skip_current': 'Peata praegune vastus, jäta ülejäänud järjekorda',
+    'settings.voice.interrupt.clear_queue': 'Peata kõik (tühjenda järjekord)',
+    'settings.voice.interrupt.off': 'Lase kõnel lõpuni mängida',
+    'settings.voice.autoSpeak': 'Loe agendi vastused ette',
+    'settings.voice.autoSpeak.help': 'Jagab vestlusvälja „Automaatne hääl“ lülitit: kui see on sees, loetakse vastused saabudes ette ja agenti palutakse hoida need lühikesed ja hääldussõbralikud.',
+    'settings.privacy.pipeline': 'Sinu hääle- ja vestlusvoog',
+    'settings.privacy.pipeline.help': 'Kus iga seadistatud etapp töötab. „Seadmes“ tähendab, et töö ei lahku sellest arvutist; „Regioon“ on sinu ANX-sõlm; „avalik pilv“ on kolmanda osapoole teenus.',
+    'settings.privacy.stage.llm': 'Vestlusmudel (LLM)',
+    'settings.privacy.stage.stt': 'Kõne tekstiks (STT)',
+    'settings.privacy.stage.tts': 'Tekst kõneks (TTS)',
+    'settings.privacy.stage.wake': 'Äratussõna',
+    'settings.privacy.stage.unset': 'Seadistamata',
+    'settings.privacy.where.onDevice': 'Seadmes',
+    'settings.privacy.where.region': 'Regioon (privaatne)',
+    'settings.privacy.where.publicCloud': 'Avalik pilv',
+    'settings.privacy.where.unknown': 'Teadmata',
+    'settings.privacy.catalog': 'Vestlustes saadaval olevad mudelid',
+    'settings.privacy.catalog.help': 'Kuidas sinu tellimusega kaasnevad mudelid majutatakse. Privaatsed ja servamarsruudid võivad osutada samale riistvarale; sina näed „privaatne“ oma sõlme ja „serv“ teise oma jaoks.',
+    'settings.privacy.catalog.empty': 'Mudeleid pole veel saadaval.',
+    'settings.privacy.badge.public_cloud': 'Avalik pilv',
+    'settings.privacy.badge.managed_cloud': 'Hallatud pilv',
+    'settings.privacy.badge.private_cloud': 'Privaatne / ise majutatud',
+    'settings.privacy.badge.edge_processing': 'Serv / seadmes',
+    'settings.privacy.badge.no_logging': 'Logimiseta',
+    'settings.privacy.badge.no_training': 'Treenimiseta',
+    'settings.privacy.badge.no_moderation': 'Modereerimiseta',
+    'settings.privacy.badge.uncensored': 'Tsenseerimata',
+    'settings.privacy.badge.self_hosted': 'Ise majutatud',
+    'settings.privacy.badge.cloud': 'Pilv',
+    'settings.privacy.help': 'Kus sinu kasutatavad mudelid tegelikult töötavad – avalik pilv, privaatne sõlm või see seade – ja millised voo etapid jäävad kohalikuks.',
   },
 
   it: {
@@ -1933,6 +2425,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'All’arrivo di un nuovo messaggio',
     'settings.companion.wake.onMessage.help': 'Se un compagno compare quando il suo agente ti scrive mentre la chat è in background.',
     'settings.companion.wake.openNotifications': 'Configura le notifiche',
+    'settings.companion.camera':
+      "Inquadratura della camera",
+    'settings.companion.camera.help':
+      "Come viene inquadrato il compagno: un primo piano sul volto, testa e spalle, tutto il corpo o i tuoi valori di camera.",
+    'settings.companion.camera.face':
+      "Primo piano volto",
+    'settings.companion.camera.bust':
+      "Testa e spalle",
+    'settings.companion.camera.fullBody':
+      "Figura intera",
+    'settings.companion.camera.custom':
+      "Personalizzato",
+    'settings.companion.camera.distance':
+      "Distanza ({m} m)",
+    'settings.companion.camera.distance.help':
+      "Quanto dista la camera dall'avatar.",
+    'settings.companion.camera.height':
+      "Altezza ({m} m)",
+    'settings.companion.camera.height.help':
+      "Quanto è alta la camera rispetto al suolo.",
+    'settings.companion.camera.pitch':
+      "Inclinazione verso il basso ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "Quanto la camera guarda verso l'avatar.",
+    'settings.companion.camera.fov':
+      "Campo visivo ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Angolo verticale dell'obiettivo — più ampio mostra più stanza.",
     'settings.companion.defaultVrm': 'Modello avatar predefinito',
     'settings.companion.defaultVrm.help': 'Il modello VRM usato per ogni agente che non ne ha uno proprio.',
     'settings.companion.defaultVrm.none': 'Nessuno (usa quello dell’agente)',
@@ -1982,6 +2502,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Caricamento del campione…',
     'settings.tts.sample.failed': 'Impossibile caricare il campione.',
     'settings.agents.avatar.fallback': 'Senza selezione si usa il modello avatar predefinito.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'Voce',
+    'settings.nav.privacy': 'Privacy',
+    'settings.voice.help': 'Come parli con gli agenti: voce a turni o chiamata dal vivo, e cosa fa un nuovo messaggio all\'audio in corso.',
+    'settings.voice.mode': 'Modalità vocale',
+    'settings.voice.mode.help': 'La voce a turni trascrive ciò che dici, risponde con testo e può leggere la risposta ad alta voce. Una chiamata dal vivo mantiene una connessione audio continua per parlare e interrompere naturalmente.',
+    'settings.voice.mode.turns': 'Voce a turni (da voce a testo + da testo a voce)',
+    'settings.voice.mode.realtime': 'Chiamata vocale dal vivo (WebRTC)',
+    'settings.voice.interrupt': 'Quando invio un messaggio',
+    'settings.voice.interrupt.help': 'Cosa succede all\'audio ancora in riproduzione o in coda quando invii un nuovo messaggio.',
+    'settings.voice.interrupt.skip_current': 'Ferma la risposta attuale, lascia il resto in coda',
+    'settings.voice.interrupt.clear_queue': 'Ferma tutto (svuota la coda)',
+    'settings.voice.interrupt.off': 'Lascia finire l\'audio',
+    'settings.voice.autoSpeak': 'Leggi ad alta voce le risposte dell\'agente',
+    'settings.voice.autoSpeak.help': 'Condivide l\'interruttore «Voce automatica» del compositore della chat: finché è attivo, le risposte vengono lette all\'arrivo e si chiede all\'agente di mantenerle brevi e pronunciabili.',
+    'settings.privacy.pipeline': 'La tua pipeline voce e chat',
+    'settings.privacy.pipeline.help': 'Dove viene eseguita ogni fase configurata. «Sul dispositivo» significa che il lavoro non lascia mai questo computer; «Regione» è il tuo nodo ANX; «cloud pubblico» è un fornitore terzo.',
+    'settings.privacy.stage.llm': 'Modello di chat (LLM)',
+    'settings.privacy.stage.stt': 'Da voce a testo (STT)',
+    'settings.privacy.stage.tts': 'Da testo a voce (TTS)',
+    'settings.privacy.stage.wake': 'Parola di attivazione',
+    'settings.privacy.stage.unset': 'Non configurato',
+    'settings.privacy.where.onDevice': 'Sul dispositivo',
+    'settings.privacy.where.region': 'Regione (privata)',
+    'settings.privacy.where.publicCloud': 'Cloud pubblico',
+    'settings.privacy.where.unknown': 'Sconosciuto',
+    'settings.privacy.catalog': 'Modelli disponibili nelle chat',
+    'settings.privacy.catalog.help': 'Come sono ospitati i modelli a cui il tuo abbonamento dà diritto. Le rotte private ed edge possono puntare allo stesso hardware; tu vedi «privata» per il tuo nodo ed «edge» per quello di un altro.',
+    'settings.privacy.catalog.empty': 'Nessun modello ancora disponibile.',
+    'settings.privacy.badge.public_cloud': 'Cloud pubblico',
+    'settings.privacy.badge.managed_cloud': 'Cloud gestito',
+    'settings.privacy.badge.private_cloud': 'Privata / self-hosted',
+    'settings.privacy.badge.edge_processing': 'Edge / sul dispositivo',
+    'settings.privacy.badge.no_logging': 'Nessuna registrazione',
+    'settings.privacy.badge.no_training': 'Nessun addestramento',
+    'settings.privacy.badge.no_moderation': 'Nessuna moderazione',
+    'settings.privacy.badge.uncensored': 'Senza censura',
+    'settings.privacy.badge.self_hosted': 'Self-hosted',
+    'settings.privacy.badge.cloud': 'Cloud',
+    'settings.privacy.help': 'Dove vengono realmente eseguiti i modelli che usi: cloud pubblico, un nodo privato o questo dispositivo, e quali fasi della pipeline restano locali.',
   },
 
   pt: {
@@ -2178,6 +2739,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'Ao receber uma mensagem nova',
     'settings.companion.wake.onMessage.help': 'Se um acompanhante aparece quando o seu agente lhe escreve com o chat em segundo plano.',
     'settings.companion.wake.openNotifications': 'Configurar notificações',
+    'settings.companion.camera':
+      "Enquadramento da câmara",
+    'settings.companion.camera.help':
+      "Como o companheiro é enquadrado: um plano fechado do rosto, cabeça e ombros, o corpo inteiro ou os teus valores de câmara.",
+    'settings.companion.camera.face':
+      "Plano fechado do rosto",
+    'settings.companion.camera.bust':
+      "Cabeça e ombros",
+    'settings.companion.camera.fullBody':
+      "Corpo inteiro",
+    'settings.companion.camera.custom':
+      "Personalizado",
+    'settings.companion.camera.distance':
+      "Distância ({m} m)",
+    'settings.companion.camera.distance.help':
+      "A que distância está a câmara do avatar.",
+    'settings.companion.camera.height':
+      "Altura ({m} m)",
+    'settings.companion.camera.height.help':
+      "A que altura está a câmara acima do chão.",
+    'settings.companion.camera.pitch':
+      "Inclinação para baixo ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "Quanto a câmara olha para baixo, para o avatar.",
+    'settings.companion.camera.fov':
+      "Campo de visão ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Ângulo vertical da lente — mais amplo mostra mais da sala.",
     'settings.companion.defaultVrm': 'Modelo de avatar predefinido',
     'settings.companion.defaultVrm.help': 'O modelo VRM usado por qualquer agente que não tenha um próprio.',
     'settings.companion.defaultVrm.none': 'Nenhum (usar o do agente)',
@@ -2227,6 +2816,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Carregando amostra…',
     'settings.tts.sample.failed': 'Não foi possível carregar a amostra.',
     'settings.agents.avatar.fallback': 'Sem seleção usa o modelo de avatar predefinido.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'Voz',
+    'settings.nav.privacy': 'Privacidade',
+    'settings.voice.help': 'Como você fala com os agentes: voz por turnos ou chamada ao vivo, e o que uma nova mensagem faz ao áudio em reprodução.',
+    'settings.voice.mode': 'Modo de voz',
+    'settings.voice.mode.help': 'A voz por turnos transcreve o que você diz, responde com texto e pode ler a resposta em voz alta. Uma chamada ao vivo mantém uma conexão de áudio contínua para falar e interromper naturalmente.',
+    'settings.voice.mode.turns': 'Voz por turnos (fala para texto + texto para fala)',
+    'settings.voice.mode.realtime': 'Chamada de voz ao vivo (WebRTC)',
+    'settings.voice.interrupt': 'Quando envio uma mensagem',
+    'settings.voice.interrupt.help': 'O que acontece com o áudio que ainda toca ou está na fila quando você envia uma nova mensagem.',
+    'settings.voice.interrupt.skip_current': 'Parar a resposta atual e manter o resto na fila',
+    'settings.voice.interrupt.clear_queue': 'Parar tudo (limpar a fila)',
+    'settings.voice.interrupt.off': 'Deixar a fala terminar',
+    'settings.voice.autoSpeak': 'Ler em voz alta as respostas do agente',
+    'settings.voice.autoSpeak.help': 'Compartilha o botão «Voz automática» do campo de mensagem: enquanto ativo, as respostas são lidas ao chegar e o agente é instruído a mantê-las curtas e fáceis de pronunciar.',
+    'settings.privacy.pipeline': 'Seu fluxo de voz e chat',
+    'settings.privacy.pipeline.help': 'Onde cada etapa configurada é executada. «No dispositivo» significa que o trabalho nunca sai deste computador; «Região» é o seu nó ANX; «nuvem pública» é um provedor externo.',
+    'settings.privacy.stage.llm': 'Modelo de chat (LLM)',
+    'settings.privacy.stage.stt': 'Fala para texto (STT)',
+    'settings.privacy.stage.tts': 'Texto para fala (TTS)',
+    'settings.privacy.stage.wake': 'Palavra de ativação',
+    'settings.privacy.stage.unset': 'Não configurado',
+    'settings.privacy.where.onDevice': 'No dispositivo',
+    'settings.privacy.where.region': 'Região (privada)',
+    'settings.privacy.where.publicCloud': 'Nuvem pública',
+    'settings.privacy.where.unknown': 'Desconhecido',
+    'settings.privacy.catalog': 'Modelos disponíveis nos chats',
+    'settings.privacy.catalog.help': 'Como os modelos a que a sua assinatura dá direito são hospedados. Rotas privadas e de borda podem apontar para o mesmo hardware; você vê «privada» para o seu nó e «borda» para o de outro.',
+    'settings.privacy.catalog.empty': 'Ainda não há modelos disponíveis.',
+    'settings.privacy.badge.public_cloud': 'Nuvem pública',
+    'settings.privacy.badge.managed_cloud': 'Nuvem gerenciada',
+    'settings.privacy.badge.private_cloud': 'Privada / auto-hospedada',
+    'settings.privacy.badge.edge_processing': 'Borda / no dispositivo',
+    'settings.privacy.badge.no_logging': 'Sem registro',
+    'settings.privacy.badge.no_training': 'Sem treinamento',
+    'settings.privacy.badge.no_moderation': 'Sem moderação',
+    'settings.privacy.badge.uncensored': 'Sem censura',
+    'settings.privacy.badge.self_hosted': 'Auto-hospedado',
+    'settings.privacy.badge.cloud': 'Nuvem',
+    'settings.privacy.help': 'Onde os modelos que você usa realmente são executados: nuvem pública, um nó privado ou este dispositivo, e quais etapas do fluxo permanecem locais.',
   },
 
   nl: {
@@ -2424,6 +3054,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'Bij een nieuw bericht',
     'settings.companion.wake.onMessage.help': 'Of een metgezel verschijnt wanneer zijn agent u bericht terwijl de chat op de achtergrond is.',
     'settings.companion.wake.openNotifications': 'Meldingen instellen',
+    'settings.companion.camera':
+      "Camerakadering",
+    'settings.companion.camera.help':
+      "Hoe de companion in beeld staat: een close-up van het gezicht, hoofd en schouders, het hele lichaam of je eigen camerawaarden.",
+    'settings.companion.camera.face':
+      "Close-up gezicht",
+    'settings.companion.camera.bust':
+      "Hoofd en schouders",
+    'settings.companion.camera.fullBody':
+      "Hele lichaam",
+    'settings.companion.camera.custom':
+      "Aangepast",
+    'settings.companion.camera.distance':
+      "Afstand ({m} m)",
+    'settings.companion.camera.distance.help':
+      "Hoe ver de camera van de avatar staat.",
+    'settings.companion.camera.height':
+      "Hoogte ({m} m)",
+    'settings.companion.camera.height.help':
+      "Hoe hoog de camera boven de grond staat.",
+    'settings.companion.camera.pitch':
+      "Kanteling omlaag ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "Hoe ver de camera naar de avatar omlaag kijkt.",
+    'settings.companion.camera.fov':
+      "Gezichtsveld ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Verticale lenshoek — breder toont meer van de kamer.",
     'settings.companion.defaultVrm': 'Standaard avatarmodel',
     'settings.companion.defaultVrm.help': 'Het VRM-model waarmee elke agent zonder eigen model wordt weergegeven.',
     'settings.companion.defaultVrm.none': 'Geen (gebruik dat van de agent)',
@@ -2473,6 +3131,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Monster uploaden…',
     'settings.tts.sample.failed': 'Kon het monster niet uploaden.',
     'settings.agents.avatar.fallback': 'Zonder keuze wordt het standaard avatarmodel gebruikt.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'Stem',
+    'settings.nav.privacy': 'Privacy',
+    'settings.voice.help': 'Hoe je met agenten praat: beurtelingse spraak of een live gesprek, en wat een nieuw bericht doet met lopende spraak.',
+    'settings.voice.mode': 'Spraakmodus',
+    'settings.voice.mode.help': 'Beurtelingse spraak zet wat je zegt om in tekst, antwoordt met tekst en kan het antwoord voorlezen. Een live gesprek houdt een doorlopende audioverbinding zodat je natuurlijk kunt praten en onderbreken.',
+    'settings.voice.mode.turns': 'Beurtelingse spraak (spraak naar tekst + tekst naar spraak)',
+    'settings.voice.mode.realtime': 'Live spraakgesprek (WebRTC)',
+    'settings.voice.interrupt': 'Wanneer ik een bericht stuur',
+    'settings.voice.interrupt.help': 'Wat er gebeurt met spraak die nog speelt of in de wachtrij staat wanneer je een nieuw bericht stuurt.',
+    'settings.voice.interrupt.skip_current': 'Stop het huidige antwoord, laat de rest in de wachtrij',
+    'settings.voice.interrupt.clear_queue': 'Alles stoppen (wachtrij legen)',
+    'settings.voice.interrupt.off': 'Spraak laten afmaken',
+    'settings.voice.autoSpeak': 'Agentantwoorden hardop voorlezen',
+    'settings.voice.autoSpeak.help': 'Deelt de schakelaar «Automatische stem» van het chatvenster: zolang deze aan staat, worden antwoorden bij aankomst voorgelezen en wordt de agent gevraagd ze kort en spreekbaar te houden.',
+    'settings.privacy.pipeline': 'Jouw spraak- en chatpijplijn',
+    'settings.privacy.pipeline.help': 'Waar elke ingestelde stap draait. «Op het apparaat» betekent dat het werk deze computer nooit verlaat; «Regio» is je ANX-node; «openbare cloud» is een externe aanbieder.',
+    'settings.privacy.stage.llm': 'Chatmodel (LLM)',
+    'settings.privacy.stage.stt': 'Spraak naar tekst (STT)',
+    'settings.privacy.stage.tts': 'Tekst naar spraak (TTS)',
+    'settings.privacy.stage.wake': 'Wekwoord',
+    'settings.privacy.stage.unset': 'Niet ingesteld',
+    'settings.privacy.where.onDevice': 'Op het apparaat',
+    'settings.privacy.where.region': 'Regio (privé)',
+    'settings.privacy.where.publicCloud': 'Openbare cloud',
+    'settings.privacy.where.unknown': 'Onbekend',
+    'settings.privacy.catalog': 'Beschikbare modellen in chats',
+    'settings.privacy.catalog.help': 'Hoe de modellen waarop je abonnement recht geeft worden gehost. Privé- en edge-routes kunnen naar dezelfde hardware wijzen; je ziet «privé» voor je eigen node en «edge» voor dat van een ander.',
+    'settings.privacy.catalog.empty': 'Nog geen modellen beschikbaar.',
+    'settings.privacy.badge.public_cloud': 'Openbare cloud',
+    'settings.privacy.badge.managed_cloud': 'Beheerde cloud',
+    'settings.privacy.badge.private_cloud': 'Privé / zelf gehost',
+    'settings.privacy.badge.edge_processing': 'Edge / op het apparaat',
+    'settings.privacy.badge.no_logging': 'Geen logging',
+    'settings.privacy.badge.no_training': 'Geen training',
+    'settings.privacy.badge.no_moderation': 'Geen moderatie',
+    'settings.privacy.badge.uncensored': 'Ongecensureerd',
+    'settings.privacy.badge.self_hosted': 'Zelf gehost',
+    'settings.privacy.badge.cloud': 'Cloud',
+    'settings.privacy.help': 'Waar de modellen die je gebruikt echt draaien: openbare cloud, een privé-node of dit apparaat, en welke pijplijnstappen lokaal blijven.',
   },
 
   pl: {
@@ -2670,6 +3369,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'Przy nowej wiadomości',
     'settings.companion.wake.onMessage.help': 'Czy towarzysz pojawia się, gdy jego agent pisze do Ciebie, a czat działa w tle.',
     'settings.companion.wake.openNotifications': 'Skonfiguruj powiadomienia',
+    'settings.companion.camera':
+      "Kadrowanie kamery",
+    'settings.companion.camera.help':
+      "Jak kadrowany jest towarzysz: zbliżenie twarzy, głowa i ramiona, całe ciało lub własne parametry kamery.",
+    'settings.companion.camera.face':
+      "Zbliżenie twarzy",
+    'settings.companion.camera.bust':
+      "Głowa i ramiona",
+    'settings.companion.camera.fullBody':
+      "Cała postać",
+    'settings.companion.camera.custom':
+      "Własne",
+    'settings.companion.camera.distance':
+      "Odległość ({m} m)",
+    'settings.companion.camera.distance.help':
+      "Jak daleko kamera znajduje się od awatara.",
+    'settings.companion.camera.height':
+      "Wysokość ({m} m)",
+    'settings.companion.camera.height.help':
+      "Jak wysoko kamera znajduje się nad podłogą.",
+    'settings.companion.camera.pitch':
+      "Pochylenie w dół ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "Jak bardzo kamera patrzy w dół na awatara.",
+    'settings.companion.camera.fov':
+      "Pole widzenia ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Pionowy kąt obiektywu — szerzej pokazuje więcej pokoju.",
     'settings.companion.defaultVrm': 'Domyślny model awatara',
     'settings.companion.defaultVrm.help': 'Model VRM używany dla każdego agenta, który nie ma własnego.',
     'settings.companion.defaultVrm.none': 'Brak (użyj własnego agenta)',
@@ -2719,6 +3446,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Przesyłanie próbki…',
     'settings.tts.sample.failed': 'Nie udało się przesłać próbki.',
     'settings.agents.avatar.fallback': 'Bez wyboru używany jest domyślny model awatara.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'Głos',
+    'settings.nav.privacy': 'Prywatność',
+    'settings.voice.help': 'Jak rozmawiasz z agentami: mowa naprzemienna lub połączenie na żywo, i co nowa wiadomość robi z odtwarzaniem.',
+    'settings.voice.mode': 'Tryb głosu',
+    'settings.voice.mode.help': 'Mowa naprzemienna zapisuje to, co mówisz, odpowiada tekstem i może odczytać odpowiedź na głos. Połączenie na żywo utrzymuje ciągłe połączenie audio, więc możesz mówić i przerywać naturalnie.',
+    'settings.voice.mode.turns': 'Mowa naprzemienna (mowa na tekst + tekst na mowę)',
+    'settings.voice.mode.realtime': 'Połączenie głosowe na żywo (WebRTC)',
+    'settings.voice.interrupt': 'Gdy wysyłam wiadomość',
+    'settings.voice.interrupt.help': 'Co dzieje się z mową, która jeszcze gra lub czeka w kolejce, gdy wysyłasz nową wiadomość.',
+    'settings.voice.interrupt.skip_current': 'Zatrzymaj bieżącą odpowiedź, resztę zostaw w kolejce',
+    'settings.voice.interrupt.clear_queue': 'Zatrzymaj wszystko (wyczyść kolejkę)',
+    'settings.voice.interrupt.off': 'Pozwól mowie dokończyć',
+    'settings.voice.autoSpeak': 'Czytaj odpowiedzi agenta na głos',
+    'settings.voice.autoSpeak.help': 'Współdzieli przełącznik „Automatyczny głos” pola czatu: gdy jest włączony, odpowiedzi są czytane po nadejściu, a agent jest proszony o krótkie i łatwe do wypowiedzenia.',
+    'settings.privacy.pipeline': 'Twój potok głosu i czatu',
+    'settings.privacy.pipeline.help': 'Gdzie działa każdy skonfigurowany etap. „Na urządzeniu” oznacza, że praca nigdy nie opuszcza tego komputera; „Region” to twój węzeł ANX; „chmura publiczna” to zewnętrzny dostawca.',
+    'settings.privacy.stage.llm': 'Model czatu (LLM)',
+    'settings.privacy.stage.stt': 'Mowa na tekst (STT)',
+    'settings.privacy.stage.tts': 'Tekst na mowę (TTS)',
+    'settings.privacy.stage.wake': 'Słowo wybudzające',
+    'settings.privacy.stage.unset': 'Nieskonfigurowane',
+    'settings.privacy.where.onDevice': 'Na urządzeniu',
+    'settings.privacy.where.region': 'Region (prywatny)',
+    'settings.privacy.where.publicCloud': 'Chmura publiczna',
+    'settings.privacy.where.unknown': 'Nieznane',
+    'settings.privacy.catalog': 'Modele dostępne w czatach',
+    'settings.privacy.catalog.help': 'Jak hostowane są modele, do których uprawnia twoja subskrypcja. Trasy prywatne i brzegowe mogą wskazywać ten sam sprzęt; widzisz „prywatny” dla swojego węzła i „brzegowy” dla cudzego.',
+    'settings.privacy.catalog.empty': 'Brak dostępnych modeli.',
+    'settings.privacy.badge.public_cloud': 'Chmura publiczna',
+    'settings.privacy.badge.managed_cloud': 'Chmura zarządzana',
+    'settings.privacy.badge.private_cloud': 'Prywatna / self-hosted',
+    'settings.privacy.badge.edge_processing': 'Brzeg / na urządzeniu',
+    'settings.privacy.badge.no_logging': 'Bez rejestrowania',
+    'settings.privacy.badge.no_training': 'Bez trenowania',
+    'settings.privacy.badge.no_moderation': 'Bez moderacji',
+    'settings.privacy.badge.uncensored': 'Bez cenzury',
+    'settings.privacy.badge.self_hosted': 'Self-hosted',
+    'settings.privacy.badge.cloud': 'Chmura',
+    'settings.privacy.help': 'Gdzie naprawdę działają używane przez ciebie modele: chmura publiczna, prywatny węzeł lub to urządzenie, i które etapy potoku pozostają lokalne.',
   },
 
   tr: {
@@ -2917,6 +3685,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'Yeni bir mesaj geldiğinde',
     'settings.companion.wake.onMessage.help': 'Sohbet arka plandayken ajanınız size yazdığında bir yardımcının açılıp açılmayacağı.',
     'settings.companion.wake.openNotifications': 'Bildirimleri yapılandır',
+    'settings.companion.camera':
+      "Kamera çerçevesi",
+    'settings.companion.camera.help':
+      "Yol arkadaşının ekranda nasıl çerçevelendiği: yakın yüz çekimi, baş ve omuzlar, tüm vücut veya kendi kamera değerlerin.",
+    'settings.companion.camera.face':
+      "Yakın yüz çekimi",
+    'settings.companion.camera.bust':
+      "Baş ve omuzlar",
+    'settings.companion.camera.fullBody':
+      "Tüm vücut",
+    'settings.companion.camera.custom':
+      "Özel",
+    'settings.companion.camera.distance':
+      "Mesafe ({m} m)",
+    'settings.companion.camera.distance.help':
+      "Kameranın avatardan ne kadar uzakta olduğu.",
+    'settings.companion.camera.height':
+      "Yükseklik ({m} m)",
+    'settings.companion.camera.height.help':
+      "Kameranın yerden ne kadar yüksekte olduğu.",
+    'settings.companion.camera.pitch':
+      "Aşağı eğim ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "Kameranın avatara ne kadar aşağı baktığı.",
+    'settings.companion.camera.fov':
+      "Görüş alanı ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "Dikey mercek açısı — daha geniş, odanın daha fazlasını gösterir.",
     'settings.companion.defaultVrm': 'Varsayılan avatar modeli',
     'settings.companion.defaultVrm.help': 'Kendi modeli olmayan her ajanın görüntülendiği VRM modeli.',
     'settings.companion.defaultVrm.none': 'Yok (ajanın kendisini kullan)',
@@ -2966,6 +3762,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'Örnek yükleniyor…',
     'settings.tts.sample.failed': 'Örnek yüklenemedi.',
     'settings.agents.avatar.fallback': 'Seçilmezse varsayılan avatar modeli kullanılır.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'Ses',
+    'settings.nav.privacy': 'Gizlilik',
+    'settings.voice.help': 'Ajanlarla nasıl konuştuğunuz: sıralı konuşma veya canlı arama ve yeni bir mesajın çalan sese etkisi.',
+    'settings.voice.mode': 'Ses modu',
+    'settings.voice.mode.help': 'Sıralı konuşma söylediklerinizi yazıya çevirir, metinle yanıtlar ve yanıtı sesli okuyabilir. Canlı arama sürekli bir ses bağlantısı kurar, böylece doğal konuşup sözünü kesebilirsiniz.',
+    'settings.voice.mode.turns': 'Sıralı konuşma (konuşmadan metne + metinden konuşmaya)',
+    'settings.voice.mode.realtime': 'Canlı sesli arama (WebRTC)',
+    'settings.voice.interrupt': 'Mesaj gönderdiğimde',
+    'settings.voice.interrupt.help': 'Yeni bir mesaj gönderdiğinizde hâlâ çalan veya kuyrukta bekleyen sese ne olur.',
+    'settings.voice.interrupt.skip_current': 'Geçerli yanıtı durdur, kalanı kuyrukta bırak',
+    'settings.voice.interrupt.clear_queue': 'Her şeyi durdur (kuyruğu temizle)',
+    'settings.voice.interrupt.off': 'Sesin bitmesini bekle',
+    'settings.voice.autoSpeak': 'Ajan yanıtlarını sesli oku',
+    'settings.voice.autoSpeak.help': 'Sohbet giriş çubuğundaki «Otomatik ses» düğmesini paylaşır: açıkken yanıtlar geldikçe okunur ve ajandan bunları kısa ve konuşmaya uygun tutması istenir.',
+    'settings.privacy.pipeline': 'Ses ve sohbet hattınız',
+    'settings.privacy.pipeline.help': 'Yapılandırılan her aşamanın nerede çalıştığı. «Cihazda» işin bu bilgisayardan hiç çıkmadığı anlamına gelir; «Bölge» ANX düğümünüzdür; «genel bulut» üçüncü taraf sağlayıcıdır.',
+    'settings.privacy.stage.llm': 'Sohbet modeli (LLM)',
+    'settings.privacy.stage.stt': 'Konuşmadan metne (STT)',
+    'settings.privacy.stage.tts': 'Metinden konuşmaya (TTS)',
+    'settings.privacy.stage.wake': 'Uyandırma sözcüğü',
+    'settings.privacy.stage.unset': 'Yapılandırılmadı',
+    'settings.privacy.where.onDevice': 'Cihazda',
+    'settings.privacy.where.region': 'Bölge (özel)',
+    'settings.privacy.where.publicCloud': 'Genel bulut',
+    'settings.privacy.where.unknown': 'Bilinmiyor',
+    'settings.privacy.catalog': 'Sohbetlerde kullanılabilir modeller',
+    'settings.privacy.catalog.help': 'Aboneliğinizin kullanım hakkı verdiği modellerin nasıl barındırıldığı. Özel ve uç rotalar aynı donanıma işaret edebilir; kendi düğümünüz için «özel», başkasınınki için «uç» görürsünüz.',
+    'settings.privacy.catalog.empty': 'Henüz kullanılabilir model yok.',
+    'settings.privacy.badge.public_cloud': 'Genel bulut',
+    'settings.privacy.badge.managed_cloud': 'Yönetilen bulut',
+    'settings.privacy.badge.private_cloud': 'Özel / kendi barındırılan',
+    'settings.privacy.badge.edge_processing': 'Uç / cihazda',
+    'settings.privacy.badge.no_logging': 'Kayıt yok',
+    'settings.privacy.badge.no_training': 'Eğitim yok',
+    'settings.privacy.badge.no_moderation': 'Moderasyon yok',
+    'settings.privacy.badge.uncensored': 'Sansürsüz',
+    'settings.privacy.badge.self_hosted': 'Kendi barındırılan',
+    'settings.privacy.badge.cloud': 'Bulut',
+    'settings.privacy.help': 'Kullandığınız modellerin gerçekte nerede çalıştığı: genel bulut, özel bir düğüm veya bu cihaz ve hangi hat aşamalarının yerel kaldığı.',
   },
 
   ar: {
@@ -3158,6 +3995,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'عند وصول رسالة جديدة',
     'settings.companion.wake.onMessage.help': 'هل يظهر الرفيق عندما يراسلك وكيله بينما الدردشة في الخلفية.',
     'settings.companion.wake.openNotifications': 'تهيئة الإشعارات',
+    'settings.companion.camera':
+      "تأطير الكاميرا",
+    'settings.companion.camera.help':
+      "كيف يظهر الرفيق على الشاشة: لقطة قريبة للوجه، الرأس والكتفان، الجسم كاملًا، أو أرقام الكاميرا الخاصة بك.",
+    'settings.companion.camera.face':
+      "لقطة قريبة للوجه",
+    'settings.companion.camera.bust':
+      "الرأس والكتفان",
+    'settings.companion.camera.fullBody':
+      "الجسم كاملًا",
+    'settings.companion.camera.custom':
+      "مخصص",
+    'settings.companion.camera.distance':
+      "المسافة ({m} م)",
+    'settings.companion.camera.distance.help':
+      "مدى بُعد الكاميرا عن الصورة الرمزية.",
+    'settings.companion.camera.height':
+      "الارتفاع ({m} م)",
+    'settings.companion.camera.height.help':
+      "مدى ارتفاع الكاميرا عن الأرض.",
+    'settings.companion.camera.pitch':
+      "إمالة للأسفل ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "مدى نظر الكاميرا للأسفل نحو الصورة الرمزية.",
+    'settings.companion.camera.fov':
+      "مجال الرؤية ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "زاوية العدسة الرأسية — الأوسع يُظهر مساحة أكبر من الغرفة.",
     'settings.companion.defaultVrm': 'نموذج الصورة الرمزية الافتراضي',
     'settings.companion.defaultVrm.help': 'نموذج VRM الذي يُعرض به كل وكيل ليس لديه نموذج خاص.',
     'settings.companion.defaultVrm.none': 'بلا (استخدام نموذج الوكيل)',
@@ -3207,6 +4072,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'جارٍ رفع العيّنة…',
     'settings.tts.sample.failed': 'تعذّر رفع العيّنة.',
     'settings.agents.avatar.fallback': 'بدون تحديد يُستخدم نموذج الصورة الرمزية الافتراضي.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'الصوت',
+    'settings.nav.privacy': 'الخصوصية',
+    'settings.voice.help': 'كيف تتحدث مع الوكلاء: صوت بالتناوب أو مكالمة مباشرة، وما يفعله رد جديد بالصوت الجاري.',
+    'settings.voice.mode': 'وضع الصوت',
+    'settings.voice.mode.help': 'الصوت بالتناوب ينسخ ما تقوله ويرد بنص ويمكنه قراءة الرد بصوت عالٍ. المكالمة المباشرة تحافظ على اتصال صوتي متواصل لتتحدث وتقاطع بشكل طبيعي.',
+    'settings.voice.mode.turns': 'الصوت بالتناوب (تحويل الكلام إلى نص + النص إلى كلام)',
+    'settings.voice.mode.realtime': 'مكالمة صوتية مباشرة (WebRTC)',
+    'settings.voice.interrupt': 'عندما أرسل رسالة',
+    'settings.voice.interrupt.help': 'ما يحدث للصوت الذي لا يزال يُشغَّل أو في قائمة الانتظار عند إرسال رسالة جديدة.',
+    'settings.voice.interrupt.skip_current': 'أوقف الرد الحالي واترك الباقي في قائمة الانتظار',
+    'settings.voice.interrupt.clear_queue': 'أوقف كل شيء (امسح قائمة الانتظار)',
+    'settings.voice.interrupt.off': 'دع الصوت يكتمل',
+    'settings.voice.autoSpeak': 'اقرأ ردود الوكيل بصوت عالٍ',
+    'settings.voice.autoSpeak.help': 'يشارك مفتاح «الصوت التلقائي» في حقل الدردشة: أثناء تشغيله تُقرأ الردود عند وصولها ويُطلب من الوكيل إبقاؤها قصيرة وسهلة النطق.',
+    'settings.privacy.pipeline': 'مسار الصوت والدردشة لديك',
+    'settings.privacy.pipeline.help': 'أين تعمل كل مرحلة مُهيَّأة. «على الجهاز» يعني أن العمل لا يغادر هذا الحاسوب أبدًا؛ «المنطقة» هي عقدة ANX لديك؛ «السحابة العامة» مزوّد خارجي.',
+    'settings.privacy.stage.llm': 'نموذج الدردشة (LLM)',
+    'settings.privacy.stage.stt': 'الكلام إلى نص (STT)',
+    'settings.privacy.stage.tts': 'النص إلى كلام (TTS)',
+    'settings.privacy.stage.wake': 'كلمة التنبيه',
+    'settings.privacy.stage.unset': 'غير مُهيَّأ',
+    'settings.privacy.where.onDevice': 'على الجهاز',
+    'settings.privacy.where.region': 'المنطقة (خاصة)',
+    'settings.privacy.where.publicCloud': 'السحابة العامة',
+    'settings.privacy.where.unknown': 'غير معروف',
+    'settings.privacy.catalog': 'النماذج المتاحة في الدردشات',
+    'settings.privacy.catalog.help': 'كيف تُستضاف النماذج التي يتيحها اشتراكك. قد تشير المسارات الخاصة والحافية إلى العتاد نفسه؛ ترى «خاصة» لعقدتك و«حافية» لعقدة غيرك.',
+    'settings.privacy.catalog.empty': 'لا توجد نماذج متاحة بعد.',
+    'settings.privacy.badge.public_cloud': 'السحابة العامة',
+    'settings.privacy.badge.managed_cloud': 'السحابة المُدارة',
+    'settings.privacy.badge.private_cloud': 'خاصة / مستضافة ذاتيًا',
+    'settings.privacy.badge.edge_processing': 'الحافة / على الجهاز',
+    'settings.privacy.badge.no_logging': 'بدون تسجيل',
+    'settings.privacy.badge.no_training': 'بدون تدريب',
+    'settings.privacy.badge.no_moderation': 'بدون مراجعة',
+    'settings.privacy.badge.uncensored': 'غير خاضع للرقابة',
+    'settings.privacy.badge.self_hosted': 'مستضاف ذاتيًا',
+    'settings.privacy.badge.cloud': 'السحابة',
+    'settings.privacy.help': 'أين تعمل النماذج التي تستخدمها فعليًا: سحابة عامة أو عقدة خاصة أو هذا الجهاز، وأي مراحل المسار تبقى محلية.',
   },
 
   hi: {
@@ -3402,6 +4308,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': 'नया संदेश आने पर',
     'settings.companion.wake.onMessage.help': 'जब चैट पृष्ठभूमि में हो और उसका एजेंट आपको संदेश भेजे, तो साथी दिखे या नहीं।',
     'settings.companion.wake.openNotifications': 'सूचनाएँ कॉन्फ़िगर करें',
+    'settings.companion.camera':
+      "कैमरा फ़्रेमिंग",
+    'settings.companion.camera.help':
+      "साथी स्क्रीन पर कैसे फ़्रेम होता है: चेहरे का क्लोज़-अप, सिर और कंधे, पूरा शरीर या आपकी अपनी कैमरा सेटिंग।",
+    'settings.companion.camera.face':
+      "चेहरे का क्लोज़-अप",
+    'settings.companion.camera.bust':
+      "सिर और कंधे",
+    'settings.companion.camera.fullBody':
+      "पूरा शरीर",
+    'settings.companion.camera.custom':
+      "कस्टम",
+    'settings.companion.camera.distance':
+      "दूरी ({m} मी)",
+    'settings.companion.camera.distance.help':
+      "कैमरा अवतार से कितनी दूर है।",
+    'settings.companion.camera.height':
+      "ऊँचाई ({m} मी)",
+    'settings.companion.camera.height.help':
+      "कैमरा ज़मीन से कितना ऊपर है।",
+    'settings.companion.camera.pitch':
+      "नीचे झुकाव ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "कैमरा अवतार की ओर कितना नीचे देखता है।",
+    'settings.companion.camera.fov':
+      "दृश्य क्षेत्र ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "लंबवत लेंस कोण — चौड़ा होने पर कमरे का अधिक हिस्सा दिखता है।",
     'settings.companion.defaultVrm': 'डिफ़ॉल्ट अवतार मॉडल',
     'settings.companion.defaultVrm.help': 'वह VRM मॉडल जिसके साथ हर ऐसा एजेंट दिखता है जिसका अपना मॉडल नहीं है।',
     'settings.companion.defaultVrm.none': 'कोई नहीं (एजेंट का अपना उपयोग करें)',
@@ -3451,6 +4385,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'नमूना अपलोड हो रहा है…',
     'settings.tts.sample.failed': 'नमूना अपलोड नहीं हो सका।',
     'settings.agents.avatar.fallback': 'चयन न होने पर डिफ़ॉल्ट अवतार मॉडल उपयोग होता है।',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': 'आवाज़',
+    'settings.nav.privacy': 'गोपनीयता',
+    'settings.voice.help': 'आप एजेंट से कैसे बात करते हैं: बारी-बारी आवाज़ या लाइव कॉल, और नया संदेश चल रही आवाज़ का क्या करता है।',
+    'settings.voice.mode': 'आवाज़ मोड',
+    'settings.voice.mode.help': 'बारी-बारी आवाज़ आपकी बात का लेख लिखती है, पाठ से जवाब देती है और जवाब को पढ़ सकती है। लाइव कॉल निरंतर ऑडियो कनेक्शन रखती है ताकि आप सहज बात कर सकें और बीच में रोक सकें।',
+    'settings.voice.mode.turns': 'बारी-बारी आवाज़ (बोली से पाठ + पाठ से बोली)',
+    'settings.voice.mode.realtime': 'लाइव वॉइस कॉल (WebRTC)',
+    'settings.voice.interrupt': 'जब मैं संदेश भेजता/भेजती हूँ',
+    'settings.voice.interrupt.help': 'नया संदेश भेजने पर उस आवाज़ का क्या होता है जो अभी चल रही है या कतार में है।',
+    'settings.voice.interrupt.skip_current': 'मौजूदा जवाब रोकें, बाकी कतार में रहने दें',
+    'settings.voice.interrupt.clear_queue': 'सब कुछ रोकें (कतार साफ़ करें)',
+    'settings.voice.interrupt.off': 'आवाज़ पूरी होने दें',
+    'settings.voice.autoSpeak': 'एजेंट के जवाब ज़ोर से पढ़ें',
+    'settings.voice.autoSpeak.help': 'चैट इनपुट के «ऑटो वॉइस» टॉगल को साझा करता है: चालू रहने पर जवाब आते ही पढ़े जाते हैं और एजेंट से उन्हें छोटा और बोलने योग्य रखने के लिए कहा जाता है।',
+    'settings.privacy.pipeline': 'आपकी आवाज़ और चैट पाइपलाइन',
+    'settings.privacy.pipeline.help': 'हर कॉन्फ़िगर किया गया चरण कहाँ चलता है। «डिवाइस पर» का अर्थ है काम इस कंप्यूटर से कभी नहीं जाता; «क्षेत्र» आपका ANX नोड है; «सार्वजनिक क्लाउड» कोई तीसरा पक्ष है।',
+    'settings.privacy.stage.llm': 'चैट मॉडल (LLM)',
+    'settings.privacy.stage.stt': 'बोली से पाठ (STT)',
+    'settings.privacy.stage.tts': 'पाठ से बोली (TTS)',
+    'settings.privacy.stage.wake': 'वेक शब्द',
+    'settings.privacy.stage.unset': 'कॉन्फ़िगर नहीं',
+    'settings.privacy.where.onDevice': 'डिवाइस पर',
+    'settings.privacy.where.region': 'क्षेत्र (निजी)',
+    'settings.privacy.where.publicCloud': 'सार्वजनिक क्लाउड',
+    'settings.privacy.where.unknown': 'अज्ञात',
+    'settings.privacy.catalog': 'चैट में उपलब्ध मॉडल',
+    'settings.privacy.catalog.help': 'आपकी सदस्यता जिन मॉडलों का हक़ देती है, वे कैसे होस्ट होते हैं। निजी और एज रूट एक ही हार्डवेयर की ओर इशारा कर सकते हैं; आप अपने नोड के लिए «निजी» और दूसरे के लिए «एज» देखते हैं।',
+    'settings.privacy.catalog.empty': 'अभी कोई मॉडल उपलब्ध नहीं है।',
+    'settings.privacy.badge.public_cloud': 'सार्वजनिक क्लाउड',
+    'settings.privacy.badge.managed_cloud': 'प्रबंधित क्लाउड',
+    'settings.privacy.badge.private_cloud': 'निजी / स्व-होस्टेड',
+    'settings.privacy.badge.edge_processing': 'एज / डिवाइस पर',
+    'settings.privacy.badge.no_logging': 'कोई लॉगिंग नहीं',
+    'settings.privacy.badge.no_training': 'कोई प्रशिक्षण नहीं',
+    'settings.privacy.badge.no_moderation': 'कोई मॉडरेशन नहीं',
+    'settings.privacy.badge.uncensored': 'बिना सेंसर',
+    'settings.privacy.badge.self_hosted': 'स्व-होस्टेड',
+    'settings.privacy.badge.cloud': 'क्लाउड',
+    'settings.privacy.help': 'आपके द्वारा उपयोग किए जाने वाले मॉडल वास्तव में कहाँ चलते हैं: सार्वजनिक क्लाउड, एक निजी नोड या यह डिवाइस, और कौन-से पाइपलाइन चरण स्थानीय रहते हैं।',
   },
 
   zh: {
@@ -3626,6 +4601,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': '收到新消息时',
     'settings.companion.wake.onMessage.help': '当聊天处于后台时，其智能体给你发消息是否弹出伙伴。',
     'settings.companion.wake.openNotifications': '配置通知',
+    'settings.companion.camera':
+      "镜头取景",
+    'settings.companion.camera.help':
+      "伙伴在屏幕上的取景方式：面部特写、头部与肩部、全身，或你自己的镜头参数。",
+    'settings.companion.camera.face':
+      "面部特写",
+    'settings.companion.camera.bust':
+      "头部与肩部",
+    'settings.companion.camera.fullBody':
+      "全身",
+    'settings.companion.camera.custom':
+      "自定义",
+    'settings.companion.camera.distance':
+      "距离（{m} 米）",
+    'settings.companion.camera.distance.help':
+      "镜头与虚拟形象之间的距离。",
+    'settings.companion.camera.height':
+      "高度（{m} 米）",
+    'settings.companion.camera.height.help':
+      "镜头高出地面的高度。",
+    'settings.companion.camera.pitch':
+      "向下俯仰（{deg}°）",
+    'settings.companion.camera.pitch.help':
+      "镜头向虚拟形象俯视的程度。",
+    'settings.companion.camera.fov':
+      "视场角（{deg}°）",
+    'settings.companion.camera.fov.help':
+      "垂直镜头角度 — 越宽可容纳的房间越多。",
     'settings.companion.defaultVrm': '默认形象模型',
     'settings.companion.defaultVrm.help': '为所有没有自身模型的智能体渲染所用的 VRM 模型。',
     'settings.companion.defaultVrm.none': '无（使用智能体自带的）',
@@ -3675,6 +4678,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': '正在上传样本…',
     'settings.tts.sample.failed': '无法上传样本。',
     'settings.agents.avatar.fallback': '未选择时使用默认形象模型。',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': '语音',
+    'settings.nav.privacy': '隐私',
+    'settings.voice.help': '你与智能体交谈的方式：轮流语音或实时通话，以及新消息对正在播放的语音有何影响。',
+    'settings.voice.mode': '语音模式',
+    'settings.voice.mode.help': '轮流语音会转录你所说的话，以文本回复，并可朗读回复。实时通话保持持续音频连接，让你自然交谈和打断。',
+    'settings.voice.mode.turns': '轮流语音（语音转文字 + 文字转语音）',
+    'settings.voice.mode.realtime': '实时语音通话（WebRTC）',
+    'settings.voice.interrupt': '当我发送消息时',
+    'settings.voice.interrupt.help': '当你发送新消息时，仍在播放或排队的语音会怎样。',
+    'settings.voice.interrupt.skip_current': '停止当前回复，其余保留在队列中',
+    'settings.voice.interrupt.clear_queue': '全部停止（清空队列）',
+    'settings.voice.interrupt.off': '让语音播完',
+    'settings.voice.autoSpeak': '朗读智能体的回复',
+    'settings.voice.autoSpeak.help': '与聊天输入框的「自动语音」开关共用：开启时，回复到达即朗读，并要求智能体保持简短、适合朗读。',
+    'settings.privacy.pipeline': '你的语音与聊天管线',
+    'settings.privacy.pipeline.help': '每个已配置环节的运行位置。 「设备上」表示处理绝不离开这台电脑；「区域」是你的 ANX 节点；「公共云」是第三方提供商。',
+    'settings.privacy.stage.llm': '聊天模型（LLM）',
+    'settings.privacy.stage.stt': '语音转文字（STT）',
+    'settings.privacy.stage.tts': '文字转语音（TTS）',
+    'settings.privacy.stage.wake': '唤醒词',
+    'settings.privacy.stage.unset': '未配置',
+    'settings.privacy.where.onDevice': '设备上',
+    'settings.privacy.where.region': '区域（私有）',
+    'settings.privacy.where.publicCloud': '公共云',
+    'settings.privacy.where.unknown': '未知',
+    'settings.privacy.catalog': '聊天中可用的模型',
+    'settings.privacy.catalog.help': '你的订阅所涵盖的模型如何托管。私有与边缘路由可能指向同一台硬件；你自己的节点显示「私有」，他人的则显示「边缘」。',
+    'settings.privacy.catalog.empty': '暂无可用模型。',
+    'settings.privacy.badge.public_cloud': '公共云',
+    'settings.privacy.badge.managed_cloud': '托管云',
+    'settings.privacy.badge.private_cloud': '私有 / 自托管',
+    'settings.privacy.badge.edge_processing': '边缘 / 设备上',
+    'settings.privacy.badge.no_logging': '不记录日志',
+    'settings.privacy.badge.no_training': '不用于训练',
+    'settings.privacy.badge.no_moderation': '无内容审核',
+    'settings.privacy.badge.uncensored': '无审查',
+    'settings.privacy.badge.self_hosted': '自托管',
+    'settings.privacy.badge.cloud': '云',
+    'settings.privacy.help': '你使用的模型实际在哪里运行——公共云、私有节点或本设备，以及哪些管线环节保留在本地。',
   },
 
   ja: {
@@ -3868,6 +4912,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': '新着メッセージ時',
     'settings.companion.wake.onMessage.help': 'チャットがバックグラウンドのとき、エージェントからメッセージが届いたらコンパニオンを表示するかどうか。',
     'settings.companion.wake.openNotifications': '通知を設定',
+    'settings.companion.camera':
+      "カメラの構図",
+    'settings.companion.camera.help':
+      "コンパニオンを画面にどう収めるか：顔のアップ、頭と肩、全身、または独自のカメラ値。",
+    'settings.companion.camera.face':
+      "顔のアップ",
+    'settings.companion.camera.bust':
+      "頭と肩",
+    'settings.companion.camera.fullBody':
+      "全身",
+    'settings.companion.camera.custom':
+      "カスタム",
+    'settings.companion.camera.distance':
+      "距離（{m} m）",
+    'settings.companion.camera.distance.help':
+      "カメラがアバターからどれだけ離れているか。",
+    'settings.companion.camera.height':
+      "高さ（{m} m）",
+    'settings.companion.camera.height.help':
+      "カメラが床からどれだけ高い位置にあるか。",
+    'settings.companion.camera.pitch':
+      "下向きの傾き（{deg}°）",
+    'settings.companion.camera.pitch.help':
+      "カメラがアバターを見下ろす角度。",
+    'settings.companion.camera.fov':
+      "視野角（{deg}°）",
+    'settings.companion.camera.fov.help':
+      "レンズの垂直角度 — 広いほど部屋を広く映します。",
     'settings.companion.defaultVrm': '既定のアバターモデル',
     'settings.companion.defaultVrm.help': '自分のモデルを持たないすべてのエージェントの表示に使う VRM モデル。',
     'settings.companion.defaultVrm.none': 'なし（エージェント自身を使用）',
@@ -3917,6 +4989,47 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': 'サンプルをアップロード中…',
     'settings.tts.sample.failed': 'サンプルをアップロードできませんでした。',
     'settings.agents.avatar.fallback': '未選択の場合は既定のアバターモデルを使います。',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': '音声',
+    'settings.nav.privacy': 'プライバシー',
+    'settings.voice.help': 'エージェントとの話し方：ターン制の音声かライブ通話か、そして新しいメッセージが再生中の音声に何をするか。',
+    'settings.voice.mode': '音声モード',
+    'settings.voice.mode.help': 'ターン制音声は話した内容を文字起こしし、テキストで応答し、応答を読み上げられます。ライブ通話は継続的な音声接続を保ち、自然に話したり遮ったりできます。',
+    'settings.voice.mode.turns': 'ターン制音声（音声認識＋読み上げ）',
+    'settings.voice.mode.realtime': 'ライブ音声通話（WebRTC）',
+    'settings.voice.interrupt': 'メッセージを送信したとき',
+    'settings.voice.interrupt.help': '新しいメッセージを送信したとき、再生中または待機中の音声がどうなるか。',
+    'settings.voice.interrupt.skip_current': '現在の応答を停止し、残りは待機させる',
+    'settings.voice.interrupt.clear_queue': 'すべて停止（キューを消去）',
+    'settings.voice.interrupt.off': '音声を最後まで再生',
+    'settings.voice.autoSpeak': 'エージェントの返信を読み上げる',
+    'settings.voice.autoSpeak.help': 'チャット入力欄の「自動音声」トグルを共有します。オンの間、返信は届き次第読み上げられ、エージェントには短く読み上げやすい文を求めます。',
+    'settings.privacy.pipeline': '音声とチャットのパイプライン',
+    'settings.privacy.pipeline.help': '設定された各段階がどこで動くか。「デバイス上」は処理がこのコンピューターから出ないことを意味し、「リージョン」はあなたの ANX ノード、「パブリッククラウド」は第三者プロバイダーです。',
+    'settings.privacy.stage.llm': 'チャットモデル（LLM）',
+    'settings.privacy.stage.stt': '音声認識（STT）',
+    'settings.privacy.stage.tts': '読み上げ（TTS）',
+    'settings.privacy.stage.wake': 'ウェイクワード',
+    'settings.privacy.stage.unset': '未設定',
+    'settings.privacy.where.onDevice': 'デバイス上',
+    'settings.privacy.where.region': 'リージョン（プライベート）',
+    'settings.privacy.where.publicCloud': 'パブリッククラウド',
+    'settings.privacy.where.unknown': '不明',
+    'settings.privacy.catalog': 'チャットで利用可能なモデル',
+    'settings.privacy.catalog.help': 'サブスクリプションで利用できるモデルのホスティング方法。プライベートとエッジのルートは同じハードウェアを指すことがあります。自分のノードは「プライベート」、他人のものは「エッジ」と表示されます。',
+    'settings.privacy.catalog.empty': '利用可能なモデルはまだありません。',
+    'settings.privacy.badge.public_cloud': 'パブリッククラウド',
+    'settings.privacy.badge.managed_cloud': 'マネージドクラウド',
+    'settings.privacy.badge.private_cloud': 'プライベート / セルフホスト',
+    'settings.privacy.badge.edge_processing': 'エッジ / デバイス上',
+    'settings.privacy.badge.no_logging': 'ログなし',
+    'settings.privacy.badge.no_training': '学習なし',
+    'settings.privacy.badge.no_moderation': 'モデレーションなし',
+    'settings.privacy.badge.uncensored': '無検閲',
+    'settings.privacy.badge.self_hosted': 'セルフホスト',
+    'settings.privacy.badge.cloud': 'クラウド',
+    'settings.privacy.help': '使用するモデルが実際にどこで動くか — パブリッククラウド、プライベートノード、またはこのデバイス — そしてどのパイプライン段階がローカルに留まるか。',
   },
 
   ko: {
@@ -4109,6 +5222,34 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.companion.wake.onMessage': '새 메시지 수신 시',
     'settings.companion.wake.onMessage.help': '채팅이 백그라운드일 때 그 에이전트가 메시지를 보내면 컴패니언을 표시할지 여부.',
     'settings.companion.wake.openNotifications': '알림 설정',
+    'settings.companion.camera':
+      "카메라 프레이밍",
+    'settings.companion.camera.help':
+      "컴패니언이 화면에 어떻게 담기는지: 얼굴 클로즈업, 머리와 어깨, 전신 또는 직접 지정한 카메라 값.",
+    'settings.companion.camera.face':
+      "얼굴 클로즈업",
+    'settings.companion.camera.bust':
+      "머리와 어깨",
+    'settings.companion.camera.fullBody':
+      "전신",
+    'settings.companion.camera.custom':
+      "사용자 지정",
+    'settings.companion.camera.distance':
+      "거리 ({m} m)",
+    'settings.companion.camera.distance.help':
+      "카메라가 아바타에서 얼마나 떨어져 있는지.",
+    'settings.companion.camera.height':
+      "높이 ({m} m)",
+    'settings.companion.camera.height.help':
+      "카메라가 바닥에서 얼마나 높은지.",
+    'settings.companion.camera.pitch':
+      "아래로 기울기 ({deg}°)",
+    'settings.companion.camera.pitch.help':
+      "카메라가 아바타를 내려다보는 정도.",
+    'settings.companion.camera.fov':
+      "시야각 ({deg}°)",
+    'settings.companion.camera.fov.help':
+      "수직 렌즈 각도 — 넓을수록 방을 더 많이 담습니다.",
     'settings.companion.defaultVrm': '기본 아바타 모델',
     'settings.companion.defaultVrm.help': '자체 모델이 없는 모든 에이전트를 렌더링하는 VRM 모델.',
     'settings.companion.defaultVrm.none': '없음(에이전트 자체 사용)',
@@ -4158,5 +5299,46 @@ export const SETTINGS_LOCALE_MESSAGES: Record<Locale, Record<string, string>> = 
     'settings.tts.sample.uploading': '샘플 업로드 중…',
     'settings.tts.sample.failed': '샘플을 업로드할 수 없습니다.',
     'settings.agents.avatar.fallback': '선택하지 않으면 기본 아바타 모델을 사용합니다.',
+
+    // Voice modes + privacy (added with the voice/privacy sections).
+    'settings.nav.voice': '음성',
+    'settings.nav.privacy': '개인정보 보호',
+    'settings.voice.help': '에이전트와 대화하는 방식: 차례별 음성 또는 실시간 통화, 그리고 새 메시지가 재생 중인 음성에 미치는 영향.',
+    'settings.voice.mode': '음성 모드',
+    'settings.voice.mode.help': '차례별 음성은 말한 내용을 받아쓰고 텍스트로 응답하며 답변을 소리 내어 읽을 수 있습니다. 실시간 통화는 지속적인 오디오 연결을 유지해 자연스럽게 말하고 끼어들 수 있습니다.',
+    'settings.voice.mode.turns': '차례별 음성(음성-텍스트 + 텍스트-음성)',
+    'settings.voice.mode.realtime': '실시간 음성 통화(WebRTC)',
+    'settings.voice.interrupt': '메시지를 보낼 때',
+    'settings.voice.interrupt.help': '새 메시지를 보낼 때 아직 재생 중이거나 대기 중인 음성이 어떻게 되는지.',
+    'settings.voice.interrupt.skip_current': '현재 응답을 중지하고 나머지는 대기열에 유지',
+    'settings.voice.interrupt.clear_queue': '모두 중지(대기열 비우기)',
+    'settings.voice.interrupt.off': '음성이 끝까지 재생되도록 둠',
+    'settings.voice.autoSpeak': '에이전트 답변을 소리 내어 읽기',
+    'settings.voice.autoSpeak.help': '채팅 입력창의 「자동 음성」 토글을 공유합니다. 켜져 있으면 답변이 도착하는 대로 읽어 주고 에이전트에게 짧고 말하기 쉬운 문장을 요청합니다.',
+    'settings.privacy.pipeline': '음성 및 채팅 파이프라인',
+    'settings.privacy.pipeline.help': '구성된 각 단계가 어디에서 실행되는지. 「기기에서」는 작업이 이 컴퓨터를 떠나지 않음을, 「리전」은 사용자의 ANX 노드를, 「퍼블릭 클라우드」는 제3자 제공자를 뜻합니다.',
+    'settings.privacy.stage.llm': '채팅 모델(LLM)',
+    'settings.privacy.stage.stt': '음성-텍스트(STT)',
+    'settings.privacy.stage.tts': '텍스트-음성(TTS)',
+    'settings.privacy.stage.wake': '호출어',
+    'settings.privacy.stage.unset': '구성되지 않음',
+    'settings.privacy.where.onDevice': '기기에서',
+    'settings.privacy.where.region': '리전(프라이빗)',
+    'settings.privacy.where.publicCloud': '퍼블릭 클라우드',
+    'settings.privacy.where.unknown': '알 수 없음',
+    'settings.privacy.catalog': '채팅에서 사용 가능한 모델',
+    'settings.privacy.catalog.help': '구독으로 사용할 수 있는 모델이 어떻게 호스팅되는지. 프라이빗 및 엣지 라우트는 같은 하드웨어를 가리킬 수 있으며, 본인 노드는 「프라이빗」, 다른 사람의 것은 「엣지」로 표시됩니다.',
+    'settings.privacy.catalog.empty': '아직 사용 가능한 모델이 없습니다.',
+    'settings.privacy.badge.public_cloud': '퍼블릭 클라우드',
+    'settings.privacy.badge.managed_cloud': '관리형 클라우드',
+    'settings.privacy.badge.private_cloud': '프라이빗 / 자체 호스팅',
+    'settings.privacy.badge.edge_processing': '엣지 / 기기에서',
+    'settings.privacy.badge.no_logging': '로깅 없음',
+    'settings.privacy.badge.no_training': '학습 없음',
+    'settings.privacy.badge.no_moderation': '검열 없음',
+    'settings.privacy.badge.uncensored': '검열 없음',
+    'settings.privacy.badge.self_hosted': '자체 호스팅',
+    'settings.privacy.badge.cloud': '클라우드',
+    'settings.privacy.help': '사용하는 모델이 실제로 어디에서 실행되는지(퍼블릭 클라우드, 프라이빗 노드 또는 이 기기), 그리고 어떤 파이프라인 단계가 로컬에 남는지.',
   },
 };

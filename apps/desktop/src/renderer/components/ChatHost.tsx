@@ -23,6 +23,9 @@ import {
   type CompanionSessionView,
   type DesktopConnectionConfig,
   type ToolsConfig,
+  type VoiceModeSettings,
+  DEFAULT_VOICE_MODE_SETTINGS,
+  normalizeVoiceModeSettings,
 } from '../bridge.js';
 import { DEFAULT_DESKTOP_TOOLS, AUDIO_TOOLS, localCommandTools } from '../tools/descriptors.js';
 import { resolveOrgLogoUrl } from '../../shared/org-logo.js';
@@ -80,6 +83,29 @@ export function ChatHost({
    * then renders the single-identity list, which is the same component.
    */
   const [identities, setIdentities] = useState<ChatIdentitySession[]>([]);
+  /**
+   * Voice-mode settings (interruption-on-send). Read once and re-read when the
+   * window regains focus, so a change in Settings applies without a restart.
+   */
+  const [voiceModes, setVoiceModes] = useState<VoiceModeSettings>(DEFAULT_VOICE_MODE_SETTINGS);
+  // Re-read on focus so a change made in Settings (a separate surface) applies to
+  // the composer's barge-in behaviour without an app restart.
+  useEffect(() => {
+    let active = true;
+    const read = () => {
+      void bridge.getUiSettings().then((ui) => {
+        // Tolerate an older main-process bundle that predates `voiceModes`
+        // (the UI bundle can reload before the main process is restarted).
+        if (active) setVoiceModes(normalizeVoiceModeSettings(ui?.voiceModes));
+      });
+    };
+    read();
+    window.addEventListener('focus', read);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', read);
+    };
+  }, []);
   const [activeVoice, setActiveVoice] = useState<{
     contactId: string | null;
     title: string;
@@ -1023,6 +1049,7 @@ export function ChatHost({
         features={{ adminPanels: false }}
         tools={registeredTools}
         onInboxEvent={reportInboxNotification}
+        voiceInterruptPolicy={voiceModes.interruptOnSend}
         slots={{
           // Mirror the companion affordance into the chat header, immediately
           // left of the built-in Config button, instead of floating it over the
