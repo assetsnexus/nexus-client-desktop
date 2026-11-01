@@ -6,6 +6,7 @@ import {
   type StoragePage,
   type StorageRevisionPage,
   type StorageWorkspaceRow,
+  type StorageFolderRow,
 } from '../bridge.js';
 import { resolveOrgLogoUrl, orgInitials } from '../../shared/org-logo.js';
 import { useStorageUploads } from '../storage/use-storage-uploads.js';
@@ -16,6 +17,20 @@ import { canThumbnail, previewKindFor } from '../../shared/storage-preview.js';
 import { StoragePreview } from './StoragePreview.js';
 import { UploadProgressPanel } from '../storage/UploadProgressPanel.js';
 import { LISTING_CACHE_TTL_MS, StorageListingCache, listingCacheKey } from '../storage/listing-cache.js';
+import {
+  DESTRUCTIVE_ACTIONS,
+  STORAGE_ACTION_LABELS,
+  applyRowClick,
+  contextMenuActions,
+  copyPathPayload,
+  type ContextTargetKind,
+  type SelectionModifiers,
+  type SelectionState,
+  type StorageActionId,
+} from '../storage/file-actions.js';
+import { absoluteStorageExplorerUrl, formatStorageReference } from '../../shared/storage-reference.js';
+import { useStorageNav } from './storage-hub/sections.js';
+import { callBridge } from '../bridge-compat.js';
 
 const panelStyle: CSSProperties = {
   height: '100%',
@@ -105,6 +120,13 @@ const SKELETON_ROWS: readonly { width: string }[] = [
  * @param baseUrl Region/gateway origin used to absolutise a relative org logo.
  */
 export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null }) {
+  /**
+   * Section navigation provided by the storage hub. "Mount to system dir" jumps
+   * to the existing Mounts section with the workspace/folder prefilled instead of
+   * building a second mount flow; without a provider the call is a no-op, so the
+   * explorer still renders standalone (and in tests).
+   */
+  const onNavigate = useStorageNav();
   const [workspaces, setWorkspaces] = useState<StorageWorkspaceRow[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [page, setPage] = useState<StoragePage | null>(null);
@@ -135,21 +157,37 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
   /** Cache key of the listing whose rows are currently painted. */
   const displayedKey = useRef<string | null>(null);
   /**
-   * Open file-browser context menu (viewport coordinates) or null. Right-click
-   * on the list background or a row opens it; the Refresh item busts the cache
-   * for the current view and reloads from the region.
+   * Open file-browser context menu (viewport coordinates) plus what it targets:
+   * a file row (with the current multi-selection) or the folder/pane background.
+   * Its action list comes from `contextMenuActions`, so single vs multi vs folder
+   * differences live in one decision table instead of scattered conditionals.
    */
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: StorageFileRow | null } | null>(
-    null,
-  );
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    kind: ContextTargetKind;
+    file: StorageFileRow | null;
+  } | null>(null);
+  /**
+   * The folder currently open inside the workspace (null = workspace root), and
+   * the sub-folders listed for it. Navigation stays inside the explorer: opening
+   * a folder re-lists with its `folderId`, so the same cache/loading rules apply.
+   */
+  const [folderId, setFolderId] = useState<string | null>(null);
+  const [folders, setFolders] = useState<StorageFolderRow[]>([]);
   const [selected, setSelected] = useState<StorageFileRow | null>(null);
   const [revisions, setRevisions] = useState<StorageRevisionPage | null>(null);
   const [revisionsUnsupported, setRevisionsUnsupported] = useState(false);
   const [revisionsTransportError, setRevisionsTransportError] = useState<string | null>(null);
   const [revisionsBusy, setRevisionsBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
-  // Multi-selection for "save many" (bounded to file ids only).
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  /**
+   * Row selection (Shift range, Ctrl/Cmd toggle, plain single) and the anchor a
+   * Shift range extends from. The selection drives the "Save N…" bulk action and
+   * the multi-file context menu; `selected` remains the one row shown in the
+   * detail column.
+   */
+  const [selection, setSelection] = useState<SelectionState>({ selectedIds: [], anchorId: null });
   // The explorer's own width decides whether the right detail column can be a
   // sibling of the file list or must overlay it (see DETAIL_LAYOUT_BREAKPOINT).
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -223,9 +261,10 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
       view: ViewMode,
       query: string,
       identityKey?: string,
-      options?: { bust?: boolean },
+      options?: { bust?: boolean; folderId?: string | null },
     ) => {
-      const key = listingCacheKey({ identityKey, workspaceId, view, search: query });
+      const folder = options?.folderId ?? null;
+      const key = listingCacheKey({ identityKey, workspaceId, folderId: folder, view, search: query });
       if (options?.bust) listingCache.current.delete(key);
 
       const cached = options?.bust ? null : listingCache.current.peek(key);
@@ -252,6 +291,7 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
       try {
         const next = await bridge.storageListFiles({
           workspaceId,
+          folderId: folder,
           search: query || undefined,
           status: view === 'trash' ? 'deleted' : undefined,
           limit: 50,
@@ -289,21 +329,47 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
       setPage(null);
       return;
     }
-    void loadFiles(activeWorkspaceId, mode, search, activeIdentityKey);
-  }, [activeWorkspaceId, mode, search, loadFiles, activeIdentityKey]);
+    void loadFiles(activeWorkspaceId, mode, search, activeIdentityKey, { folderId });
+  }, [activeWorkspaceId, mode, search, folderId, loadFiles, activeIdentityKey]);
 
   /** Explicit reload: bust the current view's cache entry and refetch. */
   const refresh = useCallback(() => {
-    if (activeWorkspaceId) void loadFiles(activeWorkspaceId, mode, search, activeIdentityKey, { bust: true });
-  }, [activeWorkspaceId, mode, search, loadFiles, activeIdentityKey]);
+    if (activeWorkspaceId) {
+      void loadFiles(activeWorkspaceId, mode, search, activeIdentityKey, { bust: true, folderId });
+    }
+  }, [activeWorkspaceId, mode, search, folderId, loadFiles, activeIdentityKey]);
+
+  // Sub-folders of the open folder, so the list can offer navigation and the
+  // "Mount to system dir" hand-off knows which folder it means. A region without
+  // the folder surface degrades to "no folders" rather than an error.
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      setFolders([]);
+      return;
+    }
+    let cancelled = false;
+    // Reached through `callBridge`: a preload older than this renderer has no
+    // folder surface, and that must degrade to "no sub-folders" rather than
+    // throwing inside an effect and taking the tree down.
+    void callBridge<StorageFolderRow[]>(bridge, 'storageFolderList', [], activeWorkspaceId, folderId).then(
+      (rows) => {
+        if (!cancelled) setFolders(rows);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId, folderId, mode]);
 
   // A dropped path list (files and/or folders) starts a queued batch upload.
   const onDroppedPaths = useCallback(
     (paths: string[]) => {
       if (!activeWorkspaceId) return;
-      void uploads.enqueuePaths(paths, { workspaceId: activeWorkspaceId, folderId: null, identityKey: activeIdentityKey });
+      // Uploads land in the folder currently open, so dropping into a sub-folder
+      // does not silently write to the workspace root.
+      void uploads.enqueuePaths(paths, { workspaceId: activeWorkspaceId, folderId, identityKey: activeIdentityKey });
     },
-    [activeWorkspaceId, activeIdentityKey, uploads],
+    [activeWorkspaceId, activeIdentityKey, folderId, uploads],
   );
   const dropZone = useStorageDropZone(onDroppedPaths, { enabled: Boolean(activeWorkspaceId) && mode === 'active' });
 
@@ -333,10 +399,10 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
         return;
       }
       setError(null);
-      await uploads.enqueuePaths([path], { workspaceId: activeWorkspaceId, folderId: null, identityKey: activeIdentityKey });
+      await uploads.enqueuePaths([path], { workspaceId: activeWorkspaceId, folderId, identityKey: activeIdentityKey });
       if (fileInput.current) fileInput.current.value = '';
     },
-    [activeWorkspaceId, activeIdentityKey, uploads],
+    [activeWorkspaceId, activeIdentityKey, folderId, uploads],
   );
 
   const onDownload = useCallback(
@@ -397,15 +463,118 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
     [refresh, activeIdentityKey],
   );
 
-  const checkedFiles = useMemo(() => items.filter((f) => checkedIds.has(f.id)), [items, checkedIds]);
-  const toggleChecked = useCallback((id: string) => {
-    setCheckedIds((cur) => {
-      const next = new Set(cur);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  /** The rows the current selection covers, in list order. */
+  const checkedFiles = useMemo(
+    () => items.filter((f) => selection.selectedIds.includes(f.id)),
+    [items, selection.selectedIds],
+  );
+
+  /** Clear the selection (after a destructive action or a workspace switch). */
+  const clearSelection = useCallback(() => setSelection({ selectedIds: [], anchorId: null }), []);
+
+  /**
+   * Row click with file-manager semantics: Shift extends from the anchor,
+   * Ctrl/Cmd toggles one row, a plain click selects just that row. The detail
+   * column follows the row that was clicked.
+   */
+  const onRowClick = useCallback(
+    (file: StorageFileRow, modifiers?: SelectionModifiers) => {
+      const orderedIds = items.map((f) => f.id);
+      setSelection((cur) => applyRowClick({ orderedIds, selection: cur, clickedId: file.id, modifiers }));
+      setSelected(file);
+    },
+    [items],
+  );
+
+  /**
+   * Copy the selection's canonical Nexus storage reference(s) to the clipboard.
+   * `bfstorage://<workspaceId>/<fileId>` is the exact form Nexus chat agents
+   * parse, so a paste into chat resolves to the same file the user sees.
+   */
+  const onCopyPath = useCallback(
+    async (files: StorageFileRow[]) => {
+      if (!activeWorkspaceId || !files.length) return;
+      const text = copyPathPayload(activeWorkspaceId, files, formatStorageReference);
+      try {
+        await navigator.clipboard.writeText(text);
+        setError(null);
+      } catch {
+        // Clipboard permission can be denied; fall back to a prompt so the user
+        // can still copy the text rather than hitting a dead end.
+        window.prompt('Copy this Nexus storage path', text);
+      }
+    },
+    [activeWorkspaceId],
+  );
+
+  /** Move the selection into another folder of the same workspace. */
+  const onMove = useCallback(
+    async (files: StorageFileRow[]) => {
+      if (!files.length) return;
+      const options = folders.filter((f) => !selection.selectedIds.includes(f.id));
+      const choice = window.prompt(
+        `Move ${files.length === 1 ? files[0].name : `${files.length} files`} to which folder?\n\n` +
+          `${options.length ? options.map((f) => `${f.name} (${f.id})`).join('\n') : 'No sub-folders.'}\n\n` +
+          'Paste a folder id, or leave empty to move to the workspace root.',
+        '',
+      );
+      if (choice === null) return;
+      const targetFolderId = choice.trim() || null;
+      try {
+        for (const file of files) {
+          await bridge.storageMoveFile(file.id, targetFolderId, activeIdentityKey);
+        }
+        setSelected(null);
+        refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'move failed');
+      }
+    },
+    [folders, selection.selectedIds, refresh, activeIdentityKey],
+  );
+
+  /** Trash every selected file (each command routed through the workspace's identity). */
+  const onTrashMany = useCallback(
+    async (files: StorageFileRow[]) => {
+      if (!files.length) return;
+      if (files.length > 1 && !window.confirm(`Move ${files.length} files to Trash?`)) return;
+      try {
+        for (const file of files) {
+          await bridge.storageTrashFile(file.id, activeIdentityKey);
+        }
+        setSelected(null);
+        clearSelection();
+        refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'delete failed');
+      }
+    },
+    [refresh, activeIdentityKey, clearSelection],
+  );
+
+  /**
+   * Open the selected file in the portal's storage browser. The portal owns the
+   * full CRUD surface, so the desktop deep-links to it instead of duplicating it.
+   */
+  const onOpenInPortal = useCallback(
+    async (file: StorageFileRow) => {
+      if (!activeWorkspaceId) return;
+      try {
+        const config = await bridge.getConnectionConfig();
+        const origin = config.portalUrl?.trim()?.replace(/\/+$/, '');
+        if (!origin) {
+          setError('No portal URL is configured for this connection.');
+          return;
+        }
+        const surface = activeWorkspace?.isOrg ? 'org' : 'user';
+        const url = absoluteStorageExplorerUrl(origin, activeWorkspaceId, file.id, { fileId: file.id, surface });
+        if (url) await bridge.openExternal(url);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'could not open the portal');
+      }
+    },
+    [activeWorkspaceId, activeWorkspace],
+  );
 
   const loadRevisions = useCallback(async (file: StorageFileRow, identityKey?: string) => {
     setRevisionsBusy(true);
@@ -458,6 +627,83 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
     void loadRevisions(selected, activeIdentityKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, activeIdentityKey]);
+
+  /** Actions the open context menu offers, from the single decision table. */
+  const menuActions = useMemo(
+    () =>
+      contextMenu
+        ? contextMenuActions({
+            target: contextMenu.kind,
+            selectionCount: contextMenu.kind === 'folder' ? 0 : Math.max(1, selection.selectedIds.length),
+            mode,
+          })
+        : [],
+    [contextMenu, selection.selectedIds.length, mode],
+  );
+
+  /**
+   * Dispatch a context-menu action against the targeted rows.
+   *
+   * A row menu acts on the whole selection when the right-clicked row is part of
+   * it (bulk delete/move/save), otherwise on just that row — right-click already
+   * normalised the selection, so this is the selection the user sees.
+   */
+  const runAction = useCallback(
+    (action: StorageActionId, target: StorageFileRow | null) => {
+      const targets = target && selection.selectedIds.includes(target.id) ? checkedFiles : target ? [target] : [];
+      switch (action) {
+        case 'copy-path':
+          void onCopyPath(targets);
+          return;
+        case 'save':
+          if (targets.length === 1) void onDownload(targets[0]);
+          else void onDownloadMany(targets);
+          return;
+        case 'move':
+          void onMove(targets);
+          return;
+        case 'rename':
+          if (targets.length === 1) void onRename(targets[0]);
+          return;
+        case 'delete':
+          void onTrashMany(targets);
+          return;
+        case 'restore':
+          if (targets.length === 1) void onRestore(targets[0]);
+          return;
+        case 'open-portal':
+          if (targets.length === 1) void onOpenInPortal(targets[0]);
+          return;
+        case 'mount-folder':
+          // Hand off to the Mounts section with the workspace and folder already
+          // chosen — the mount daemon and its confirmation live there, so this
+          // surface never invents a second mount rail.
+          onNavigate({ section: 'mounts', workspaceId: activeWorkspaceId ?? undefined, remoteFolderId: folderId ?? undefined });
+          return;
+        case 'refresh':
+          refresh();
+          return;
+        default:
+          return;
+      }
+    },
+    [
+      selection.selectedIds,
+      checkedFiles,
+      onCopyPath,
+      onDownload,
+      onDownloadMany,
+      onMove,
+      onRename,
+      onTrashMany,
+      onRestore,
+      onOpenInPortal,
+      onNavigate,
+      activeWorkspaceId,
+      folderId,
+      refresh,
+    ],
+  );
 
   return (
     <div
@@ -519,6 +765,11 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
                 onClick={() => {
                   setActiveWorkspaceId(w.id);
                   setSelected(null);
+                  // Selection ids belong to the workspace being left; carrying
+                  // them over would let a bulk action target rows that no longer
+                  // exist in the new listing.
+                  clearSelection();
+                  setFolderId(null);
                   // A menu opened against the previous workspace must not linger
                   // over the newly selected one.
                   setContextMenu(null);
@@ -610,11 +861,23 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
             <button
               type="button"
               style={{ ...btnStyle, width: '100%', marginBottom: 4 }}
-              onClick={() => setMode('active')}
+              onClick={() => {
+                setMode('active');
+                clearSelection();
+                setSelected(null);
+              }}
             >
               Files
             </button>
-            <button type="button" style={{ ...btnStyle, width: '100%' }} onClick={() => setMode('trash')}>
+            <button
+              type="button"
+              style={{ ...btnStyle, width: '100%' }}
+              onClick={() => {
+                setMode('trash');
+                clearSelection();
+                setSelected(null);
+              }}
+            >
               Trash
             </button>
           </div>
@@ -706,7 +969,7 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
               // Right-click on empty pane space (not a row) opens the folder
               // menu, whose Refresh item busts the cache for this view.
               e.preventDefault();
-              setContextMenu({ x: e.clientX, y: e.clientY, file: null });
+              setContextMenu({ x: e.clientX, y: e.clientY, kind: 'folder', file: null });
             }}
           >
             {/*
@@ -735,7 +998,64 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
                 ))}
               </div>
             ) : null}
-            {items.length === 0 && !listingPending ? (
+            {/*
+              Sub-folders first, the way every file manager orders a listing.
+              Clicking one navigates into it; right-clicking offers the folder
+              menu (Refresh + "Mount to system dir").
+            */}
+            {mode === 'active'
+              ? folders.map((folder) => (
+                  <div
+                    key={folder.id}
+                    data-testid={`storage-folder-row-${folder.id}`}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setContextMenu({ x: e.clientX, y: e.clientY, kind: 'folder', file: null });
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      width: '100%',
+                      padding: '8px 10px',
+                      marginBottom: 4,
+                      borderRadius: 8,
+                      border: '1px solid transparent',
+                      color: '#e8eef4',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFolderId(folder.id);
+                        setSelected(null);
+                        clearSelection();
+                        setContextMenu(null);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        flex: 1,
+                        minWidth: 0,
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#e8eef4',
+                        cursor: 'pointer',
+                        padding: 0,
+                        textAlign: 'left',
+                      }}
+                    >
+                      <span aria-hidden>📁</span>
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {folder.name}
+                      </span>
+                    </button>
+                  </div>
+                ))
+              : null}
+            {items.length === 0 && !listingPending && !(mode === 'active' && folders.length) ? (
               <p data-testid="storage-listing-empty" style={{ color: '#6b7784', padding: 12 }}>
                 {mode === 'trash' ? 'Trash is empty.' : 'No files yet.'}
               </p>
@@ -747,11 +1067,20 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
                 onMouseEnter={() => downloads.warmDrag({ id: f.id, name: f.name }, activeIdentityKey)}
                 onDragStart={(e) => downloads.onDragStart(e, { id: f.id, name: f.name }, activeIdentityKey)}
                 onDragEnd={() => downloads.onDragEnd({ id: f.id, name: f.name })}
+                data-testid={`storage-row-${f.id}`}
+                data-selected={selection.selectedIds.includes(f.id) ? 'true' : 'false'}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   // Stop the pane-level handler replacing this row's menu.
                   e.stopPropagation();
-                  setContextMenu({ x: e.clientX, y: e.clientY, file: f });
+                  // Right-clicking a row that is not part of the selection selects
+                  // just that row first — the file-manager convention, and it keeps
+                  // a bulk action from silently targeting rows the user forgot.
+                  if (!selection.selectedIds.includes(f.id)) {
+                    setSelection({ selectedIds: [f.id], anchorId: f.id });
+                    setSelected(f);
+                  }
+                  setContextMenu({ x: e.clientX, y: e.clientY, kind: 'file', file: f });
                 }}
                 style={{
                   display: 'flex',
@@ -763,7 +1092,15 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
                   marginBottom: 4,
                   borderRadius: 8,
                   border: '1px solid transparent',
-                  background: selected?.id === f.id ? '#1c2733' : 'transparent',
+                  // Selected rows keep a tint distinct from the row shown in the
+                  // detail column, so a multi-selection is readable at a glance.
+                  background: selection.selectedIds.includes(f.id)
+                    ? selected?.id === f.id
+                      ? '#22303f'
+                      : '#1a2430'
+                    : selected?.id === f.id
+                      ? '#1c2733'
+                      : 'transparent',
                   color: '#e8eef4',
                   cursor: downloads.draggingId === f.id ? 'grabbing' : 'pointer',
                 }}
@@ -771,15 +1108,24 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
                 {mode === 'active' ? (
                   <input
                     type="checkbox"
-                    checked={checkedIds.has(f.id)}
-                    onChange={() => toggleChecked(f.id)}
+                    checked={selection.selectedIds.includes(f.id)}
+                    onChange={() =>
+                      setSelection((cur) =>
+                        applyRowClick({
+                          orderedIds: items.map((x) => x.id),
+                          selection: cur,
+                          clickedId: f.id,
+                          modifiers: { ctrlKey: true },
+                        }),
+                      )
+                    }
                     onClick={(e) => e.stopPropagation()}
                     title="Select for multi-download"
                   />
                 ) : null}
                 <button
                   type="button"
-                  onClick={() => setSelected(f)}
+                  onClick={(e) => onRowClick(f, { shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey })}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -1042,31 +1388,28 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
                 {activeWorkspace?.name ?? 'This folder'}
               </div>
             )}
-            <button
-              type="button"
-              role="menuitem"
-              data-testid="storage-context-refresh"
-              style={{ ...btnStyle, border: 'none', textAlign: 'left', background: 'transparent' }}
-              onClick={() => {
-                setContextMenu(null);
-                refresh();
-              }}
-            >
-              Refresh
-            </button>
-            {contextMenu.file ? (
+            {menuActions.map((action) => (
               <button
+                key={action}
                 type="button"
                 role="menuitem"
-                style={{ ...btnStyle, border: 'none', textAlign: 'left', background: 'transparent' }}
+                data-testid={`storage-context-${action}`}
+                style={{
+                  ...btnStyle,
+                  border: 'none',
+                  textAlign: 'left',
+                  background: 'transparent',
+                  color: DESTRUCTIVE_ACTIONS.includes(action) ? '#f2a1a1' : '#e8eef4',
+                }}
                 onClick={() => {
+                  const target = contextMenu.file;
                   setContextMenu(null);
-                  setSelected(contextMenu.file);
+                  runAction(action, target);
                 }}
               >
-                Details
+                {STORAGE_ACTION_LABELS[action]}
               </button>
-            ) : null}
+            ))}
           </div>
         </>
       ) : null}

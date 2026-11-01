@@ -268,16 +268,19 @@ describe('storage explorer two-pane layout', () => {
     const drag = detail.querySelector('[data-testid="storage-detail-drag"]') as HTMLElement;
     expect(drag.getAttribute('draggable')).toBe('true');
 
-    // Multi-select still shows the "Save N…" action in the list toolbar.
+    // Multi-select still shows the "Save N…" action in the list toolbar. The
+    // first row is already selected by the click above, so ticking the second
+    // row's box extends the selection to two and the bulk action follows suit.
     const boxes = Array.from(container!.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[];
     expect(boxes.length).toBe(2);
+    expect(boxes[0].checked).toBe(true);
     await act(async () => {
-      boxes[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      boxes[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await act(async () => {
       await Promise.resolve();
     });
-    expect(Array.from(container!.querySelectorAll('button')).some((b) => (b.textContent ?? '').includes('Save 1…'))).toBe(true);
+    expect(Array.from(container!.querySelectorAll('button')).some((b) => (b.textContent ?? '').includes('Save 2…'))).toBe(true);
   });
 
   it('shows a clear, retryable state when revision history hits a transport drop', async () => {

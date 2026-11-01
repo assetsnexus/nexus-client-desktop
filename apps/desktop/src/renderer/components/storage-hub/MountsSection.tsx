@@ -52,7 +52,23 @@ function formatExpiry(expiresAt: string | null): string | null {
   return when.toLocaleString();
 }
 
-export function MountsSection() {
+export function MountsSection({
+  initialWorkspaceId = null,
+  initialRemoteFolderId = null,
+  onPrefillConsumed,
+}: {
+  /**
+   * Prefill handed over from the storage explorer's "Mount to system dir" action:
+   * the workspace and folder the user right-clicked. The user only has to pick a
+   * mount point and confirm — the mount daemon and its lifetime/restart options
+   * stay here, so there is one mount flow rather than a second one in the file
+   * browser.
+   */
+  initialWorkspaceId?: string | null;
+  initialRemoteFolderId?: string | null;
+  /** Called once the prefill has been applied, so a later visit starts clean. */
+  onPrefillConsumed?: () => void;
+} = {}) {
   const { t } = useI18n();
   const [snap, setSnap] = useState<MountSnapshot | null>(null);
   const [workspaces, setWorkspaces] = useState<StorageWorkspaceRow[]>([]);
@@ -64,8 +80,8 @@ export function MountsSection() {
    * workspace reads its folders and mounts with that org's envelope. */
   const identityKey = workspaces.find((w) => w.id === workspaceId)?.identityKey;
 
-  const [workspaceId, setWorkspaceId] = useState('');
-  const [remoteFolderId, setRemoteFolderId] = useState('');
+  const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId ?? '');
+  const [remoteFolderId, setRemoteFolderId] = useState(initialRemoteFolderId ?? '');
   const [mountpoint, setMountpoint] = useState('');
   const [mode, setMode] = useState<'read-only' | 'read-write'>('read-only');
   const [volumeName, setVolumeName] = useState('Nexus');
@@ -106,6 +122,19 @@ export function MountsSection() {
       }
     })();
   }, [workspaceId, identityKey]);
+
+  /**
+   * Apply a hand-off from the storage explorer ("Mount to system dir"): select
+   * the workspace and folder the user right-clicked, then report the prefill as
+   * consumed so returning to Mounts later starts from the default.
+   */
+  useEffect(() => {
+    if (initialWorkspaceId) setWorkspaceId(initialWorkspaceId);
+    if (initialRemoteFolderId) setRemoteFolderId(initialRemoteFolderId);
+    if (initialWorkspaceId || initialRemoteFolderId) onPrefillConsumed?.();
+    // Consume once per hand-off; a new hand-off arrives as new prop values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialWorkspaceId, initialRemoteFolderId]);
 
   const chooseMountpoint = useCallback(async () => {
     const dir = await bridge.mountChooseMountpoint();

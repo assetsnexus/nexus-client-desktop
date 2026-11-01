@@ -133,6 +133,11 @@ export function StorageHubPanel({
   );
   /** Path handed to Agent folders for prefill; cleared once consumed. */
   const [pendingPath, setPendingPath] = useState<string | null>(initialPath ?? null);
+  /**
+   * Workspace/folder handed to Mounts for prefill by the explorer's "Mount to
+   * system dir" action; cleared once consumed so a later visit starts fresh.
+   */
+  const [pendingMount, setPendingMount] = useState<{ workspaceId?: string; remoteFolderId?: string } | null>(null);
 
   // Follow a deep-link that arrives while the panel is already open.
   useEffect(() => {
@@ -151,8 +156,9 @@ export function StorageHubPanel({
   );
 
   const navigate = useCallback(
-    ({ section, path }: StorageNavTarget) => {
+    ({ section, path, workspaceId, remoteFolderId }: StorageNavTarget) => {
       if (path) setPendingPath(path);
+      if (workspaceId || remoteFolderId) setPendingMount({ workspaceId, remoteFolderId });
       selectSection(section);
     },
     [selectSection],
@@ -227,7 +233,13 @@ export function StorageHubPanel({
           <div style={detail}>
             <ErrorBoundary key={activeEntry.id} label={t(activeEntry.labelKey)}>
               <StorageNavContext.Provider value={navigate}>
-                {active === 'mounts' ? <MountsSection /> : null}
+                {active === 'mounts' ? (
+                  <MountsSection
+                    initialWorkspaceId={pendingMount?.workspaceId ?? null}
+                    initialRemoteFolderId={pendingMount?.remoteFolderId ?? null}
+                    onPrefillConsumed={() => setPendingMount(null)}
+                  />
+                ) : null}
                 {active === 'sync' ? <SyncSection /> : null}
                 {active === 'folders' ? (
                   <FoldersSection

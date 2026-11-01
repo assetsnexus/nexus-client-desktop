@@ -45,6 +45,17 @@ export type StorageNavTarget = {
   section: StorageHubSectionId;
   /** Optional prefill carried across a jump (e.g. a path to grant). */
   path?: string;
+  /**
+   * Workspace to preselect in the destination section. Used by the explorer's
+   * "Mount to system dir" action, which hands off to Mounts with the workspace
+   * already chosen so the user only confirms the mount point.
+   */
+  workspaceId?: string;
+  /**
+   * Remote folder to preselect in the destination section (Mounts' folder
+   * dropdown), matching `workspaceId`.
+   */
+  remoteFolderId?: string;
 };
 
 export const StorageNavContext = createContext<(target: StorageNavTarget) => void>(() => {});
