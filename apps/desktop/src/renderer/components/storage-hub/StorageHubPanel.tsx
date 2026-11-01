@@ -17,6 +17,8 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useI18n } from '../../i18n/index.js';
 import { ErrorBoundary } from '../ErrorBoundary.js';
 import { AccessSection } from './AccessSection.js';
+import { CloudWorkspacesSection } from './CloudWorkspacesSection.js';
+import { DataRoomsSection } from './DataRoomsSection.js';
 import { FoldersSection } from './FoldersSection.js';
 import { MountsSection } from './MountsSection.js';
 import { SyncSection } from './SyncSection.js';
@@ -241,6 +243,9 @@ export function StorageHubPanel({
                   />
                 ) : null}
                 {active === 'sync' ? <SyncSection /> : null}
+                {/* Portal-managed collections: listed here, managed there. */}
+                {active === 'datarooms' ? <DataRoomsSection /> : null}
+                {active === 'workspaces' ? <CloudWorkspacesSection /> : null}
                 {active === 'folders' ? (
                   <FoldersSection
                     initialPath={pendingPath}

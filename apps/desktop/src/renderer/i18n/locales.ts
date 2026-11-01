@@ -256,6 +256,8 @@ const en = {
   'storage.title': 'Storage',
   'storage.done': 'Done',
   'storage.nav.browse': 'Browse',
+  'storage.nav.datarooms': 'Data rooms',
+  'storage.nav.workspaces': 'Cloud workspaces',
   'storage.nav.mounts': 'Mounts',
   'storage.nav.sync': 'Sync',
   'storage.nav.folders': 'Agent folders',
@@ -268,6 +270,47 @@ const en = {
     'The local folders agents may read or write, and which agents may use each one.',
   'storage.access.help':
     'See which agents can reach a path, mount, sync, or folder — and grant access.',
+
+  // Portal-managed collections (data rooms + cloud workspaces). The desktop lists
+  // them and deep-links to the portal for create/edit/share — no CRUD here.
+  'storage.collections.loading': 'Loading…',
+  'storage.collections.refresh': 'Refresh',
+  'storage.collections.total': '{count} total',
+  'storage.collections.error': 'Could not load: {error}',
+  'storage.collections.signedOut': 'Sign in to see your collections.',
+  'storage.collections.scope.org': 'Organisation',
+  'storage.collections.scope.personal': 'Personal',
+  'storage.collections.visibility': 'Visibility: {visibility}',
+  'storage.collections.accessMode': 'Access: {mode}',
+
+  'storage.datarooms.title': 'Data rooms',
+  'storage.datarooms.help':
+    'Rooms group files for a deal, client or diligence pack. The desktop lists them and their engagement; creating, sharing and settings happen in the portal.',
+  'storage.datarooms.filter.mine': 'Mine',
+  'storage.datarooms.filter.shared': 'Shared with me',
+  'storage.datarooms.empty': 'No data rooms yet. Create the first one in the portal.',
+  'storage.datarooms.items': '{count} items',
+  'storage.datarooms.shares': '{count} live shares',
+  'storage.datarooms.views': '{count} views',
+  'storage.datarooms.viewsUnavailable': 'views unavailable',
+  'storage.datarooms.frozen': 'Frozen',
+  'storage.datarooms.open': 'Open',
+  'storage.datarooms.manage': 'Manage in portal',
+  'storage.datarooms.new': 'New data room',
+
+  'storage.workspaces.title': 'Cloud workspaces',
+  'storage.workspaces.help':
+    'Workspaces are shared collections agents and people collaborate in. The desktop lists them; members, links and settings are managed in the portal.',
+  'storage.workspaces.filter.shared': 'Shared',
+  'storage.workspaces.filter.all': 'All',
+  'storage.workspaces.empty': 'No cloud workspaces yet. Create the first one in the portal.',
+  'storage.workspaces.items': '{count} items',
+  'storage.workspaces.members': '{count} members',
+  'storage.workspaces.people': '{count} people',
+  'storage.workspaces.hidden': '{count} hidden (private scratch workspaces)',
+  'storage.workspaces.open': 'Open',
+  'storage.workspaces.manage': 'Manage in portal',
+  'storage.workspaces.new': 'New workspace',
 
   // Mounts.
   'storage.mounts.capabilities': 'Delivery',

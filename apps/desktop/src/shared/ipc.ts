@@ -274,7 +274,14 @@ export type SettingsSectionId =
  * boundary and the preload must type the forwarded section without importing
  * renderer code. `renderer/components/storage-hub/sections.ts` re-uses this type.
  */
-export type StorageHubSectionId = 'browse' | 'mounts' | 'sync' | 'folders' | 'access';
+export type StorageHubSectionId =
+  | 'browse'
+  | 'workspaces'
+  | 'datarooms'
+  | 'mounts'
+  | 'sync'
+  | 'folders'
+  | 'access';
 
 /**
  * Non-secret desktop UI preferences. `locale` is validated by the renderer

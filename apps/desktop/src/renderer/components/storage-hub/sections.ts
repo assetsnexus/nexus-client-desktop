@@ -24,10 +24,26 @@ export type StorageNavEntry = {
 /**
  * Nav order is deliberate: the everyday file surfaces first (browse, mounts,
  * sync), then the more technical agent-access surfaces (folders, access) last —
- * the "advanced" half of the normal/advanced split.
+ * the "advanced" half of the normal/advanced split. The two portal-managed
+ * collections (data rooms, cloud workspaces) sit next to browse because they are
+ * file-adjacent: the hub shows what exists and hands management to the portal.
  */
 export const STORAGE_NAV: readonly StorageNavEntry[] = [
   { id: 'browse', labelKey: 'storage.nav.browse', icon: '🗂️', helpKey: 'storage.browse.help' },
+  // Collections that are *managed* in the portal: the hub lists what the caller
+  // can see and deep-links for create/edit/share, so no CRUD lives here.
+  {
+    id: 'datarooms',
+    labelKey: 'storage.nav.datarooms',
+    icon: '📑',
+    helpKey: 'storage.datarooms.help',
+  },
+  {
+    id: 'workspaces',
+    labelKey: 'storage.nav.workspaces',
+    icon: '🤝',
+    helpKey: 'storage.workspaces.help',
+  },
   { id: 'mounts', labelKey: 'storage.nav.mounts', icon: '💽', helpKey: 'storage.mounts.help' },
   { id: 'sync', labelKey: 'storage.nav.sync', icon: '🔄', helpKey: 'storage.sync.help' },
   { id: 'folders', labelKey: 'storage.nav.folders', icon: '📁', helpKey: 'storage.folders.help' },
