@@ -96,12 +96,35 @@ class FakeWindow {
 
 vi.mock('electron', () => ({
   BrowserWindow: FakeWindow,
+  // Controllable so a test can reproduce the pre-`ready` startup path; the
+  // real module getter throws when `screen` is touched before `ready`.
+  app: {
+    isReady: () => electronReady,
+  },
   screen: {
-    getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
-    getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }],
-    getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+    getPrimaryDisplay: () => {
+      screenCallCounts.getPrimaryDisplay += 1;
+      return { workArea: { x: 0, y: 0, width: 1920, height: 1080 } };
+    },
+    getAllDisplays: () => {
+      screenCallCounts.getAllDisplays += 1;
+      return [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }];
+    },
+    getDisplayMatching: () => {
+      screenCallCounts.getDisplayMatching += 1;
+      return { workArea: { x: 0, y: 0, width: 1920, height: 1080 } };
+    },
   },
 }));
+
+/** Simulated `app.isReady()`; defaults to ready so existing tests are unchanged. */
+let electronReady = true;
+/** Counts `screen.*` calls so a pre-ready test can assert none happened. */
+const screenCallCounts = {
+  getPrimaryDisplay: 0,
+  getAllDisplays: 0,
+  getDisplayMatching: 0,
+};
 
 const { createCompanionWindowManager, defaultCompanionPreloadPath } = await import(
   './companion-window.js'
@@ -118,6 +141,10 @@ function manager(over: Partial<Parameters<typeof createCompanionWindowManager>[0
 beforeEach(() => {
   created.length = 0;
   FakeWindow.destroyCount = 0;
+  electronReady = true;
+  screenCallCounts.getPrimaryDisplay = 0;
+  screenCallCounts.getAllDisplays = 0;
+  screenCallCounts.getDisplayMatching = 0;
 });
 
 describe('companion window manager', () => {
@@ -444,6 +471,68 @@ describe('companion window manager', () => {
     const sessions = created[1].sent.filter((s) => s.channel === 'nexus:companion:session');
     // A fresh window must not show the previous window's finished turn.
     expect(sessions).toEqual([]);
+  });
+});
+
+describe('pre-ready screen guard (startup crash fix)', () => {
+  /**
+   * The bug this pins: a companion can be requested during early startup (a
+   * persisted wake, or a re-open on launch), and `resolveDisplays` called
+   * `screen.getPrimaryDisplay()`/`screen.getAllDisplays()`/`screen.getDisplayMatching()`
+   * unconditionally. Electron's `screen` is ready-only, so that access threw
+   * `The 'screen' module can't be used before the app 'ready' event` and crashed
+   * the main process. The guard must fall back without touching `screen` at all.
+   */
+  it('opens a companion before ready without touching the screen module', () => {
+    electronReady = false;
+    const m = manager();
+    expect(() => m.open({ contactId: 've-1' })).not.toThrow();
+    // No `screen.*` call may run pre-ready — that is exactly what threw.
+    expect(screenCallCounts.getPrimaryDisplay).toBe(0);
+    expect(screenCallCounts.getAllDisplays).toBe(0);
+    expect(screenCallCounts.getDisplayMatching).toBe(0);
+    // The window still opens, placed inside the fallback work area.
+    expect(created).toHaveLength(1);
+    const { x, y, width, height } = created[0].options as Record<string, number>;
+    expect(x).toBeGreaterThanOrEqual(0);
+    expect(y).toBeGreaterThanOrEqual(0);
+    expect(x + width).toBeLessThanOrEqual(1920);
+    expect(y + height).toBeLessThanOrEqual(1080);
+  });
+
+  it('does not throw re-clamping off-screen windows before ready', () => {
+    electronReady = false;
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    created[0].setBounds({ x: 5000, y: 5000, width: 560, height: 740 });
+    expect(() => m.reclampOffScreen()).not.toThrow();
+    expect(screenCallCounts.getPrimaryDisplay).toBe(0);
+    expect(screenCallCounts.getAllDisplays).toBe(0);
+    expect(screenCallCounts.getDisplayMatching).toBe(0);
+  });
+
+  it('uses the real screen layout once the app is ready', () => {
+    electronReady = true;
+    const m = manager();
+    m.open({ contactId: 've-1' });
+    // Fallback is 1920x1080; the injected/real display path was consulted now.
+    expect(screenCallCounts.getPrimaryDisplay).toBeGreaterThan(0);
+    expect(screenCallCounts.getAllDisplays).toBeGreaterThan(0);
+  });
+
+  it('prefers injected displays over the screen module in every readiness state', () => {
+    electronReady = false;
+    // Deliberately different from the 1920x1080 fallback, so the assertion
+    // proves the injected layout was used rather than the pre-ready default.
+    const work = { x: 0, y: 0, width: 1400, height: 900 };
+    const m = manager({
+      getDisplays: () => ({ primaryWorkArea: work, targetWorkArea: work, allWorkAreas: [work] }),
+    });
+    m.open({ contactId: 've-1' });
+    expect(screenCallCounts.getPrimaryDisplay).toBe(0);
+    const { x, y, width, height } = created[0].options as Record<string, number>;
+    expect(x).toBe(1400 - width - 16);
+    expect(y).toBe(900 - height - 16);
   });
 });
 

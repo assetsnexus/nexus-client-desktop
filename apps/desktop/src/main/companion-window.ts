@@ -12,7 +12,7 @@
  * like the main window. Nothing sensitive is placed in the hash.
  */
 
-import { BrowserWindow, screen } from 'electron';
+import { app, BrowserWindow, screen } from 'electron';
 import { join } from 'node:path';
 import {
   buildCompanionHash,
@@ -90,13 +90,24 @@ export type CompanionWindowOptions = {
   };
 };
 
-/** Resolve placement context from the injected displays (or Electron `screen`). */
-function resolveDisplays(options: CompanionWindowOptions): {
+/** A sane single-display work area, used before Electron `screen` is usable. */
+const FALLBACK_WORK_AREA: PlacementRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+/**
+ * Read the live display layout from Electron's `screen` module.
+ *
+ * `screen` is a *ready-only* module: touching it before the `ready` event throws
+ * `The 'screen' module can't be used before the app 'ready' event`. A companion
+ * window can be requested during early startup (a persisted wake, a re-open on
+ * launch), so this returns `null` instead of throwing and the caller falls back
+ * to {@link FALLBACK_WORK_AREA}. After `ready` it is the real multi-monitor layout.
+ */
+function readElectronDisplays(options: CompanionWindowOptions): {
   primaryWorkArea: PlacementRect;
   targetWorkArea: PlacementRect;
   allWorkAreas: PlacementRect[];
-} {
-  if (options.getDisplays) return options.getDisplays();
+} | null {
+  if (!app.isReady()) return null;
   const primaryWorkArea = screen.getPrimaryDisplay().workArea;
   const allWorkAreas = screen.getAllDisplays().map((d) => d.workArea);
   const mainBounds = options.getMainBounds?.() ?? null;
@@ -105,6 +116,28 @@ function resolveDisplays(options: CompanionWindowOptions): {
       ? screen.getDisplayMatching(mainBounds).workArea
       : primaryWorkArea;
   return { primaryWorkArea, targetWorkArea, allWorkAreas };
+}
+
+/**
+ * Resolve placement context from the injected displays, else Electron `screen`.
+ *
+ * Injected displays win unconditionally (tests / headless). Otherwise the live
+ * layout is used once `ready`; before `ready` a single-display fallback keeps a
+ * merge of the requested size + the work area working without throwing.
+ */
+function resolveDisplays(options: CompanionWindowOptions): {
+  primaryWorkArea: PlacementRect;
+  targetWorkArea: PlacementRect;
+  allWorkAreas: PlacementRect[];
+} {
+  if (options.getDisplays) return options.getDisplays();
+  return (
+    readElectronDisplays(options) ?? {
+      primaryWorkArea: FALLBACK_WORK_AREA,
+      targetWorkArea: FALLBACK_WORK_AREA,
+      allWorkAreas: [FALLBACK_WORK_AREA],
+    }
+  );
 }
 
 /**

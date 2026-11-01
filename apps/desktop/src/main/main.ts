@@ -2297,18 +2297,18 @@ app.whenReady().then(async () => {
   // records are first normalized to `stopped` by the daemon).
   void mountDaemon.resumePersisted();
   await createWindow();
+  // A monitor unplugged while companions are open would leave any window parked on
+  // it unreachable; pull the fully off-screen ones back onto a connected display.
+  // Wiring this *inside* `whenReady` is required: `screen` is a ready-only module
+  // and subscribing before the `ready` event throws. `display-removed` fires with
+  // the *remaining* displays already applied, so the re-clamp sees the true layout.
+  screen.on('display-removed', () => companionWindows.reclampOffScreen());
+  screen.on('display-metrics-changed', () => companionWindows.reclampOffScreen());
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });
 });
-
-// A monitor unplugged while companions are open would leave any window parked on
-// it unreachable; pull the fully off-screen ones back onto a connected display.
-// `display-removed` fires with the *remaining* displays already applied, so the
-// re-clamp sees the true new layout.
-screen.on('display-removed', () => companionWindows.reclampOffScreen());
-screen.on('display-metrics-changed', () => companionWindows.reclampOffScreen());
 
 app.on('window-all-closed', () => {
   // With a tray the app keeps running (and receiving messages) with no window;

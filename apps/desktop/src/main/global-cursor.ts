@@ -18,7 +18,7 @@
  * `unref()` keeps the timer from holding the process open.
  */
 
-import { screen, type BrowserWindow } from 'electron';
+import { app, screen, type BrowserWindow } from 'electron';
 import { IPC, type CompanionCursorCoords } from '../shared/ipc.js';
 
 /** Sampling cadence. ~30 Hz is smooth enough and keeps main idle-friendly. */
@@ -110,7 +110,12 @@ export function createGlobalCursorTracker(options: GlobalCursorTrackerOptions) {
   // native source has no reading yet / is unavailable. The source must win over
   // the probe: `main.ts` supplies both, and the probe would otherwise silently
   // shadow the live stream.
-  const probe = options.getCursorPoint ?? (() => screen.getCursorScreenPoint());
+  // The Electron probes are ready-only (`screen` throws before the `ready`
+  // event), so they fail closed to a harmless zero point / no work area pre-ready
+  // rather than crashing the main process if a sample ever fires that early.
+  const probe =
+    options.getCursorPoint ??
+    (() => (app.isReady() ? screen.getCursorScreenPoint() : { x: 0, y: 0 }));
   const getPoint = (): { x: number; y: number } => {
     const fromSource = options.pointerSource?.current?.();
     return fromSource ?? probe();
@@ -118,6 +123,7 @@ export function createGlobalCursorTracker(options: GlobalCursorTrackerOptions) {
   const getWorkArea =
     options.getDisplayWorkArea ??
     ((bounds) => {
+      if (!app.isReady()) return null;
       try {
         return screen.getDisplayMatching(bounds).workArea;
       } catch {

@@ -1,9 +1,34 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+/** Controllable readiness so the pre-`ready` fallback paths can be exercised. */
+let electronReady = true;
+const screenCalls = { getCursorScreenPoint: 0, getDisplayMatching: 0 };
+
+vi.mock('electron', () => ({
+  app: { isReady: () => electronReady },
+  screen: {
+    getCursorScreenPoint: () => {
+      screenCalls.getCursorScreenPoint += 1;
+      return { x: 0, y: 0 };
+    },
+    getDisplayMatching: () => {
+      screenCalls.getDisplayMatching += 1;
+      return { workArea: { x: 0, y: 0, width: 1920, height: 1080 } };
+    },
+  },
+}));
+
 import {
   normalizeCursorToBounds,
   shouldEmitCursorSample,
   createGlobalCursorTracker,
 } from './global-cursor.js';
+
+beforeEach(() => {
+  electronReady = true;
+  screenCalls.getCursorScreenPoint = 0;
+  screenCalls.getDisplayMatching = 0;
+});
 
 describe('normalizeCursorToBounds', () => {
   const bounds = { x: 100, y: 200, width: 400, height: 300 };
@@ -238,5 +263,34 @@ describe('createGlobalCursorTracker', () => {
     tracker.stop();
     expect(cleared).toBe(1);
     expect(tracker.isRunning()).toBe(false);
+  });
+
+  it('never touches the ready-only screen module from the default probes pre-ready', () => {
+    // `screen` throws before the app `ready` event. If a sample ever fired that
+    // early, the default probes must fail closed (zero point / no work area)
+    // instead of crashing the main process.
+    electronReady = false;
+    const a = makeWindow();
+    const tracker = createGlobalCursorTracker({
+      listWindows: () => [{ contactId: 'contact-a', window: a.window }],
+      // No injectable probe/work area: exercise the Electron defaults.
+    });
+    expect(() => tracker.sampleOnce()).not.toThrow();
+    expect(screenCalls.getCursorScreenPoint).toBe(0);
+    expect(screenCalls.getDisplayMatching).toBe(0);
+    // The sample still flows, normalized to the fallback window box.
+    expect(a.sent).toHaveLength(1);
+  });
+
+  it('uses the Electron probes once ready', () => {
+    electronReady = true;
+    const a = makeWindow();
+    const tracker = createGlobalCursorTracker({
+      listWindows: () => [{ contactId: 'contact-a', window: a.window }],
+    });
+    tracker.sampleOnce();
+    expect(screenCalls.getCursorScreenPoint).toBe(1);
+    expect(screenCalls.getDisplayMatching).toBe(1);
+    expect(a.sent).toHaveLength(1);
   });
 });
