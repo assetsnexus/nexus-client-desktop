@@ -75,6 +75,26 @@ vi.mock('./settings/IntegrationsSection.js', () => ({
     return null;
   },
 }));
+// Every section in SETTINGS_NAV must be stubbed above: this spec exercises the
+// shell only, and a live section would call the real `bridge`/`@nexus/chat-core`
+// peers (e.g. `VoiceSection` needs the `normalizeVoiceModeSettings` re-export,
+// `PrivacySection` needs `bridge.localVoiceGetState`), which the partial bridge
+// mock does not provide. `PrivacySection`/`VoiceSection` were added to the nav
+// after this spec and were previously left un-stubbed.
+vi.mock('./settings/PrivacySection.js', () => ({
+  PrivacySection: () => {
+    h.current = 'PrivacySection';
+    h.rendered.push('PrivacySection');
+    return null;
+  },
+}));
+vi.mock('./settings/VoiceSection.js', () => ({
+  VoiceSection: () => {
+    h.current = 'VoiceSection';
+    h.rendered.push('VoiceSection');
+    return null;
+  },
+}));
 vi.mock('./settings/SecuritySection.js', () => ({
   SecuritySection: () => {
     h.current = 'SecuritySection';
