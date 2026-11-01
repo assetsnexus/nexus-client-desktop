@@ -315,6 +315,42 @@ describe('storage explorer context menu', () => {
     await clickMenuItem('copy-path');
     expect(container!.querySelector('[data-testid="storage-context-menu"]')).toBeNull();
   });
+
+  it('closes the menu on Escape', async () => {
+    await mount();
+    await openRowMenu('f-1');
+    expect(container!.querySelector('[data-testid="storage-context-menu"]')).toBeTruthy();
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await settle();
+    expect(container!.querySelector('[data-testid="storage-context-menu"]')).toBeNull();
+    expect(container!.querySelector('[data-testid="storage-context-backdrop"]')).toBeNull();
+  });
+
+  it('leaves the selection untouched when Escape closes the menu', async () => {
+    await mount();
+    await clickRow('f-1');
+    await clickRow('f-2', { ctrlKey: true });
+    await openRowMenu('f-2');
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await settle();
+    expect(selectedIds()).toEqual(['f-1', 'f-2']);
+  });
+
+  it('ignores Escape when no menu is open', async () => {
+    await mount();
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await settle();
+    expect(container!.querySelector('[data-testid="storage-context-menu"]')).toBeNull();
+    expect(selectedIds()).toEqual([]);
+  });
 });
 
 describe('copy Nexus path', () => {

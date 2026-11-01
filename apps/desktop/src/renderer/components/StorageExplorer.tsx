@@ -642,6 +642,20 @@ export function StorageExplorer({ baseUrl = null }: { baseUrl?: string | null })
   );
 
   /**
+   * Escape closes the context menu, matching the backdrop's click dismissal.
+   * Bound at the document while the menu is open so it fires wherever focus is;
+   * the menu keeps no roving focus, so nothing else can swallow the key.
+   */
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setContextMenu(null);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [contextMenu]);
+
+  /**
    * Dispatch a context-menu action against the targeted rows.
    *
    * A row menu acts on the whole selection when the right-clicked row is part of
