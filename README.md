@@ -73,6 +73,12 @@ running the parts of the stack that belong on *your* machine.
 **Sign in — sandbox badge, four sign-in methods, country → region routing**
 ![Sign-in screen](docs/screenshots/login.png)
 
+**Chat — conversations list, agents, and the shared Nexus Chat stack**
+![Conversations list](docs/screenshots/desktop_conversations_list.png)
+
+**Storage mounts — project a bucket folder as a local directory (FUSE helper or mirror daemon)**
+![Bucket mounts](docs/screenshots/anx-desktop-storage-bucket-mounts.png)
+
 **Local models — register your own Ollama / ComfyUI instances and pick a routing policy**
 ![Local models settings](docs/screenshots/anx-desktop-local-models.png)
 
